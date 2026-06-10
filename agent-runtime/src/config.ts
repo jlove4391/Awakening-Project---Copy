@@ -1,7 +1,8 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const runtimeRoot = path.basename(process.cwd()) === 'agent-runtime' ? process.cwd() : path.resolve(process.cwd(), 'agent-runtime');
-const repoRoot = path.dirname(runtimeRoot);
+const runtimeRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = path.resolve(runtimeRoot, '..');
 
 export const runtimeConfig = {
   port: Number(process.env.AGENT_RUNTIME_PORT || process.env.PORT || 4317),

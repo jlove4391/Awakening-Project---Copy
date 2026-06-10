@@ -6,6 +6,7 @@ import { chatRouter } from './routes/chat.js';
 import { toolsRouter } from './routes/tools.js';
 import { tasksRouter } from './routes/tasks.js';
 import { voiceRouter } from './routes/voice.js';
+import { memoryRouter } from './routes/memory.js';
 import { googleAuthRouter } from './providers/google/auth.js';
 import { attachTelephonyMediaStream } from './voice/telephonyStream.js';
 
@@ -23,6 +24,7 @@ app.use('/api/chat', chatRouter);
 app.use('/api/tools', toolsRouter);
 app.use('/api/tasks', tasksRouter);
 app.use('/api/voice', voiceRouter);
+app.use('/api/memory', memoryRouter);
 app.use('/api/auth/google', googleAuthRouter);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

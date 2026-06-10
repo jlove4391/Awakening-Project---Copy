@@ -2,12 +2,26 @@ import type { Session } from '@openai/agents';
 
 export type TaskStatus = 'queued' | 'running' | 'blocked' | 'completed' | 'failed';
 
+export type MemoryScope =
+  | 'user_profile'
+  | 'business_context'
+  | 'contacts'
+  | 'leads'
+  | 'preferences'
+  | 'agent_lessons'
+  | 'task_history'
+  | 'conversation_summary';
+
 export interface MemoryReference {
   id: string;
   text: string;
-  scope: 'user' | 'project' | 'session';
+  scope: MemoryScope;
   createdAt: string;
+  updatedAt?: string;
   tags?: string[];
+  metadata?: Record<string, unknown>;
+  importance?: number;
+  source?: 'agent' | 'user' | 'system' | 'api' | 'voice' | 'migration';
 }
 
 export interface AgentTask {

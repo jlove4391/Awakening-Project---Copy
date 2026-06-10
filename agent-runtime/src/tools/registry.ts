@@ -1,6 +1,6 @@
 import { tool } from '@openai/agents';
 import { z } from 'zod';
-import { listMemories, remember } from '../memory/index.js';
+import { durableMemoryScopes, listMemories, remember, retrieveMemories, summarizeMemories } from '../memory/index.js';
 import { writeToolAuditLog, sanitizeAuditInput } from '../audit/auditLogger.js';
 import { createCalendarEvent, listCalendarEvents } from '../providers/google/calendar.js';
 import { createDriveTextFile, searchDriveFiles } from '../providers/google/drive.js';
@@ -449,9 +449,22 @@ export const toolRegistry: RegisteredToolDefinition[] = [
   },
   {
     name: 'memory.remember',
-    description: 'Persist a durable memory reference for the current Elora session.',
-    inputSchema: objectSchema({ text: stringSchema('Memory text to store.'), scope: stringSchema('Memory scope: user, project, or session.'), tags: stringArraySchema('Memory tags.') }, ['text']),
-    parameters: z.object({ text: z.string().min(1), scope: z.enum(['user', 'project', 'session']).default('session'), tags: z.array(z.string()).default([]) }),
+    description: `Persist durable backend memory for the current session. Supported scopes: ${durableMemoryScopes.join(', ')}.`,
+    inputSchema: objectSchema(
+      {
+        text: stringSchema('Memory text to store.'),
+        scope: stringSchema(`Durable memory scope: ${durableMemoryScopes.join(', ')}.`),
+        tags: stringArraySchema('Memory tags.'),
+        importance: numberSchema('Importance from 0 to 1.', { minimum: 0, maximum: 1 }),
+      },
+      ['text'],
+    ),
+    parameters: z.object({
+      text: z.string().min(1),
+      scope: z.enum(durableMemoryScopes).default('conversation_summary'),
+      tags: z.array(z.string()).default([]),
+      importance: z.number().min(0).max(1).default(0.5),
+    }),
     scopes: ['runtime.memory.write'],
     riskLevel: 'write',
     humanApprovalRequired: false,
@@ -462,13 +475,13 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['text', 'tags'],
       logEvents: ['tool.memory.remember.requested', 'tool.memory.remember.completed'],
     },
-    executor: async (input, context) => remember(context.sessionId, input.text, { scope: input.scope, tags: input.tags }),
+    executor: async (input, context) => remember(context.sessionId, input.text, { scope: input.scope, tags: input.tags, importance: input.importance }),
   },
   {
     name: 'memory.list',
-    description: 'List recent memory references available to Elora.',
-    inputSchema: objectSchema({ limit: numberSchema('Maximum memories.', { minimum: 1, maximum: 25 }) }),
-    parameters: z.object({ limit: z.number().int().min(1).max(25).default(10) }),
+    description: 'List recent durable backend memory references available to Elora.',
+    inputSchema: objectSchema({ limit: numberSchema('Maximum memories.', { minimum: 1, maximum: 25 }), scopes: stringArraySchema('Optional memory scopes to include.') }),
+    parameters: z.object({ limit: z.number().int().min(1).max(25).default(10), scopes: z.array(z.enum(durableMemoryScopes)).default([]) }),
     scopes: ['runtime.memory.read'],
     riskLevel: 'read',
     humanApprovalRequired: false,
@@ -478,7 +491,41 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       resourceType: 'memory_reference',
       logEvents: ['tool.memory.list.requested', 'tool.memory.list.completed'],
     },
-    executor: async (input, context) => listMemories(context.sessionId, input.limit),
+    executor: async (input, context) => listMemories(context.sessionId, input.limit, input.scopes),
+  },
+  {
+    name: 'memory.retrieve',
+    description: 'Retrieve relevant durable backend memories by keyword scoring. Vector retrieval can be added behind this interface later.',
+    inputSchema: objectSchema({ query: stringSchema('Search query.'), limit: numberSchema('Maximum memories.', { minimum: 1, maximum: 25 }), scopes: stringArraySchema('Optional memory scopes to include.') }, ['query']),
+    parameters: z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(25).default(10), scopes: z.array(z.enum(durableMemoryScopes)).default([]) }),
+    scopes: ['runtime.memory.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'memory',
+      action: 'retrieve',
+      resourceType: 'memory_reference',
+      sensitiveFields: ['query'],
+      logEvents: ['tool.memory.retrieve.requested', 'tool.memory.retrieve.completed'],
+    },
+    executor: async (input, context) => retrieveMemories({ sessionId: context.sessionId, query: input.query, limit: input.limit, scopes: input.scopes }),
+  },
+  {
+    name: 'memory.summarize',
+    description: 'Build a concise extractive summary from relevant durable backend memories.',
+    inputSchema: objectSchema({ query: stringSchema('Optional summary focus.'), limit: numberSchema('Maximum source memories.', { minimum: 1, maximum: 25 }), scopes: stringArraySchema('Optional memory scopes to include.') }),
+    parameters: z.object({ query: z.string().default(''), limit: z.number().int().min(1).max(25).default(12), scopes: z.array(z.enum(durableMemoryScopes)).default([]) }),
+    scopes: ['runtime.memory.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'memory',
+      action: 'summarize',
+      resourceType: 'memory_reference',
+      sensitiveFields: ['query'],
+      logEvents: ['tool.memory.summarize.requested', 'tool.memory.summarize.completed'],
+    },
+    executor: async (input, context) => summarizeMemories({ sessionId: context.sessionId, query: input.query, limit: input.limit, scopes: input.scopes }),
   },
 
   {

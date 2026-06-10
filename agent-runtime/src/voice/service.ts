@@ -590,8 +590,9 @@ export async function recordMissedCall(input: {
     .join(' ');
 
   const memory = await remember(sessionId, memoryText, {
-    scope: 'session',
+    scope: 'task_history',
     tags: ['voice', 'missed-call', 'callback-needed'],
+    source: 'voice',
   });
   const task = await createTask(
     sessionId,

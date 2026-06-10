@@ -11,4 +11,4 @@ coverage/
 *.zip
 *.log
 # Agent runtime local state
-agent-runtime/.runtime-data/
+apps/agent-runtime/.runtime-data/

@@ -1,0 +1,29 @@
+{
+  "name": "awakening-project",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Workspace for the Awakening web shell, agent runtime, shared contracts, and archived legacy code.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev:web & npm run dev:agent-runtime",
+    "dev:web": "npm --workspace @awakening/web run dev",
+    "dev:agent-runtime": "npm --workspace @awakening/agent-runtime run dev",
+    "start:web": "npm --workspace @awakening/web run start",
+    "start:agent-runtime": "npm --workspace @awakening/agent-runtime run start",
+    "build": "npm run build:shared && npm run build:web && npm run build:agent-runtime",
+    "build:web": "npm --workspace @awakening/web run build",
+    "build:agent-runtime": "npm --workspace @awakening/agent-runtime run build",
+    "build:shared": "npm --workspace @awakening/shared run build",
+    "typecheck": "npm run typecheck:shared && npm run typecheck:agent-runtime && npm run typecheck:web",
+    "typecheck:web": "npm --workspace @awakening/web run typecheck",
+    "typecheck:agent-runtime": "npm --workspace @awakening/agent-runtime run typecheck",
+    "typecheck:shared": "npm --workspace @awakening/shared run typecheck",
+    "test": "npm run test:shared && npm run test:agent-runtime && npm run test:web",
+    "test:web": "npm --workspace @awakening/web run test -- --watchAll=false",
+    "test:agent-runtime": "npm --workspace @awakening/agent-runtime run test",
+    "test:shared": "npm --workspace @awakening/shared run test"
+  }
+}

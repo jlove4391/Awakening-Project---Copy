@@ -1,5 +1,5 @@
 {
-  "name": "vireon-core",
+  "name": "@awakening/web",
   "version": "1.0.0",
   "private": true,
   "dependencies": {
@@ -18,8 +18,10 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "test": "react-scripts test --passWithNoTests",
+    "eject": "react-scripts eject",
+    "dev": "react-scripts start",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "browserslist": {
     "production": [
@@ -35,7 +37,8 @@
   },
   "devDependencies": {
     "@types/react": "^19.1.11",
-    "@types/react-dom": "^19.1.7"
+    "@types/react-dom": "^19.1.7",
+    "typescript": "^5.7.3"
   },
   "overrides": {
     "nth-check": "^2.0.1",
@@ -43,5 +46,6 @@
     "css-select": "^5.1.0",
     "svgo": "^2.8.0",
     "webpack-dev-server": "^4.15.1"
-  }
+  },
+  "description": "React visual shell for the Awakening project."
 }

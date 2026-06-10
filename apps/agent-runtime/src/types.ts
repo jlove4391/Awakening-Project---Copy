@@ -1,4 +1,7 @@
 import type { Session } from '@openai/agents';
+import type { RuntimeAgentName } from '@awakening/shared';
+
+export type { RuntimeAgentName } from '@awakening/shared';
 
 export type TaskStatus = 'queued' | 'running' | 'blocked' | 'completed' | 'failed';
 
@@ -61,8 +64,6 @@ export interface AgentMessageEvent {
   event: 'session' | 'memory' | 'runtime_event' | 'delta' | 'completed' | 'error';
   data: any;
 }
-
-export type RuntimeAgentName = 'elora' | 'nexora';
 
 export interface ChatRequestBody {
   message?: string;

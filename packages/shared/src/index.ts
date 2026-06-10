@@ -1,4 +1,31 @@
-import type { RuntimeAgentName } from '../types.js';
+export type RuntimeAgentName = 'elora' | 'nexora';
+
+export interface ToolInvocation {
+  id: string;
+  toolName: string;
+  input: unknown;
+  startedAt: string;
+  finishedAt?: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  output?: unknown;
+  error?: { message: string; stack?: string };
+}
+
+export type RuntimeEventType =
+  | 'agent.message'
+  | 'tool.invocation.created'
+  | 'tool.invocation.updated'
+  | 'task.created'
+  | 'task.updated'
+  | 'task.finished';
+
+export interface RuntimeEvent<TPayload = unknown> {
+  id: string;
+  type: RuntimeEventType;
+  occurredAt: string;
+  source: RuntimeAgentName | 'system' | 'user';
+  payload: TPayload;
+}
 
 export type DelegatedTaskStatus =
   | 'queued'

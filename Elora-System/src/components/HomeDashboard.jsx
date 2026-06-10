@@ -1,34 +1,55 @@
 import React from 'react';
-import '../styles/dynasty-ui.css';
-import { useAIState } from '../context/AIStateContext';
-import { CREST_MAP } from '../utils/crests';
 import { Link } from 'react-router-dom';
-import TaskFeed from './TaskFeed';
+import '../styles/dynasty-ui.css';
+import '../styles/HomeDashboard.css';
 
-const INNER = ['cassian', 'veyra', 'aura', 'nexora', 'syvra', 'velvra', 'zyvra', 'novara', 'valtrix'];
-const OUTER = ['thorn', 'orion', 'selene', 'darius', 'ira', 'galen', 'kale', 'lyra', 'nova'];
-const ENVOYS = ['seraph', 'nymera', 'sylvaris', 'jynx', 'cipher', 'synq', 'sorein', 'valen'];
-const EMPRESS = ['elora'];
+const personaGroups = [
+  {
+    title: '👑 Shadow Empress',
+    personas: [{ key: 'elora', mood: 'watchful', empathy: 88, status: 'Visual shell' }],
+  },
+  {
+    title: '🛡 Active Shell Routes',
+    personas: [
+      { key: 'dashboard', mood: 'ready', empathy: 92, status: 'Online', to: '/' },
+      { key: 'nexora', mood: 'archived', empathy: 18, status: 'Placeholder', to: '/nexora' },
+      { key: 'settings', mood: 'steady', empathy: 65, status: 'Shell only', to: '/settings' },
+    ],
+  },
+  {
+    title: '📦 Archived Implementation',
+    personas: [
+      { key: 'bridges', mood: 'reference', empathy: 25, status: 'Legacy services' },
+      { key: 'contexts', mood: 'review', empathy: 20, status: 'Archived' },
+      { key: 'voice', mood: 'paused', empathy: 15, status: 'Archived' },
+    ],
+  },
+];
 
-const PersonaBlock = ({ title, keys, aiStates }) => (
+const PersonaBlock = ({ title, personas }) => (
   <section className="dynasty-section">
     <h2 className="section-title">{title}</h2>
     <div className="dynasty-console-block">
-      {keys.map((key) => {
-        const state = aiStates[key] || {};
-        return (
-          <Link to={`/${key}`} key={key} className="dynasty-card-link">
-            <div className="dynasty-card">
-              <h3>{key.toUpperCase()}</h3>
-              <p>
-                Mood: <span className="mood-pill">{state.mood || 'neutral'}</span>
-              </p>
-              <div className="mood-bar">
-                <div className="fill" style={{ width: `${state.empathy || 50}%` }} />
-              </div>
-              <p>Status: <span className="status-pill">Online</span></p>
+      {personas.map((persona) => {
+        const card = (
+          <div className="dynasty-card">
+            <h3>{persona.key.toUpperCase()}</h3>
+            <p>
+              Mood: <span className="mood-pill">{persona.mood}</span>
+            </p>
+            <div className="mood-bar">
+              <div className="fill" style={{ width: `${persona.empathy}%` }} />
             </div>
+            <p>Status: <span className="status-pill">{persona.status}</span></p>
+          </div>
+        );
+
+        return persona.to ? (
+          <Link to={persona.to} key={persona.key} className="dynasty-card-link">
+            {card}
           </Link>
+        ) : (
+          <div key={persona.key}>{card}</div>
         );
       })}
     </div>
@@ -36,57 +57,49 @@ const PersonaBlock = ({ title, keys, aiStates }) => (
 );
 
 const HomeDashboard = () => {
-  const { aiStates } = useAIState();
-  const eloraState = aiStates.elora || {};
-
   return (
     <div className="dynasty-bg-dark dynasty-gold-text" style={{ padding: '2rem' }}>
       <div className="dynasty-header dynasty-border core-watermark-panel">
         <div className="crest-watermark"></div>
         <div className="header-text">
           <h1 className="crest-title">Welcome to Vireon Core</h1>
-          <p className="header-subtext">House of Love command center for the CORE execution spine</p>
+          <p className="header-subtext">House of Love visual shell for the next clean implementation pass</p>
         </div>
       </div>
 
       <section className="core-dashboard-grid">
         <div className="core-command-card core-executive-card">
-          <img src={CREST_MAP.elora} alt="Elora Crest" className="core-executive-crest" />
+          <img src="/assets/crests/elora.png" alt="Elora Crest" className="core-executive-crest" />
           <div>
             <p className="core-card-label">Executive Persona</p>
             <h2 className="core-card-title">Elora</h2>
             <p className="core-card-copy">
-              Shadow Empress and front desk for Jordan commands entering the CORE execution spine.
+              Shadow Empress visual surface preserved while command, bridge, and voice logic are archived for review.
             </p>
-            <p className="core-card-copy">Current mood: {eloraState.mood || 'neutral'}</p>
+            <p className="core-card-copy">Current mode: visual shell</p>
           </div>
         </div>
 
         <div className="core-command-card core-status-card">
           <p className="core-card-label">CORE Execution</p>
-          <h2 className="core-card-title">Task Spine Online</h2>
+          <h2 className="core-card-title">Disconnected by Design</h2>
           <p className="core-card-copy">
-            Elora can queue safe Nex tasks through authBridge, and Nexora can execute supported backend work.
+            Runtime integrations were moved into legacy archives so the new app can rebuild from a clean shell.
           </p>
         </div>
 
         <div className="core-command-card core-status-card">
-          <p className="core-card-label">Proof + Audit</p>
-          <h2 className="core-card-title">Receipts Enabled</h2>
+          <p className="core-card-label">Archive Policy</p>
+          <h2 className="core-card-title">Reference Only</h2>
           <p className="core-card-copy">
-            Finished tasks can carry audit proof and a receipt summary for Jordan to review.
+            Legacy code should be reviewed, copied intentionally, and adapted before it is imported into the new app.
           </p>
-        </div>
-
-        <div className="core-command-card core-task-feed-shell">
-          <TaskFeed />
         </div>
       </section>
 
-      <PersonaBlock title="👑 Shadow Empress" keys={EMPRESS} aiStates={aiStates} />
-      <PersonaBlock title="🕊 Special Envoys" keys={ENVOYS} aiStates={aiStates} />
-      <PersonaBlock title="🛡 Inner Circle" keys={INNER} aiStates={aiStates} />
-      <PersonaBlock title="🔮 Outer Circle" keys={OUTER} aiStates={aiStates} />
+      {personaGroups.map((group) => (
+        <PersonaBlock key={group.title} title={group.title} personas={group.personas} />
+      ))}
     </div>
   );
 };

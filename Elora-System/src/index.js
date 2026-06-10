@@ -1,39 +1,13 @@
-import React, { useEffect } from 'react';
+// Minimal visual-shell entrypoint retained for react-scripts; do not reconnect legacy providers here without review.
+import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-import './index.css';
+import './styles/index.css';
 import './styles/dynasty-ui.css';
-
-import { SettingsProvider } from './context/SettingsContext';
-import { AIStateProvider, useAIState } from './context/AIStateContext';
-import { runSharedInfluence } from './utils/SharedInfluenceEngine';
-import { MemoryProvider } from './context/MemoryContext';
-
-// Wrapper to run shared influence engine
-function AppWrapper() {
-  const { aiStates, updateAIState } = useAIState();
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      runSharedInfluence(aiStates, updateAIState);
-    }, 3000); // runs every 3 seconds
-
-    return () => clearInterval(interval);
-  }, [aiStates]);
-
-  return <App />;
-}
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
-   <MemoryProvider>
-  <SettingsProvider>
-    <AIStateProvider>
-      <AppWrapper />
-    </AIStateProvider>
-  </SettingsProvider>
-</MemoryProvider>
-
+    <App />
   </React.StrictMode>
 );

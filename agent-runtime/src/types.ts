@@ -62,7 +62,10 @@ export interface AgentMessageEvent {
   data: any;
 }
 
+export type RuntimeAgentName = 'elora' | 'nexora';
+
 export interface ChatRequestBody {
   message?: string;
   sessionId?: string;
+  agent?: RuntimeAgentName;
 }

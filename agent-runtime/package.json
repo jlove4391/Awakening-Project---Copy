@@ -17,7 +17,7 @@
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
     "zod": "^4.0.0",
-    "@awakening/shared": "file:../../packages/shared"
+    "@awakening/shared": "file:../packages/shared"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

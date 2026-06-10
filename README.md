@@ -1,9 +1,9 @@
 # Awakening Project
 
-This repository uses one workspace layout before adding new runtime features:
+This repository uses one clean layout before adding new runtime features:
 
-- `apps/web/` — React visual shell.
-- `apps/agent-runtime/` — Elora/Nexora SDK agents, provider adapters, tools, task routes, and voice routes.
+- `Elora-System/` — React visual shell.
+- `agent-runtime/` — Elora/Nexora SDK agents, provider adapters, tools, task routes, and voice routes.
 - `packages/shared/` — shared task, tool, and runtime event TypeScript contracts.
 - `legacy/` — archived bridge services and older app snapshots retained for reference only.
 
@@ -20,4 +20,4 @@ Run commands from the repository root after installing dependencies with `npm in
 | Tests | `npm test` |
 | Production build | `npm run build` |
 
-The active backend is `apps/agent-runtime/`. Archived bridge servers under `legacy/` should not be extended for new features.
+The active backend is `agent-runtime/`. Archived bridge servers under `legacy/` should not be extended for new features.

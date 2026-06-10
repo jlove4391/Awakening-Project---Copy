@@ -4,7 +4,8 @@
   "private": true,
   "description": "Workspace for the Awakening web shell, agent runtime, shared contracts, and archived legacy code.",
   "workspaces": [
-    "apps/*",
+    "Elora-System",
+    "agent-runtime",
     "packages/*"
   ],
   "scripts": {

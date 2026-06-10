@@ -25,7 +25,7 @@ npm run dev:agent-runtime
 
 By default the service listens on `http://localhost:4317` and allows the React app at `http://localhost:3000`.
 
-Set `OPENAI_API_KEY` to enable the SDK's `OpenAIConversationsSession`; otherwise the runtime uses the SDK `MemorySession` backed by local JSON records under `apps/agent-runtime/.runtime-data/` for development.
+Set `OPENAI_API_KEY` to enable the SDK's `OpenAIConversationsSession`; otherwise the runtime uses the SDK `MemorySession` backed by local JSON records under `agent-runtime/.runtime-data/` for development.
 
 The chat endpoint defaults to Elora. Pass `agent: "nexora"` in `POST /api/chat` to run the Nexora definition with the same session and memory store plus code/VS Code tools.
 

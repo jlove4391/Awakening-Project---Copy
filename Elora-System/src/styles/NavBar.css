@@ -1,0 +1,43 @@
+/* Top Navigation Header */
+.dynasty-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 64px;
+  background-color: #0c0c0c;
+  padding: 0 2rem 0 5.5rem; /* space for sidebar */
+  border-bottom: 1px solid rgba(209, 170, 100, 0.15);
+  box-shadow: 0 1px 8px rgba(255, 215, 150, 0.05);
+  z-index: 999;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+.dynasty-logo {
+  font-family: 'Cinzel', serif;
+  font-size: 1.6rem;
+  font-weight: bold;
+  color: #e4b260;
+  letter-spacing: 2px;
+  text-shadow: 0 0 4px rgba(255, 200, 150, 0.25);
+}
+
+.dynasty-nav-links {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.dynasty-nav-links a {
+  color: #f0c98a;
+  font-weight: 600;
+  text-decoration: none;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+}
+
+.dynasty-nav-links a:hover {
+  color: #ffdeac;
+  text-shadow: 0 0 4px rgba(255, 200, 130, 0.4);
+}

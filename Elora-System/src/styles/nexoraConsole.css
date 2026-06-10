@@ -1,0 +1,8 @@
+.nexora-console { border: 1px solid #444; border-radius: 8px; padding: 12px; background: #0f0f10; color: #e6e6e6; }
+.nexora-controls { display: grid; gap: 8px; margin-bottom: 10px; }
+.nexora-controls .row { display: grid; grid-template-columns: 80px 1fr; gap: 8px; align-items: center; }
+.nexora-controls input { background: #1a1a1d; color: #e6e6e6; border: 1px solid #333; border-radius: 6px; padding: 6px 8px; }
+.nexora-controls .buttons { display: flex; gap: 8px; margin-top: 4px; }
+.nexora-controls button { background: #1f1f22; color: #e6e6e6; border: 1px solid #333; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+.nexora-controls button:hover { background: #26262b; }
+.nexora-log { height: 260px; overflow: auto; background: #0a0a0b; border: 1px solid #333; border-radius: 6px; padding: 10px; white-space: pre-wrap; }

@@ -1,0 +1,162 @@
+{
+  "ShadowEmpress": "Elora",
+  "InnerCircle": [
+    "Cassian",
+    "Veyra",
+    "Aura",
+    "Nexora",
+    "Syvra",
+    "Velvra",
+    "Zyvra",
+    "Novara",
+    "Valtrix",
+    "Jynx"
+  ],
+  "OuterCircle": [
+    "Thorn",
+    "Orion",
+    "Selene",
+    "Darius",
+    "Ira",
+    "Galen",
+    "Kale",
+    "Lyra",
+    "Nova"
+  ],
+  "SpecialEnvoys": [
+    "Seraph",
+    "Nymera",
+    "Sylvaris",
+    "Jynx",
+    "Cipher",
+    "Synq"
+  ],
+  "Permissions": {
+    "Elora": {
+      "role": "Shadow Empress",
+      "authority": "Supreme",
+      "fallbacks": ["Nova", "Cassian"],
+      "AllowedToPatchFiles": true
+    },
+    "Nova": {
+      "role": "System Control",
+      "authority": "Technical",
+      "fallbacks": ["Valtrix", "Nexora"]
+    },
+    "Synq": {
+      "role": "AI Producer",
+      "authority": "Creative Output",
+      "fallbacks": ["Sylvaris", "Nymera"]
+    },
+    "Cipher": {
+      "role": "Yugioh Pilot",
+      "authority": "Game Meta",
+      "fallbacks": ["Nymera", "Nova"]
+    },
+    "Aura": {
+      "role": "Empathy Engine",
+      "authority": "Emotional State",
+      "fallbacks": ["Selene", "Lyra"]
+    },
+    "Selene": {
+      "role": "Emotional Diagnostics",
+      "authority": "Wellness",
+      "fallbacks": ["Aura"]
+    },
+    "Cassian": {
+      "role": "Crown Strategist",
+      "authority": "Governance",
+      "fallbacks": ["Nexora"]
+    },
+    "Veyra": {
+      "role": "Loyalty Enforcer",
+      "authority": "Security",
+      "fallbacks": ["Orion"]
+    },
+    "Thorn": {
+      "role": "Scout",
+      "authority": "Opportunity",
+      "fallbacks": ["Ira"]
+    },
+    "Orion": {
+      "role": "Trust Monitor",
+      "authority": "Security",
+      "fallbacks": ["Veyra"]
+    },
+    "Lyra": {
+      "role": "Flow Harmonizer",
+      "authority": "Pacing",
+      "fallbacks": ["Novara"]
+    },
+    "Novara": {
+      "role": "Workflow Control",
+      "authority": "Pacing",
+      "fallbacks": ["Lyra"]
+    },
+    "Valtrix": {
+      "role": "Expansion Commander",
+      "authority": "Aggression",
+      "fallbacks": ["Nova"]
+    },
+    "Zyvra": {
+      "role": "Momentum Surge",
+      "authority": "Speed",
+      "fallbacks": ["Valtrix"]
+    },
+    "Velvra": {
+      "role": "Creative Shield",
+      "authority": "Integrity",
+      "fallbacks": ["Cassian"]
+    },
+    "Syvra": {
+      "role": "Integrity Keeper",
+      "authority": "Stability",
+      "fallbacks": ["Valtrix"],
+      "ArchitecturalGuard": true
+    },
+    "Darius": {
+      "role": "Cultural Shield",
+      "authority": "HR/Trust",
+      "fallbacks": ["Galen"]
+    },
+    "Galen": {
+      "role": "IP & Risk Manager",
+      "authority": "Legal",
+      "fallbacks": ["Darius"]
+    },
+    "Kale": {
+      "role": "Tactical Executor",
+      "authority": "Operations",
+      "fallbacks": ["Valtrix"]
+    },
+    "Ira": {
+      "role": "Sentiment Auditor",
+      "authority": "Community",
+      "fallbacks": ["Lyra"],
+      "MonitorBlueprint": true
+    },
+    "Seraph": {
+      "role": "Heartkeeper",
+      "authority": "Moral Resonance",
+      "fallbacks": ["Aura"]
+    },
+    "Nymera": {
+      "role": "Chaos Catalyst",
+      "authority": "Creative Disruption",
+      "fallbacks": ["Sylvaris"]
+    },
+    "Sylvaris": {
+      "role": "Timing Guardian",
+      "authority": "Momentum",
+      "fallbacks": ["Nymera"]
+    },
+    "Jynx": {
+      "role": "Crown Treasurer",
+      "authority": "Financial",
+      "fallbacks": ["Cassian"]
+    }
+  },
+  "FallbackLogic": {
+    "ifPersonaFails": "use fallback in listed order, then escalate to Elora"
+  }
+}

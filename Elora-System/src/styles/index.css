@@ -1,0 +1,22 @@
+.elora-console {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  border: 1px solid #333;
+  padding: 16px;
+  border-radius: 12px;
+  background-color: #1b1b2f;
+  color: #fff;
+  box-shadow: 0 0 20px rgba(128, 90, 213, 0.4);
+  transition: background 0.5s ease, box-shadow 0.5s ease;
+}
+
+.elora-header {
+  font-size: 1.25rem;
+  margin-bottom: 12px;
+  font-weight: bold;
+  color: #c6b4fc;
+}
+
+.elora-log {
+  font-size: 0.95rem;
+  line-height: 1.4;
+}

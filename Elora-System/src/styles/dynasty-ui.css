@@ -1,0 +1,288 @@
+
+:root {
+  --flame-gold: #d1aa64;
+  --flame-deep: #0e0c0b;
+  --flame-shadow: rgba(209, 170, 100, 0.15);
+  --flame-border: rgba(209, 170, 100, 0.35);
+  --flame-text: #e7cfa5;
+  --flame-glow: 0 0 8px rgba(209, 170, 100, 0.4);
+}
+
+body {
+  font-family: 'Cinzel', serif;
+  background: radial-gradient(circle at center, #12100f, #0a0908 60%, #070606 100%);
+  color: var(--flame-text);
+  margin: 0;
+  padding: 0;
+}
+
+.dynasty-header {
+  background-color: var(--flame-deep);
+  border: 1px solid var(--flame-border);
+  border-radius: 14px;
+  padding: 2.5rem 1rem;
+  text-align: center;
+  position: relative;
+  box-shadow: 0 0 20px var(--flame-shadow);
+}
+
+.crest-title {
+  font-size: 2.2rem;
+  font-weight: bold;
+  color: var(--flame-gold);
+  text-shadow: var(--flame-glow);
+  margin: 0.5rem 0;
+}
+
+.header-subtext {
+  color: #c1b398;
+  font-size: 1rem;
+  font-style: italic;
+  text-shadow: 0 0 4px rgba(255, 215, 175, 0.1);
+}
+
+.crest-watermark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 240px;
+  height: 240px;
+  transform: translate(-50%, -50%);
+  background-image: url('../../public/assets/crests/house-of-love-crest.png');
+
+  background-size: contain;
+  background-repeat: no-repeat;
+  opacity: 0.05;
+  z-index: 0;
+  filter: drop-shadow(0 0 6px rgba(255, 215, 175, 0.2));
+}
+
+.header-text {
+  position: relative;
+  z-index: 1;
+}
+
+.dynasty-section {
+  margin: 2rem 0;
+  padding: 1.5rem;
+  border: 1px solid var(--flame-border);
+  background-color: #151210;
+  border-radius: 16px;
+  box-shadow: inset 0 0 12px rgba(209, 170, 100, 0.04);
+}
+
+.section-title {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--flame-gold);
+  margin-bottom: 1rem;
+  text-shadow: var(--flame-glow);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 0.4rem;
+}
+
+.dynasty-console-block {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.dynasty-card {
+  background-color: #1a1816;
+  border: 1px solid var(--flame-border);
+  border-radius: 12px;
+  padding: 1rem;
+  min-width: 160px;
+  color: var(--flame-text);
+  box-shadow: 0 0 10px var(--flame-shadow);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.dynasty-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 0 16px rgba(209, 170, 100, 0.3);
+}
+
+.mood-bar {
+  background-color: #2e2a26;
+  border-radius: 6px;
+  height: 8px;
+  margin-top: 0.25rem;
+  overflow: hidden;
+}
+
+.mood-bar .fill {
+  height: 100%;
+  background-color: var(--flame-gold);
+  transition: width 0.3s ease-in-out;
+}
+
+.status-pill {
+  background-color: #1c1c1c;
+  border: 1px solid var(--flame-gold);
+  color: var(--flame-gold);
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+}
+.dynasty-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 80px;
+  height: 100vh;
+  background-color: #0e0c0b; /* deep matte black */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 20px;
+  border-right: 1px solid rgba(255, 215, 100, 0.1); /* thin golden edge */
+  box-shadow: 2px 0 8px rgba(255, 140, 0, 0.05); /* faint orange glow */
+  z-index: 1000;
+}
+
+.sidebar-icon {
+  margin: 20px 0;
+  transition: transform 0.3s ease, filter 0.3s ease;
+  filter: brightness(0.85) drop-shadow(0 0 4px rgba(255, 100, 0, 0.2));
+}
+
+.sidebar-icon:hover {
+  transform: scale(1.1);
+  filter: brightness(1.1) drop-shadow(0 0 6px rgba(255, 100, 0, 0.4));
+}
+/* Top Navigation Header */
+.dynasty-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 64px;
+  background-color: #0c0c0c;
+  padding: 0 2rem 0 5.5rem; /* space for sidebar */
+  border-bottom: 1px solid rgba(209, 170, 100, 0.15);
+  box-shadow: 0 1px 8px rgba(255, 215, 150, 0.05);
+  z-index: 999;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+.dynasty-logo {
+  font-family: 'Cinzel', serif;
+  font-size: 1.6rem;
+  font-weight: bold;
+  color: #e4b260;
+  letter-spacing: 2px;
+  text-shadow: 0 0 4px rgba(255, 200, 150, 0.25);
+}
+
+.dynasty-nav-links {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.dynasty-nav-links a {
+  color: #f0c98a;
+  font-weight: 600;
+  text-decoration: none;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+}
+
+.dynasty-nav-links a:hover {
+  color: #ffdeac;
+  text-shadow: 0 0 4px rgba(255, 200, 130, 0.4);
+}
+/* Ensure main content never hides under Sidebar */
+.console-panel,
+.dynasty-bg-dark {
+  margin-left: 80px;  /* same as .dynasty-sidebar width */
+  padding: 2rem;
+  box-sizing: border-box;
+}
+/* Dynasty Core: Universal Content Offset for Sidebar */
+.console-panel,
+.console-container,
+.dynasty-bg-dark,
+.console-body {
+  margin-left: 80px;  /* same as Sidebar width */
+  padding: 2rem;
+  box-sizing: border-box;
+}
+.dynasty-main-content {
+  margin-left: 80px;
+  padding: 2rem;
+  box-sizing: border-box;
+}
+
+/* CORE Dashboard UI Upgrade */
+.core-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+
+.core-command-card {
+  background: rgba(21, 18, 16, 0.92);
+  border: 1px solid var(--flame-border);
+  border-radius: 16px;
+  box-shadow: 0 0 14px rgba(209, 170, 100, 0.1);
+  color: var(--flame-text);
+  padding: 1.25rem;
+}
+
+.core-executive-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.core-executive-crest {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px rgba(209, 170, 100, 0.28));
+}
+
+.core-status-card {
+  min-height: 150px;
+}
+
+.core-task-feed-shell {
+  grid-column: 1 / -1;
+  padding: 0;
+  overflow: hidden;
+}
+
+.core-task-feed-shell > div {
+  margin-top: 0 !important;
+  border: 0 !important;
+}
+
+.core-watermark-panel {
+  overflow: hidden;
+}
+
+.core-card-label {
+  color: #a99572;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+}
+
+.core-card-title {
+  color: var(--flame-gold);
+  font-size: 1.35rem;
+  margin: 0 0 0.5rem;
+  text-shadow: var(--flame-glow);
+}
+
+.core-card-copy {
+  color: #d9c8aa;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin: 0.35rem 0 0;
+}

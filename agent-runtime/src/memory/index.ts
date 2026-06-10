@@ -91,24 +91,6 @@ export async function persistRuntimeContext(context: RuntimeContext) {
   await saveRecord(context.record);
 }
 
-export async function remember(sessionId: string, text: string, options?: Partial<MemoryReference>) {
-  const context = await getRuntimeContext(sessionId);
-  const memory: MemoryReference = {
-    id: options?.id || randomUUID(),
-    text,
-    scope: options?.scope || 'session',
-    tags: options?.tags || [],
-    createdAt: options?.createdAt || now(),
-  };
-  context.record.memories.unshift(memory);
-  await saveRecord(context.record);
-  return memory;
-}
-
-export async function listMemories(sessionId: string, limit = 10) {
-  const context = await getRuntimeContext(sessionId);
-  return context.record.memories.slice(0, limit);
-}
 
 export async function createTask(sessionId: string, title: string, notes?: string) {
   const context = await getRuntimeContext(sessionId);
@@ -138,3 +120,8 @@ export async function updateTask(sessionId: string, taskId: string, patch: Parti
   await saveRecord(context.record);
   return task;
 }
+
+export { durableMemoryScopes, memoryStore, normalizeMemoryScope, type StoredMemory } from './store.js';
+export { listMemories, retrieveMemories, type RetrieveMemoryInput, type RetrievedMemory } from './retrieve.js';
+export { deleteMemory, remember, writeMemory, type RememberOptions } from './write.js';
+export { replaceConversationSummary, summarizeMemories, writeConversationSummary, type SummarizeMemoryInput } from './summarize.js';

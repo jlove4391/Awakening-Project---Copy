@@ -5,6 +5,7 @@ import { runtimeConfig } from './config.js';
 import { chatRouter } from './routes/chat.js';
 import { toolsRouter } from './routes/tools.js';
 import { tasksRouter } from './routes/tasks.js';
+import { googleAuthRouter } from './providers/google/auth.js';
 
 const app = express();
 
@@ -18,6 +19,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/chat', chatRouter);
 app.use('/api/tools', toolsRouter);
 app.use('/api/tasks', tasksRouter);
+app.use('/api/auth/google', googleAuthRouter);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (res.headersSent) return;

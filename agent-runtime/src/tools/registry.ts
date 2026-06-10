@@ -1,6 +1,6 @@
 import { tool } from '@openai/agents';
 import { z } from 'zod';
-import { createTask, listMemories, listTasks, remember } from '../memory/index.js';
+import { listMemories, remember } from '../memory/index.js';
 import { writeToolAuditLog, sanitizeAuditInput } from '../audit/auditLogger.js';
 import {
   completeExecutionRecord,
@@ -24,6 +24,14 @@ import {
   vscodeStatus,
   workspaceRoot,
 } from './codeTools.js';
+import {
+  approveDelegationTask,
+  createDelegationTask,
+  getDelegationTask,
+  listDelegationTasks,
+  recordDelegationTaskResult,
+  updateDelegationTask,
+} from './delegation.js';
 
 export type ToolCategory =
   | 'calendar'
@@ -620,36 +628,132 @@ export const toolRegistry: RegisteredToolDefinition[] = [
   },
   {
     name: 'delegation.create_task',
-    description: 'Create a tracked backend task for work that Elora should plan, execute, or await approval for.',
-    inputSchema: objectSchema({ title: stringSchema('Task title.'), notes: stringSchema('Task notes.') }, ['title']),
-    parameters: z.object({ title: z.string().min(1), notes: z.string().default('') }),
+    description: 'Create a durable delegated task from Elora to Nexora with objective, constraints, tool needs, approvals, events, and audit trail.',
+    inputSchema: objectSchema(
+      {
+        objective: stringSchema('Specific outcome Nexora should accomplish.'),
+        constraints: stringArraySchema('Rules, limits, or context Nexora must follow.'),
+        requiredTools: stringArraySchema('Tool names or capabilities Nexora is expected to need.'),
+        approvalRequirements: stringArraySchema('Human approvals required before the task can be dispatched.'),
+        initialLog: stringSchema('Optional initial task log entry.'),
+      },
+      ['objective'],
+    ),
+    parameters: z.object({
+      objective: z.string().min(1),
+      constraints: z.array(z.string()).default([]),
+      requiredTools: z.array(z.string()).default([]),
+      approvalRequirements: z.array(z.string()).default([]),
+      initialLog: z.string().default(''),
+    }),
     scopes: ['runtime.delegation.write'],
     riskLevel: 'write',
     humanApprovalRequired: false,
     audit: {
       category: 'delegation',
       action: 'create_task',
-      resourceType: 'agent_task',
-      sensitiveFields: ['title', 'notes'],
+      resourceType: 'delegated_task',
+      sensitiveFields: ['objective', 'constraints', 'initialLog'],
       logEvents: ['tool.delegation.create_task.requested', 'tool.delegation.create_task.completed'],
     },
-    executor: async (input, context) => createTask(context.sessionId, input.title, input.notes),
+    executor: createDelegationTask,
   },
   {
     name: 'delegation.list_tasks',
-    description: 'List task statuses for the current Elora session.',
-    inputSchema: objectSchema({}),
-    parameters: z.object({}),
+    description: 'List durable Elora-to-Nexora delegated task statuses for the current session.',
+    inputSchema: objectSchema({ includeAllSessions: { type: 'boolean', description: 'When true, include tasks from every session.' } }),
+    parameters: z.object({ includeAllSessions: z.boolean().default(false) }),
     scopes: ['runtime.delegation.read'],
     riskLevel: 'read',
     humanApprovalRequired: false,
     audit: {
       category: 'delegation',
       action: 'list_tasks',
-      resourceType: 'agent_task',
+      resourceType: 'delegated_task',
       logEvents: ['tool.delegation.list_tasks.requested', 'tool.delegation.list_tasks.completed'],
     },
-    executor: async (_input, context) => listTasks(context.sessionId),
+    executor: listDelegationTasks,
+  },
+  {
+    name: 'delegation.get_task',
+    description: 'Fetch one durable delegated task with events, result, receipt, and audit trail.',
+    inputSchema: objectSchema({ taskId: stringSchema('Delegated task ID.') }, ['taskId']),
+    parameters: z.object({ taskId: z.string().min(1) }),
+    scopes: ['runtime.delegation.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'delegation',
+      action: 'get_task',
+      resourceType: 'delegated_task',
+      resourceIdField: 'taskId',
+      logEvents: ['tool.delegation.get_task.requested', 'tool.delegation.get_task.completed'],
+    },
+    executor: getDelegationTask,
+  },
+  {
+    name: 'delegation.approve_task',
+    description: 'Record human approval for a pending durable delegated task and enqueue it when all approvals are satisfied.',
+    inputSchema: objectSchema(
+      { taskId: stringSchema('Delegated task ID.'), approver: stringSchema('Person approving the task.'), note: approvalNoteSchema, confirmedByUser: approvalBooleanSchema },
+      ['taskId', 'confirmedByUser'],
+    ),
+    parameters: z.object({ taskId: z.string().min(1), approver: z.string().default('user'), note: z.string().default(''), confirmedByUser: z.boolean().default(false) }),
+    scopes: ['runtime.delegation.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'delegation',
+      action: 'approve_task',
+      resourceType: 'delegated_task',
+      resourceIdField: 'taskId',
+      sensitiveFields: ['note'],
+      logEvents: ['tool.delegation.approve_task.approval_requested', 'tool.delegation.approve_task.completed'],
+    },
+    executor: approveDelegationTask,
+  },
+  {
+    name: 'delegation.update_task',
+    description: 'Update durable delegated task status or append an operational log entry.',
+    inputSchema: objectSchema({ taskId: stringSchema('Delegated task ID.'), status: stringSchema('New task status.'), log: stringSchema('Log entry to append.') }, ['taskId']),
+    parameters: z.object({
+      taskId: z.string().min(1),
+      status: z.enum(['queued', 'pending_approval', 'running', 'blocked', 'completed', 'failed', 'cancelled']).optional(),
+      log: z.string().optional(),
+    }),
+    scopes: ['runtime.delegation.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'delegation',
+      action: 'update_task',
+      resourceType: 'delegated_task',
+      resourceIdField: 'taskId',
+      sensitiveFields: ['log'],
+      logEvents: ['tool.delegation.update_task.requested', 'tool.delegation.update_task.completed'],
+    },
+    executor: updateDelegationTask,
+  },
+  {
+    name: 'delegation.record_result',
+    description: 'Record Nexora task output, mark the task completed or failed, and generate a receipt/audit proof.',
+    inputSchema: objectSchema(
+      { taskId: stringSchema('Delegated task ID.'), ok: { type: 'boolean', description: 'Whether Nexora completed the task successfully.' }, summary: stringSchema('Result summary.'), data: { type: 'object', additionalProperties: true, description: 'Optional structured result data.' }, errorMessage: stringSchema('Failure message when ok is false.') },
+      ['taskId', 'ok', 'summary'],
+    ),
+    parameters: z.object({ taskId: z.string().min(1), ok: z.boolean(), summary: z.string().min(1), data: z.unknown().optional(), errorMessage: z.string().optional() }),
+    scopes: ['runtime.delegation.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'delegation',
+      action: 'record_result',
+      resourceType: 'delegated_task',
+      resourceIdField: 'taskId',
+      sensitiveFields: ['summary', 'data', 'errorMessage'],
+      logEvents: ['tool.delegation.record_result.requested', 'tool.delegation.record_result.completed'],
+    },
+    executor: recordDelegationTaskResult,
   },
   {
     name: 'delegation.execute_code',
@@ -724,32 +828,7 @@ function toRuntimeTool(definition: RegisteredToolDefinition) {
     name: definition.name,
     description: definition.description,
     parameters: definition.parameters,
-    needsApproval: false,
-    execute: async (input: any, runContext?: { context?: RuntimeContext }, details?: { toolCall?: { id?: string }; toolCallId?: string }) => {
-      const context = runContext?.context;
-      if (!context) throw new Error(`Runtime context missing for ${definition.name}`);
 
-      const sanitizedInput = sanitizeAuditInput(input || {}, definition.audit.sensitiveFields);
-      const approved = !definition.humanApprovalRequired || input?.confirmedByUser === true;
-      const approvalStatus = definition.humanApprovalRequired ? (approved ? 'approved' : 'pending') : 'not_required';
-      const toolCallId = details?.toolCall?.id || details?.toolCallId;
-      const executionRecord = createExecutionRecord({
-        kind: definition.audit.category === 'delegation' ? 'delegated_task' : 'tool_call',
-        whoRequested: 'user',
-        chosenByAgent: context.agent || (definition.audit.category === 'code' || definition.audit.category === 'vscode' ? 'nexora' : 'elora'),
-        action: definition.name,
-        inputPayload: sanitizedInput,
-        riskLevel: definition.riskLevel,
-        approvalStatus,
-        linkedIds: {
-          sessionId: context.sessionId,
-          toolCallId,
-          voiceSessionId: context.voiceSessionId,
-          taskIds: definition.audit.resourceIdField && input?.[definition.audit.resourceIdField] ? [String(input[definition.audit.resourceIdField])] : undefined,
-        },
-        startedAt: new Date().toISOString(),
-        status: 'running',
-        receiptSummary: `${definition.name} requested`,
       });
 
       await writeExecutionRecord(executionRecord);
@@ -764,85 +843,6 @@ function toRuntimeTool(definition: RegisteredToolDefinition) {
         input: sanitizedInput,
       });
 
-      const blocked = enforceApprovalLimits(definition, input, context);
-      if (blocked) {
-        const completed = completeExecutionRecord(executionRecord, {
-          status: 'blocked',
-          approvalStatus: 'blocked',
-          executionResult: blocked.result,
-          providerResponseSummary: summarizeProviderResponse(blocked.result),
-          errors: [blocked.result.reason],
-          receiptSummary: `${definition.name} blocked: ${blocked.result.reason}`,
-        });
-        await writeExecutionRecord(completed);
-        await writeToolAuditLog({
-          event: definition.audit.logEvents[0] || `${definition.name}.approval_required`,
-          tool: definition.name,
-          sessionId: context.sessionId,
-          riskLevel: definition.riskLevel,
-          humanApprovalRequired: definition.humanApprovalRequired,
-          approved: false,
-          workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
-          input: sanitizedInput,
-          resultStatus: blocked.result.status,
-          error: blocked.result.reason,
-        });
-        return blocked;
-      }
-
-      try {
-        const result = await definition.executor(input, context);
-        const resultStatus = typeof result === 'object' && result && 'status' in result ? String((result as { status?: unknown }).status) : 'completed';
-        const completed = completeExecutionRecord(executionRecord, {
-          status: 'completed',
-          approvalStatus: approved ? (definition.humanApprovalRequired ? 'approved' : 'not_required') : approvalStatus,
-          executionResult: result,
-          providerResponseSummary: summarizeProviderResponse(result),
-          receiptSummary: `${definition.name} completed with ${resultStatus}`,
-        });
-        await writeExecutionRecord(completed);
-        await writeToolAuditLog({
-          event: definition.audit.logEvents.at(-1) || `${definition.name}.completed`,
-          tool: definition.name,
-          sessionId: context.sessionId,
-          riskLevel: definition.riskLevel,
-          humanApprovalRequired: definition.humanApprovalRequired,
-          approved,
-          workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
-          resultStatus,
-        });
-        return {
-          ok: true,
-          tool: definition.name,
-          riskLevel: definition.riskLevel,
-          humanApprovalRequired: definition.humanApprovalRequired,
-          executionRecordId: completed.id,
-          receipt: completed.receipt,
-          result,
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown tool execution error';
-        const failed = completeExecutionRecord(executionRecord, {
-          status: 'failed',
-          approvalStatus: approved ? (definition.humanApprovalRequired ? 'approved' : 'not_required') : approvalStatus,
-          errors: [message],
-          providerResponseSummary: message,
-          receiptSummary: `${definition.name} failed: ${message}`,
-        });
-        await writeExecutionRecord(failed);
-        await writeToolAuditLog({
-          event: `${definition.name}.failed`,
-          tool: definition.name,
-          sessionId: context.sessionId,
-          riskLevel: definition.riskLevel,
-          humanApprovalRequired: definition.humanApprovalRequired,
-          approved,
-          workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
-          input: sanitizedInput,
-          error: message,
-        });
-        throw error;
-      }
     },
   } as any);
 }
@@ -852,8 +852,7 @@ export function getRegisteredTool(name: string) {
 }
 
 export function runtimeToolsForCategories(categories: ToolCategory[]) {
-  const allowed = new Set(categories);
-  return toolRegistry.filter((definition) => allowed.has(definition.audit.category)).map(toRuntimeTool);
+
 }
 
 export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'voice', 'memory', 'delegation'];

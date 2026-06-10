@@ -1,11 +1,23 @@
 import { tool } from '@openai/agents';
 import { z } from 'zod';
 import { createTask, listMemories, listTasks, remember } from '../memory/index.js';
+import { writeToolAuditLog, sanitizeAuditInput } from '../audit/auditLogger.js';
 import { createCalendarEvent, listCalendarEvents } from '../providers/google/calendar.js';
 import { createDriveTextFile, searchDriveFiles } from '../providers/google/drive.js';
 import { searchGmailMessages, sendGmailEmail } from '../providers/google/gmail.js';
 import { readSheetRange, updateSheetRange } from '../providers/google/sheets.js';
 import type { RuntimeContext } from '../types.js';
+import {
+  codeCommit,
+  codeDiff,
+  codeEdit,
+  codeRead,
+  codeSearch,
+  codeTest,
+  vscodeOpen,
+  vscodeStatus,
+  workspaceRoot,
+} from './codeTools.js';
 
 export type ToolCategory =
   | 'calendar'
@@ -17,7 +29,9 @@ export type ToolCategory =
   | 'leadgen'
   | 'voice'
   | 'memory'
-  | 'delegation';
+  | 'delegation'
+  | 'code'
+  | 'vscode';
 
 export type ToolRiskLevel = 'read' | 'write' | 'external_send' | 'purchase_or_commit' | 'code_execution';
 
@@ -44,7 +58,7 @@ export interface RegisteredToolDefinition {
   name: `${ToolCategory}.${string}`;
   description: string;
   inputSchema: JsonSchema;
-  parameters: z.ZodTypeAny;
+  parameters: any;
   scopes: string[];
   riskLevel: ToolRiskLevel;
   humanApprovalRequired: boolean;
@@ -85,6 +99,7 @@ const approvalBooleanSchema = {
   description: 'Must be true only after explicit user approval for this write/send action.',
 };
 const approvalNoteSchema = stringSchema('Optional note describing the user approval that authorized this action.');
+const relativePathSchema = stringSchema('Workspace-relative path under the configured Nexora workspace root. Absolute paths and parent traversal are rejected.');
 
 export const toolRegistry: RegisteredToolDefinition[] = [
   {
@@ -142,7 +157,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       end: z.string().min(1),
       attendees: z.array(z.string().email()).default([]),
       confirmedByUser: z.boolean().default(false),
-      approvalNote: z.string().optional(),
+      approvalNote: z.string().default(''),
     }),
     scopes: ['https://www.googleapis.com/auth/calendar.events'],
     riskLevel: 'write',
@@ -196,7 +211,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       subject: z.string().min(1),
       body: z.string().min(1),
       confirmedByUser: z.boolean().default(false),
-      approvalNote: z.string().optional(),
+      approvalNote: z.string().default(''),
     }),
     scopes: ['https://www.googleapis.com/auth/gmail.send'],
     riskLevel: 'external_send',
@@ -237,11 +252,11 @@ export const toolRegistry: RegisteredToolDefinition[] = [
     ),
     parameters: z.object({
       name: z.string().min(1),
-      parentId: z.string().optional(),
+      parentId: z.string().default(''),
       content: z.string().min(1),
       mimeType: z.string().default('text/plain'),
       confirmedByUser: z.boolean().default(false),
-      approvalNote: z.string().optional(),
+      approvalNote: z.string().default(''),
     }),
     scopes: ['https://www.googleapis.com/auth/drive.file'],
     riskLevel: 'write',
@@ -281,7 +296,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       { spreadsheetId: stringSchema('Spreadsheet ID.'), range: stringSchema('A1 notation range.'), values: { type: 'array', description: 'Two-dimensional row values.', items: { type: 'array', items: {} } }, confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema },
       ['spreadsheetId', 'range', 'values'],
     ),
-    parameters: z.object({ spreadsheetId: z.string().min(1), range: z.string().min(1), values: z.array(z.array(z.unknown())), confirmedByUser: z.boolean().default(false), approvalNote: z.string().optional() }),
+    parameters: z.object({ spreadsheetId: z.string().min(1), range: z.string().min(1), values: z.array(z.array(z.unknown())), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     riskLevel: 'write',
     humanApprovalRequired: true,
@@ -316,10 +331,10 @@ export const toolRegistry: RegisteredToolDefinition[] = [
     name: 'crm.upsert_contact',
     description: 'Create or update a CRM contact.',
     inputSchema: objectSchema(
-      { email: stringSchema('Contact email.'), firstName: stringSchema('First name.'), lastName: stringSchema('Last name.'), company: stringSchema('Company.'), notes: stringSchema('Internal notes.') },
+      { email: stringSchema('Contact email.'), firstName: stringSchema('First name.'), lastName: stringSchema('Last name.'), company: stringSchema('Company.'), notes: stringSchema('Internal notes.'), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema },
       ['email'],
     ),
-    parameters: z.object({ email: z.string().email(), firstName: z.string().optional(), lastName: z.string().optional(), company: z.string().optional(), notes: z.string().optional() }),
+    parameters: z.object({ email: z.string().email(), firstName: z.string().default(''), lastName: z.string().default(''), company: z.string().default(''), notes: z.string().default(''), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
     scopes: ['crm.contacts.write'],
     riskLevel: 'write',
     humanApprovalRequired: true,
@@ -336,8 +351,8 @@ export const toolRegistry: RegisteredToolDefinition[] = [
   {
     name: 'clay.enrich_person',
     description: 'Request a person enrichment from Clay or a compatible enrichment adapter.',
-    inputSchema: objectSchema({ email: stringSchema('Person email.'), linkedinUrl: stringSchema('LinkedIn profile URL.'), fullName: stringSchema('Full name.'), company: stringSchema('Company name.') }),
-    parameters: z.object({ email: z.string().email().optional(), linkedinUrl: z.string().url().optional(), fullName: z.string().optional(), company: z.string().optional() }),
+    inputSchema: objectSchema({ email: stringSchema('Person email.'), linkedinUrl: stringSchema('LinkedIn profile URL.'), fullName: stringSchema('Full name.'), company: stringSchema('Company name.'), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema }),
+    parameters: z.object({ email: z.string().default(''), linkedinUrl: z.string().default(''), fullName: z.string().default(''), company: z.string().default(''), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
     scopes: ['clay.enrichments.write'],
     riskLevel: 'purchase_or_commit',
     humanApprovalRequired: true,
@@ -358,7 +373,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       { market: stringSchema('Target market or ICP.'), titles: stringArraySchema('Target titles.'), geography: stringSchema('Target geography.'), limit: numberSchema('Maximum lead count.', { minimum: 1, maximum: 100 }) },
       ['market'],
     ),
-    parameters: z.object({ market: z.string().min(1), titles: z.array(z.string()).default([]), geography: z.string().optional(), limit: z.number().int().min(1).max(100).default(25) }),
+    parameters: z.object({ market: z.string().min(1), titles: z.array(z.string()).default([]), geography: z.string().default(''), limit: z.number().int().min(1).max(100).default(25) }),
     scopes: ['leadgen.search.read'],
     riskLevel: 'read',
     humanApprovalRequired: false,
@@ -374,8 +389,8 @@ export const toolRegistry: RegisteredToolDefinition[] = [
   {
     name: 'leadgen.export_sequence',
     description: 'Export approved leads into an outreach sequence or CRM campaign.',
-    inputSchema: objectSchema({ leadIds: stringArraySchema('Approved lead IDs.'), destination: stringSchema('Destination sequence or campaign identifier.') }, ['leadIds', 'destination']),
-    parameters: z.object({ leadIds: z.array(z.string()).min(1), destination: z.string().min(1) }),
+    inputSchema: objectSchema({ leadIds: stringArraySchema('Approved lead IDs.'), destination: stringSchema('Destination sequence or campaign identifier.'), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema }, ['leadIds', 'destination']),
+    parameters: z.object({ leadIds: z.array(z.string()).min(1), destination: z.string().min(1), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
     scopes: ['leadgen.sequence.write', 'crm.contacts.write'],
     riskLevel: 'external_send',
     humanApprovalRequired: true,
@@ -393,7 +408,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
     name: 'voice.transcribe_audio',
     description: 'Transcribe a previously uploaded audio artifact.',
     inputSchema: objectSchema({ audioId: stringSchema('Runtime audio artifact ID.'), language: stringSchema('BCP-47 language hint.') }, ['audioId']),
-    parameters: z.object({ audioId: z.string().min(1), language: z.string().optional() }),
+    parameters: z.object({ audioId: z.string().min(1), language: z.string().default('') }),
     scopes: ['voice.transcription.create'],
     riskLevel: 'read',
     humanApprovalRequired: false,
@@ -410,8 +425,8 @@ export const toolRegistry: RegisteredToolDefinition[] = [
   {
     name: 'voice.speak_text',
     description: 'Render text to speech for a selected voice profile.',
-    inputSchema: objectSchema({ text: stringSchema('Text to render.'), voice: stringSchema('Voice profile key.'), delivery: stringSchema('Delivery mode: preview, call, or stream.') }, ['text']),
-    parameters: z.object({ text: z.string().min(1), voice: z.string().default('default'), delivery: z.enum(['preview', 'call', 'stream']).default('preview') }),
+    inputSchema: objectSchema({ text: stringSchema('Text to render.'), voice: stringSchema('Voice profile key.'), delivery: stringSchema('Delivery mode: preview, call, or stream.'), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema }, ['text']),
+    parameters: z.object({ text: z.string().min(1), voice: z.string().default('default'), delivery: z.enum(['preview', 'call', 'stream']).default('preview'), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
     scopes: ['voice.speech.create'],
     riskLevel: 'external_send',
     humanApprovalRequired: true,
@@ -457,11 +472,151 @@ export const toolRegistry: RegisteredToolDefinition[] = [
     },
     executor: async (input, context) => listMemories(context.sessionId, input.limit),
   },
+
+  {
+    name: 'code.read',
+    description: 'Read a UTF-8 text file from the sandboxed Nexora workspace root. Rejects absolute paths, parent traversal, and symlink escapes.',
+    inputSchema: objectSchema({ path: relativePathSchema, maxBytes: numberSchema('Maximum bytes to read.', { minimum: 1, maximum: 200000 }) }, ['path']),
+    parameters: z.object({ path: z.string().min(1), maxBytes: z.number().int().min(1).max(200000).default(20000) }),
+    scopes: ['runtime.code.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'code',
+      action: 'read',
+      resourceType: 'workspace_file',
+      resourceIdField: 'path',
+      sensitiveFields: ['path'],
+      logEvents: ['tool.code.read.requested', 'tool.code.read.completed'],
+    },
+    executor: codeRead,
+  },
+  {
+    name: 'code.search',
+    description: 'Search text files inside the sandboxed Nexora workspace root with bounded results and ignored dependency/build directories.',
+    inputSchema: objectSchema({ query: stringSchema('Literal text or regular expression to search for.'), path: relativePathSchema, isRegex: { type: 'boolean', description: 'Treat query as a JavaScript regular expression.' }, maxResults: numberSchema('Maximum matches.', { minimum: 1, maximum: 200 }) }, ['query']),
+    parameters: z.object({ query: z.string().min(1), path: z.string().default('.'), isRegex: z.boolean().default(false), maxResults: z.number().int().min(1).max(200).default(50) }),
+    scopes: ['runtime.code.search'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'code',
+      action: 'search',
+      resourceType: 'workspace_search',
+      sensitiveFields: ['query', 'path'],
+      logEvents: ['tool.code.search.requested', 'tool.code.search.completed'],
+    },
+    executor: codeSearch,
+  },
+  {
+    name: 'code.edit',
+    description: 'Overwrite or append to a file inside the Nexora workspace root after explicit approval. Supports expectedSha256 optimistic locking.',
+    inputSchema: objectSchema({ path: relativePathSchema, content: stringSchema('UTF-8 content to write.'), mode: stringSchema('overwrite or append.'), expectedSha256: stringSchema('Optional sha256 of existing content.'), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema }, ['path', 'content']),
+    parameters: z.object({ path: z.string().min(1), content: z.string(), mode: z.enum(['overwrite', 'append']).default('overwrite'), expectedSha256: z.string().default(''), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
+    scopes: ['runtime.code.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'code',
+      action: 'edit',
+      resourceType: 'workspace_file',
+      resourceIdField: 'path',
+      sensitiveFields: ['path', 'content'],
+      logEvents: ['tool.code.edit.approval_requested', 'tool.code.edit.completed'],
+    },
+    executor: codeEdit,
+  },
+  {
+    name: 'code.diff',
+    description: 'Return git diff output for the sandboxed Nexora workspace root or a workspace-relative path.',
+    inputSchema: objectSchema({ path: relativePathSchema }),
+    parameters: z.object({ path: z.string().default('') }),
+    scopes: ['runtime.code.diff'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'code',
+      action: 'diff',
+      resourceType: 'workspace_diff',
+      resourceIdField: 'path',
+      sensitiveFields: ['path'],
+      logEvents: ['tool.code.diff.requested', 'tool.code.diff.completed'],
+    },
+    executor: codeDiff,
+  },
+  {
+    name: 'code.test',
+    description: 'Run an approved shell command from a sandboxed workspace-relative cwd with a bounded timeout and captured output.',
+    inputSchema: objectSchema({ command: stringSchema('Command to run after approval.'), cwd: relativePathSchema, timeoutMs: numberSchema('Timeout in milliseconds.', { minimum: 1000, maximum: 600000 }), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema }, ['command']),
+    parameters: z.object({ command: z.string().min(1), cwd: z.string().default('.'), timeoutMs: z.number().int().min(1000).max(600000).default(120000), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
+    scopes: ['runtime.code.execute'],
+    riskLevel: 'code_execution',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'code',
+      action: 'test',
+      resourceType: 'workspace_command',
+      sensitiveFields: ['command', 'cwd'],
+      logEvents: ['tool.code.test.approval_requested', 'tool.code.test.completed'],
+    },
+    executor: codeTest,
+  },
+  {
+    name: 'code.commit',
+    description: 'Stage workspace-relative paths and create a git commit after explicit user approval.',
+    inputSchema: objectSchema({ message: stringSchema('Git commit message.'), paths: stringArraySchema('Workspace-relative paths to stage; defaults to all.'), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema }, ['message']),
+    parameters: z.object({ message: z.string().min(1), paths: z.array(z.string()).default([]), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
+    scopes: ['runtime.code.commit'],
+    riskLevel: 'purchase_or_commit',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'code',
+      action: 'commit',
+      resourceType: 'git_commit',
+      sensitiveFields: ['message', 'paths'],
+      logEvents: ['tool.code.commit.approval_requested', 'tool.code.commit.completed'],
+    },
+    executor: codeCommit,
+  },
+  {
+    name: 'vscode.open',
+    description: 'Build a vscode://file URI for an existing file inside the sandboxed Nexora workspace root.',
+    inputSchema: objectSchema({ path: relativePathSchema, line: numberSchema('One-based line number.', { minimum: 1 }), column: numberSchema('One-based column number.', { minimum: 1 }) }, ['path']),
+    parameters: z.object({ path: z.string().min(1), line: z.number().int().min(1).default(1), column: z.number().int().min(1).default(1) }),
+    scopes: ['runtime.vscode.open'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'vscode',
+      action: 'open',
+      resourceType: 'workspace_file',
+      resourceIdField: 'path',
+      sensitiveFields: ['path'],
+      logEvents: ['tool.vscode.open.requested', 'tool.vscode.open.completed'],
+    },
+    executor: vscodeOpen,
+  },
+  {
+    name: 'vscode.status',
+    description: 'Return workspace root and lightweight git status information for Nexora workspace context.',
+    inputSchema: objectSchema({}),
+    parameters: z.object({}),
+    scopes: ['runtime.vscode.status'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'vscode',
+      action: 'status',
+      resourceType: 'workspace_status',
+      logEvents: ['tool.vscode.status.requested', 'tool.vscode.status.completed'],
+    },
+    executor: vscodeStatus,
+  },
   {
     name: 'delegation.create_task',
     description: 'Create a tracked backend task for work that Elora should plan, execute, or await approval for.',
     inputSchema: objectSchema({ title: stringSchema('Task title.'), notes: stringSchema('Task notes.') }, ['title']),
-    parameters: z.object({ title: z.string().min(1), notes: z.string().optional() }),
+    parameters: z.object({ title: z.string().min(1), notes: z.string().default('') }),
     scopes: ['runtime.delegation.write'],
     riskLevel: 'write',
     humanApprovalRequired: false,
@@ -518,18 +673,55 @@ function toRuntimeTool(definition: RegisteredToolDefinition) {
     description: definition.description,
     parameters: definition.parameters,
     async execute(input, runContext) {
+      if (!runContext?.context) throw new Error(`Runtime context is required for ${definition.name}`);
       const context = runContext.context as RuntimeContext;
+      const inputRecord = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
+      const approved = inputRecord.confirmedByUser === true;
+      const requestedAt = new Date().toISOString();
+      const audit = {
+        ...definition.audit,
+        requestedAt,
+        sessionId: context.sessionId,
+      };
+
+      await writeToolAuditLog({
+        event: definition.audit.logEvents[0] || `${definition.name}.requested`,
+        tool: definition.name,
+        sessionId: context.sessionId,
+        riskLevel: definition.riskLevel,
+        humanApprovalRequired: definition.humanApprovalRequired,
+        approved,
+        workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
+        input: sanitizeAuditInput(inputRecord, definition.audit.sensitiveFields),
+      });
+
+      if (definition.humanApprovalRequired && !approved) {
+        const result = {
+          ok: false,
+          status: 'approval_required',
+          tool: definition.name,
+          message: `${definition.name} requires explicit user approval before execution.`,
+        };
+        return { ok: true, tool: definition.name, riskLevel: definition.riskLevel, humanApprovalRequired: true, audit, result };
+      }
+
       const result = await definition.executor(input, context);
+      await writeToolAuditLog({
+        event: definition.audit.logEvents.at(-1) || `${definition.name}.completed`,
+        tool: definition.name,
+        sessionId: context.sessionId,
+        riskLevel: definition.riskLevel,
+        humanApprovalRequired: definition.humanApprovalRequired,
+        approved,
+        workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
+        resultStatus: typeof result === 'object' && result && 'status' in result ? String((result as { status?: unknown }).status) : 'completed',
+      });
       return {
         ok: true,
         tool: definition.name,
         riskLevel: definition.riskLevel,
         humanApprovalRequired: definition.humanApprovalRequired,
-        audit: {
-          ...definition.audit,
-          requestedAt: new Date().toISOString(),
-          sessionId: context.sessionId,
-        },
+        audit,
         result,
       };
     },
@@ -537,10 +729,19 @@ function toRuntimeTool(definition: RegisteredToolDefinition) {
 }
 
 export function getRegisteredTool(name: string) {
-  return registryByName.get(name);
+  return registryByName.get(name as RegisteredToolDefinition['name']);
 }
 
-export const runtimeTools = toolRegistry.map(toRuntimeTool);
+export function runtimeToolsForCategories(categories: ToolCategory[]) {
+  const allowed = new Set<ToolCategory>(categories);
+  return toolRegistry.filter((definition) => allowed.has(definition.audit.category)).map(toRuntimeTool);
+}
+
+export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'voice', 'memory', 'delegation'];
+export const nexoraRuntimeToolCategories: ToolCategory[] = [...sharedRuntimeToolCategories, 'code', 'vscode'];
+
+export const runtimeTools = runtimeToolsForCategories(sharedRuntimeToolCategories);
+export const nexoraRuntimeTools = runtimeToolsForCategories(nexoraRuntimeToolCategories);
 
 export const toolManifest = toolRegistry.map(({ executor: _executor, parameters: _parameters, ...definition }) => definition);
 

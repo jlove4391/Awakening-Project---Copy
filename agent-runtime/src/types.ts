@@ -35,7 +35,10 @@ export interface RuntimeContext {
   record: SessionRecord;
 }
 
+export type RuntimeAgentName = 'elora' | 'nexora';
+
 export interface ChatRequestBody {
   message?: string;
   sessionId?: string;
+  agent?: RuntimeAgentName;
 }

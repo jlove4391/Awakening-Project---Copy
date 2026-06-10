@@ -8,4 +8,6 @@ export const runtimeConfig = {
   dataDir: process.env.AGENT_RUNTIME_DATA_DIR || path.join(runtimeRoot, '.runtime-data'),
   sessionBackend: process.env.AGENT_RUNTIME_SESSION_BACKEND || 'auto',
   corsOrigin: process.env.AGENT_RUNTIME_CORS_ORIGIN || 'http://localhost:3000',
+  codeWorkspaceRoot: path.resolve(process.env.NEXORA_WORKSPACE_ROOT || process.env.AGENT_RUNTIME_WORKSPACE_ROOT || process.cwd()),
+  codeCommandTimeoutMs: Number(process.env.NEXORA_CODE_COMMAND_TIMEOUT_MS || 120_000),
 };

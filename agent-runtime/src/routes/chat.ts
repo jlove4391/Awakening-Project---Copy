@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { run } from '@openai/agents';
 import { elora } from '../agents/elora.js';
+import { nexora } from '../agents/nexora.js';
 import { getRuntimeContext, listMemories, persistRuntimeContext } from '../memory/index.js';
 import { setupSse, sendEvent } from '../lib/sse.js';
 import type { ChatRequestBody } from '../types.js';
@@ -21,10 +22,15 @@ function isToolishEvent(event: any) {
 }
 
 chatRouter.post('/', async (req, res, next) => {
-  const { message, sessionId } = req.body as ChatRequestBody;
+  const { message, sessionId, agent = 'elora' } = req.body as ChatRequestBody;
 
   if (!message?.trim()) {
     res.status(400).json({ error: 'message is required' });
+    return;
+  }
+
+  if (agent !== 'elora' && agent !== 'nexora') {
+    res.status(400).json({ error: 'agent must be elora or nexora' });
     return;
   }
 
@@ -32,14 +38,17 @@ chatRouter.post('/', async (req, res, next) => {
 
   try {
     const context = await getRuntimeContext(sessionId);
+    const selectedAgent = agent === 'nexora' ? nexora : elora;
+
     sendEvent(res, 'session', {
       sessionId: context.sessionId,
+      agent,
       provider: context.record.provider,
       providerConversationId: context.record.providerConversationId,
     });
     sendEvent(res, 'memory', { references: await listMemories(context.sessionId, 5) });
 
-    const stream = await run(elora, message.trim(), {
+    const stream = await run(selectedAgent, message.trim(), {
       stream: true,
       session: context.session,
       context,

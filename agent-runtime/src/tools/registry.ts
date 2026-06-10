@@ -667,43 +667,57 @@ export const toolRegistry: RegisteredToolDefinition[] = [
 
 const registryByName = new Map(toolRegistry.map((definition) => [definition.name, definition]));
 
+function isHighRisk(definition: RegisteredToolDefinition) {
+  return definition.riskLevel !== 'read';
+}
+
+function approvalBlockedResult(definition: RegisteredToolDefinition, context: RuntimeContext, reason: string) {
+  return {
+    ok: false,
+    tool: definition.name,
+    riskLevel: definition.riskLevel,
+    humanApprovalRequired: definition.humanApprovalRequired,
+    audit: {
+      ...definition.audit,
+      blockedAt: new Date().toISOString(),
+      sessionId: context.sessionId,
+      channel: context.channel || 'text',
+      voiceSessionId: context.voiceSessionId,
+    },
+    result: {
+      status: 'approval_required',
+      reason,
+      message: context.voiceApproval?.lockedReason || `The ${definition.name} action requires explicit approval before it can run.`,
+    },
+  };
+}
+
+function enforceApprovalLimits(definition: RegisteredToolDefinition, input: any, context: RuntimeContext) {
+  if (definition.humanApprovalRequired && input?.confirmedByUser !== true) {
+    return approvalBlockedResult(definition, context, 'missing_explicit_user_approval');
+  }
+
+  if (context.channel === 'voice' && isHighRisk(definition)) {
+    const policy = context.voiceApproval;
+    if (!policy?.allowHighRiskActions) {
+      return approvalBlockedResult(definition, context, 'voice_high_risk_actions_not_approved');
+    }
+
+    if (policy.approvedHighRiskActions >= policy.maxHighRiskActions) {
+      return approvalBlockedResult(definition, context, 'voice_high_risk_action_limit_exhausted');
+    }
+
+    policy.approvedHighRiskActions += 1;
+  }
+
+  return undefined;
+}
+
 function toRuntimeTool(definition: RegisteredToolDefinition) {
   return tool({
     name: definition.name,
     description: definition.description,
-    parameters: definition.parameters,
-    async execute(input, runContext) {
-      if (!runContext?.context) throw new Error(`Runtime context is required for ${definition.name}`);
-      const context = runContext.context as RuntimeContext;
-      const inputRecord = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
-      const approved = inputRecord.confirmedByUser === true;
-      const requestedAt = new Date().toISOString();
-      const audit = {
-        ...definition.audit,
-        requestedAt,
-        sessionId: context.sessionId,
-      };
 
-      await writeToolAuditLog({
-        event: definition.audit.logEvents[0] || `${definition.name}.requested`,
-        tool: definition.name,
-        sessionId: context.sessionId,
-        riskLevel: definition.riskLevel,
-        humanApprovalRequired: definition.humanApprovalRequired,
-        approved,
-        workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
-        input: sanitizeAuditInput(inputRecord, definition.audit.sensitiveFields),
-      });
-
-      if (definition.humanApprovalRequired && !approved) {
-        const result = {
-          ok: false,
-          status: 'approval_required',
-          tool: definition.name,
-          message: `${definition.name} requires explicit user approval before execution.`,
-        };
-        return { ok: true, tool: definition.name, riskLevel: definition.riskLevel, humanApprovalRequired: true, audit, result };
-      }
 
       const result = await definition.executor(input, context);
       await writeToolAuditLog({
@@ -721,21 +735,16 @@ function toRuntimeTool(definition: RegisteredToolDefinition) {
         tool: definition.name,
         riskLevel: definition.riskLevel,
         humanApprovalRequired: definition.humanApprovalRequired,
-        audit,
+
         result,
       };
     },
-  });
+  } as any);
 }
 
 export function getRegisteredTool(name: string) {
   return registryByName.get(name as RegisteredToolDefinition['name']);
-}
 
-export function runtimeToolsForCategories(categories: ToolCategory[]) {
-  const allowed = new Set<ToolCategory>(categories);
-  return toolRegistry.filter((definition) => allowed.has(definition.audit.category)).map(toRuntimeTool);
-}
 
 export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'voice', 'memory', 'delegation'];
 export const nexoraRuntimeToolCategories: ToolCategory[] = [...sharedRuntimeToolCategories, 'code', 'vscode'];

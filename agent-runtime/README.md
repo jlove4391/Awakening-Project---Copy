@@ -43,8 +43,3 @@ Read/list tools execute directly once OAuth is connected. Google write/send tool
 
 ## Tool Registry
 
-The runtime now registers tools by capability category instead of calling providers directly from agent logic. Shared namespaces are `calendar.*`, `gmail.*`, `drive.*`, `sheets.*`, `crm.*`, `clay.*`, `leadgen.*`, `voice.*`, `memory.*`, and `delegation.*`. Nexora additionally receives `code.read`, `code.search`, `code.edit`, `code.diff`, `code.test`, `code.commit`, `vscode.open`, and `vscode.status`. Each registry entry carries its JSON input schema, required OAuth/provider scopes, risk level, human-approval requirement, executor, and audit-log metadata. Google provider-backed entries now use the backend adapters under `src/providers/google/`; other provider-backed entries continue to fail closed with `provider_not_configured` until their adapters are wired. The archived AuthBridge, VsCodeBridge, and Nexora code-action integrations should remain references only when rebuilding adapters.
-
-## Nexora Code Workspace
-
-Nexora code and VS Code tools are intentionally sandboxed. The clear workspace root defaults to `process.cwd()` and can be overridden with `NEXORA_WORKSPACE_ROOT` or `AGENT_RUNTIME_WORKSPACE_ROOT`. Tool paths must be workspace-relative; absolute paths, `..` traversal, and symlink escapes are rejected. Write, command execution, and commit tools require `confirmedByUser: true` after explicit approval. All tool calls append redacted audit records to `AGENT_RUNTIME_DATA_DIR/audit/tool-audit.jsonl`.

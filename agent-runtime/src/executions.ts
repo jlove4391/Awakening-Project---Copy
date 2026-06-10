@@ -1,0 +1,200 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { runtimeConfig } from './config.js';
+import type { ToolRiskLevel } from './tools/registry.js';
+
+export type ExecutionKind = 'tool_call' | 'delegated_task' | 'runtime_action';
+export type ExecutionApprovalStatus = 'not_required' | 'approved' | 'blocked' | 'pending' | 'rejected' | 'unknown';
+export type ExecutionStatus = 'requested' | 'running' | 'completed' | 'blocked' | 'failed';
+
+export interface ExecutionRecord {
+  id: string;
+  kind: ExecutionKind;
+  whoRequested: string;
+  chosenByAgent: string;
+  action: string;
+  inputPayload: unknown;
+  riskLevel: ToolRiskLevel | 'unknown';
+  approvalStatus: ExecutionApprovalStatus;
+  executionResult?: unknown;
+  providerResponseSummary?: string;
+  errors: string[];
+  timestamps: {
+    requestedAt: string;
+    startedAt?: string;
+    completedAt?: string;
+  };
+  linkedIds: {
+    sessionId?: string;
+    memoryIds?: string[];
+    taskIds?: string[];
+    toolCallId?: string;
+    voiceSessionId?: string;
+  };
+  status: ExecutionStatus;
+  receipt: {
+    summary: string;
+    status: ExecutionStatus;
+    issuedAt: string;
+  };
+}
+
+const executionsDir = path.join(runtimeConfig.dataDir, 'executions');
+const executionLogPath = path.join(executionsDir, 'execution-records.jsonl');
+
+function now() {
+  return new Date().toISOString();
+}
+
+async function ensureStore() {
+  await fs.mkdir(executionsDir, { recursive: true });
+}
+
+function sessionExecutionPath(sessionId: string) {
+  return path.join(executionsDir, `${sessionId}.json`);
+}
+
+function truncate(value: string, maxLength = 360) {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
+}
+
+export function summarizeProviderResponse(result: unknown) {
+  if (result === undefined) return 'No provider response body returned.';
+  if (result === null) return 'Provider returned null.';
+  if (typeof result === 'string') return truncate(result);
+  if (typeof result === 'number' || typeof result === 'boolean') return String(result);
+
+  if (typeof result === 'object') {
+    const objectResult = result as Record<string, unknown>;
+    const status = objectResult.status ? `status=${String(objectResult.status)}` : undefined;
+    const ok = typeof objectResult.ok === 'boolean' ? `ok=${String(objectResult.ok)}` : undefined;
+    const message = typeof objectResult.message === 'string' ? truncate(objectResult.message, 180) : undefined;
+    const id = typeof objectResult.id === 'string' ? `id=${objectResult.id}` : undefined;
+    const parts = [ok, status, id, message].filter(Boolean);
+    if (parts.length) return parts.join('; ');
+  }
+
+  try {
+    return truncate(JSON.stringify(result));
+  } catch (_error) {
+    return 'Provider response could not be serialized.';
+  }
+}
+
+export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'timestamps' | 'status' | 'receipt' | 'errors'> & {
+  requestedAt?: string;
+  startedAt?: string;
+  status?: ExecutionStatus;
+  errors?: string[];
+  receiptSummary?: string;
+}): ExecutionRecord {
+  const requestedAt = input.requestedAt || now();
+  const status = input.status || 'requested';
+  return {
+    id: randomUUID(),
+    kind: input.kind,
+    whoRequested: input.whoRequested,
+    chosenByAgent: input.chosenByAgent,
+    action: input.action,
+    inputPayload: input.inputPayload,
+    riskLevel: input.riskLevel,
+    approvalStatus: input.approvalStatus,
+    executionResult: input.executionResult,
+    providerResponseSummary: input.providerResponseSummary,
+    errors: input.errors || [],
+    timestamps: {
+      requestedAt,
+      startedAt: input.startedAt,
+    },
+    linkedIds: input.linkedIds,
+    status,
+    receipt: {
+      summary: input.receiptSummary || `${input.action} ${status}`,
+      status,
+      issuedAt: now(),
+    },
+  };
+}
+
+export function completeExecutionRecord(
+  record: ExecutionRecord,
+  patch: {
+    status: ExecutionStatus;
+    executionResult?: unknown;
+    providerResponseSummary?: string;
+    errors?: string[];
+    approvalStatus?: ExecutionApprovalStatus;
+    completedAt?: string;
+    receiptSummary?: string;
+  },
+): ExecutionRecord {
+  const completedAt = patch.completedAt || now();
+  return {
+    ...record,
+    status: patch.status,
+    approvalStatus: patch.approvalStatus || record.approvalStatus,
+    executionResult: patch.executionResult,
+    providerResponseSummary: patch.providerResponseSummary ?? summarizeProviderResponse(patch.executionResult),
+    errors: patch.errors || record.errors,
+    timestamps: {
+      ...record.timestamps,
+      completedAt,
+    },
+    receipt: {
+      summary: patch.receiptSummary || `${record.action} ${patch.status}`,
+      status: patch.status,
+      issuedAt: completedAt,
+    },
+  };
+}
+
+async function appendSessionRecord(record: ExecutionRecord) {
+  const sessionId = record.linkedIds.sessionId;
+  if (!sessionId) return;
+  const filePath = sessionExecutionPath(sessionId);
+  let records: ExecutionRecord[] = [];
+  try {
+    records = JSON.parse(await fs.readFile(filePath, 'utf8')) as ExecutionRecord[];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  records.unshift(record);
+  await fs.writeFile(filePath, `${JSON.stringify(records.slice(0, 250), null, 2)}\n`);
+}
+
+export async function writeExecutionRecord(record: ExecutionRecord) {
+  await ensureStore();
+  await fs.appendFile(executionLogPath, `${JSON.stringify(record)}\n`);
+  await appendSessionRecord(record);
+  return record;
+}
+
+export async function listExecutionRecords(options: { sessionId?: string; limit?: number } = {}) {
+  await ensureStore();
+  const limit = Math.max(1, Math.min(options.limit || 25, 100));
+
+  if (options.sessionId) {
+    try {
+      const records = JSON.parse(await fs.readFile(sessionExecutionPath(options.sessionId), 'utf8')) as ExecutionRecord[];
+      return records.slice(0, limit);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
+  }
+
+  try {
+    const raw = await fs.readFile(executionLogPath, 'utf8');
+    return raw
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .slice(-limit)
+      .reverse()
+      .map((line) => JSON.parse(line) as ExecutionRecord);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+}

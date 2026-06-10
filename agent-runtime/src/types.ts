@@ -47,6 +47,7 @@ export interface RuntimeContext {
   channel?: RuntimeChannel;
   voiceSessionId?: string;
   voiceApproval?: VoiceApprovalPolicy;
+  agent?: RuntimeAgentName;
 }
 
 export interface AgentMessageRequest {
@@ -55,6 +56,7 @@ export interface AgentMessageRequest {
   channel?: RuntimeChannel;
   voiceSessionId?: string;
   voiceApproval?: VoiceApprovalPolicy;
+  agent?: RuntimeAgentName;
 }
 
 export interface AgentMessageEvent {

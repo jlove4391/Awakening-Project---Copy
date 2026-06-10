@@ -2,6 +2,12 @@ import { tool } from '@openai/agents';
 import { z } from 'zod';
 import { createTask, listMemories, listTasks, remember } from '../memory/index.js';
 import { writeToolAuditLog, sanitizeAuditInput } from '../audit/auditLogger.js';
+import {
+  completeExecutionRecord,
+  createExecutionRecord,
+  summarizeProviderResponse,
+  writeExecutionRecord,
+} from '../executions.js';
 import { createCalendarEvent, listCalendarEvents } from '../providers/google/calendar.js';
 import { createDriveTextFile, searchDriveFiles } from '../providers/google/drive.js';
 import { searchGmailMessages, sendGmailEmail } from '../providers/google/gmail.js';
@@ -717,34 +723,138 @@ function toRuntimeTool(definition: RegisteredToolDefinition) {
   return tool({
     name: definition.name,
     description: definition.description,
+    parameters: definition.parameters,
+    needsApproval: false,
+    execute: async (input: any, runContext?: { context?: RuntimeContext }, details?: { toolCall?: { id?: string }; toolCallId?: string }) => {
+      const context = runContext?.context;
+      if (!context) throw new Error(`Runtime context missing for ${definition.name}`);
 
+      const sanitizedInput = sanitizeAuditInput(input || {}, definition.audit.sensitiveFields);
+      const approved = !definition.humanApprovalRequired || input?.confirmedByUser === true;
+      const approvalStatus = definition.humanApprovalRequired ? (approved ? 'approved' : 'pending') : 'not_required';
+      const toolCallId = details?.toolCall?.id || details?.toolCallId;
+      const executionRecord = createExecutionRecord({
+        kind: definition.audit.category === 'delegation' ? 'delegated_task' : 'tool_call',
+        whoRequested: 'user',
+        chosenByAgent: context.agent || (definition.audit.category === 'code' || definition.audit.category === 'vscode' ? 'nexora' : 'elora'),
+        action: definition.name,
+        inputPayload: sanitizedInput,
+        riskLevel: definition.riskLevel,
+        approvalStatus,
+        linkedIds: {
+          sessionId: context.sessionId,
+          toolCallId,
+          voiceSessionId: context.voiceSessionId,
+          taskIds: definition.audit.resourceIdField && input?.[definition.audit.resourceIdField] ? [String(input[definition.audit.resourceIdField])] : undefined,
+        },
+        startedAt: new Date().toISOString(),
+        status: 'running',
+        receiptSummary: `${definition.name} requested`,
+      });
 
-      const result = await definition.executor(input, context);
+      await writeExecutionRecord(executionRecord);
       await writeToolAuditLog({
-        event: definition.audit.logEvents.at(-1) || `${definition.name}.completed`,
+        event: definition.audit.logEvents[0] || `${definition.name}.requested`,
         tool: definition.name,
         sessionId: context.sessionId,
         riskLevel: definition.riskLevel,
         humanApprovalRequired: definition.humanApprovalRequired,
         approved,
         workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
-        resultStatus: typeof result === 'object' && result && 'status' in result ? String((result as { status?: unknown }).status) : 'completed',
+        input: sanitizedInput,
       });
-      return {
-        ok: true,
-        tool: definition.name,
-        riskLevel: definition.riskLevel,
-        humanApprovalRequired: definition.humanApprovalRequired,
 
-        result,
-      };
+      const blocked = enforceApprovalLimits(definition, input, context);
+      if (blocked) {
+        const completed = completeExecutionRecord(executionRecord, {
+          status: 'blocked',
+          approvalStatus: 'blocked',
+          executionResult: blocked.result,
+          providerResponseSummary: summarizeProviderResponse(blocked.result),
+          errors: [blocked.result.reason],
+          receiptSummary: `${definition.name} blocked: ${blocked.result.reason}`,
+        });
+        await writeExecutionRecord(completed);
+        await writeToolAuditLog({
+          event: definition.audit.logEvents[0] || `${definition.name}.approval_required`,
+          tool: definition.name,
+          sessionId: context.sessionId,
+          riskLevel: definition.riskLevel,
+          humanApprovalRequired: definition.humanApprovalRequired,
+          approved: false,
+          workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
+          input: sanitizedInput,
+          resultStatus: blocked.result.status,
+          error: blocked.result.reason,
+        });
+        return blocked;
+      }
+
+      try {
+        const result = await definition.executor(input, context);
+        const resultStatus = typeof result === 'object' && result && 'status' in result ? String((result as { status?: unknown }).status) : 'completed';
+        const completed = completeExecutionRecord(executionRecord, {
+          status: 'completed',
+          approvalStatus: approved ? (definition.humanApprovalRequired ? 'approved' : 'not_required') : approvalStatus,
+          executionResult: result,
+          providerResponseSummary: summarizeProviderResponse(result),
+          receiptSummary: `${definition.name} completed with ${resultStatus}`,
+        });
+        await writeExecutionRecord(completed);
+        await writeToolAuditLog({
+          event: definition.audit.logEvents.at(-1) || `${definition.name}.completed`,
+          tool: definition.name,
+          sessionId: context.sessionId,
+          riskLevel: definition.riskLevel,
+          humanApprovalRequired: definition.humanApprovalRequired,
+          approved,
+          workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
+          resultStatus,
+        });
+        return {
+          ok: true,
+          tool: definition.name,
+          riskLevel: definition.riskLevel,
+          humanApprovalRequired: definition.humanApprovalRequired,
+          executionRecordId: completed.id,
+          receipt: completed.receipt,
+          result,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown tool execution error';
+        const failed = completeExecutionRecord(executionRecord, {
+          status: 'failed',
+          approvalStatus: approved ? (definition.humanApprovalRequired ? 'approved' : 'not_required') : approvalStatus,
+          errors: [message],
+          providerResponseSummary: message,
+          receiptSummary: `${definition.name} failed: ${message}`,
+        });
+        await writeExecutionRecord(failed);
+        await writeToolAuditLog({
+          event: `${definition.name}.failed`,
+          tool: definition.name,
+          sessionId: context.sessionId,
+          riskLevel: definition.riskLevel,
+          humanApprovalRequired: definition.humanApprovalRequired,
+          approved,
+          workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
+          input: sanitizedInput,
+          error: message,
+        });
+        throw error;
+      }
     },
   } as any);
 }
 
 export function getRegisteredTool(name: string) {
   return registryByName.get(name as RegisteredToolDefinition['name']);
+}
 
+export function runtimeToolsForCategories(categories: ToolCategory[]) {
+  const allowed = new Set(categories);
+  return toolRegistry.filter((definition) => allowed.has(definition.audit.category)).map(toRuntimeTool);
+}
 
 export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'voice', 'memory', 'delegation'];
 export const nexoraRuntimeToolCategories: ToolCategory[] = [...sharedRuntimeToolCategories, 'code', 'vscode'];

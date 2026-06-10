@@ -1,5 +1,6 @@
 import React from 'react';
 import GoogleConnection from './GoogleConnection';
+import ExecutionReceiptsPanel from './ExecutionReceiptsPanel';
 
 const routeStatus = [
   { path: '/', label: 'Home dashboard', state: 'active' },
@@ -30,6 +31,8 @@ const RuntimeStatus = () => (
       <p>Legacy Visuals: Stored under legacy only</p>
       <p>Runtime Integrations: Google provider adapters available through the backend runtime</p>
     </div>
+
+    <ExecutionReceiptsPanel />
 
     <div className="console-log" aria-label="Active routes">
       {routeStatus.map((route) => (

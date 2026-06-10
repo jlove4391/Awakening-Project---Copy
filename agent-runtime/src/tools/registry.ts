@@ -1,66 +1,528 @@
-import { tool, webSearchTool } from '@openai/agents';
+import { tool } from '@openai/agents';
 import { z } from 'zod';
 import { createTask, listMemories, listTasks, remember } from '../memory/index.js';
 import type { RuntimeContext } from '../types.js';
 
-export const rememberPreferenceTool = tool({
-  name: 'remember_memory_reference',
-  description: 'Persist a durable memory reference for the current Elora session.',
-  parameters: z.object({
-    text: z.string().min(1).describe('The memory text to store.'),
-    scope: z.enum(['user', 'project', 'session']).default('session'),
-    tags: z.array(z.string()).default([]),
-  }),
-  async execute(input, runContext) {
-    const context = runContext.context as RuntimeContext;
-    return remember(context.sessionId, input.text, { scope: input.scope, tags: input.tags });
-  },
+export type ToolCategory =
+  | 'calendar'
+  | 'gmail'
+  | 'drive'
+  | 'sheets'
+  | 'crm'
+  | 'clay'
+  | 'leadgen'
+  | 'voice'
+  | 'memory'
+  | 'delegation';
+
+export type ToolRiskLevel = 'read' | 'write' | 'external_send' | 'purchase_or_commit' | 'code_execution';
+
+type JsonSchema = {
+  type: 'object';
+  additionalProperties?: boolean;
+  properties: Record<string, unknown>;
+  required?: string[];
+};
+
+type ToolExecutor = (input: any, context: RuntimeContext) => Promise<unknown>;
+
+export interface ToolAuditMetadata {
+  category: ToolCategory;
+  action: string;
+  resourceType: string;
+  resourceIdField?: string;
+  actorField?: string;
+  sensitiveFields?: string[];
+  logEvents: string[];
+}
+
+export interface RegisteredToolDefinition {
+  name: `${ToolCategory}.${string}`;
+  description: string;
+  inputSchema: JsonSchema;
+  parameters: z.ZodTypeAny;
+  scopes: string[];
+  riskLevel: ToolRiskLevel;
+  humanApprovalRequired: boolean;
+  audit: ToolAuditMetadata;
+  executor: ToolExecutor;
+}
+
+function unavailableProvider(category: ToolCategory, provider: string): ToolExecutor {
+  return async (input, context) => ({
+    ok: false,
+    status: 'provider_not_configured',
+    category,
+    provider,
+    sessionId: context.sessionId,
+    requestedInput: input,
+    message:
+      `The ${category} provider adapter is registered, but ${provider} credentials/client wiring has not been configured in the new runtime yet.`,
+  });
+}
+
+function objectSchema(properties: Record<string, unknown>, required: string[] = []): JsonSchema {
+  return { type: 'object', additionalProperties: false, properties, ...(required.length ? { required } : {}) };
+}
+
+const stringSchema = (description: string) => ({ type: 'string', description });
+const numberSchema = (description: string, options: Record<string, unknown> = {}) => ({
+  type: 'number',
+  description,
+  ...options,
+});
+const stringArraySchema = (description: string) => ({
+  type: 'array',
+  description,
+  items: { type: 'string' },
 });
 
-export const listMemoryTool = tool({
-  name: 'list_memory_references',
-  description: 'List the most recent memory references available to Elora.',
-  parameters: z.object({
-    limit: z.number().int().min(1).max(25).default(10),
-  }),
-  async execute(input, runContext) {
-    const context = runContext.context as RuntimeContext;
-    return listMemories(context.sessionId, input.limit);
+export const toolRegistry: RegisteredToolDefinition[] = [
+  {
+    name: 'calendar.list_events',
+    description: 'List calendar events for a time range using the configured calendar provider adapter.',
+    inputSchema: objectSchema(
+      {
+        calendarId: stringSchema('Calendar identifier; defaults to primary when omitted.'),
+        timeMin: stringSchema('Inclusive ISO-8601 start time.'),
+        timeMax: stringSchema('Exclusive ISO-8601 end time.'),
+        maxResults: numberSchema('Maximum number of events to return.', { minimum: 1, maximum: 100 }),
+      },
+      ['timeMin', 'timeMax'],
+    ),
+    parameters: z.object({
+      calendarId: z.string().default('primary'),
+      timeMin: z.string().min(1),
+      timeMax: z.string().min(1),
+      maxResults: z.number().int().min(1).max(100).default(10),
+    }),
+    scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'calendar',
+      action: 'list_events',
+      resourceType: 'calendar_event',
+      resourceIdField: 'calendarId',
+      sensitiveFields: ['timeMin', 'timeMax'],
+      logEvents: ['tool.calendar.list_events.requested', 'tool.calendar.list_events.completed'],
+    },
+    executor: unavailableProvider('calendar', 'google-calendar'),
   },
-});
-
-export const createTaskTool = tool({
-  name: 'create_agent_task',
-  description: 'Create a tracked backend task for work that Elora should plan, execute, or await approval for.',
-  parameters: z.object({
-    title: z.string().min(1),
-    notes: z.string().optional(),
-  }),
-  async execute(input, runContext) {
-    const context = runContext.context as RuntimeContext;
-    return createTask(context.sessionId, input.title, input.notes);
+  {
+    name: 'calendar.create_event',
+    description: 'Create a calendar event through the configured calendar provider adapter.',
+    inputSchema: objectSchema(
+      {
+        calendarId: stringSchema('Calendar identifier; defaults to primary when omitted.'),
+        summary: stringSchema('Event title.'),
+        description: stringSchema('Event notes or agenda.'),
+        start: stringSchema('ISO-8601 start time.'),
+        end: stringSchema('ISO-8601 end time.'),
+        attendees: stringArraySchema('Attendee email addresses.'),
+      },
+      ['summary', 'start', 'end'],
+    ),
+    parameters: z.object({
+      calendarId: z.string().default('primary'),
+      summary: z.string().min(1),
+      description: z.string().default(''),
+      start: z.string().min(1),
+      end: z.string().min(1),
+      attendees: z.array(z.string().email()).default([]),
+    }),
+    scopes: ['https://www.googleapis.com/auth/calendar.events'],
+    riskLevel: 'write',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'calendar',
+      action: 'create_event',
+      resourceType: 'calendar_event',
+      resourceIdField: 'calendarId',
+      sensitiveFields: ['summary', 'description', 'attendees'],
+      logEvents: ['tool.calendar.create_event.approval_requested', 'tool.calendar.create_event.completed'],
+    },
+    executor: unavailableProvider('calendar', 'google-calendar'),
   },
-});
-
-export const listTasksTool = tool({
-  name: 'list_agent_tasks',
-  description: 'List task statuses for the current Elora session.',
-  parameters: z.object({}),
-  async execute(_input, runContext) {
-    const context = runContext.context as RuntimeContext;
-    return listTasks(context.sessionId);
+  {
+    name: 'gmail.search_messages',
+    description: 'Search Gmail messages and return lightweight message metadata.',
+    inputSchema: objectSchema({ query: stringSchema('Gmail search query.'), maxResults: numberSchema('Maximum messages.', { minimum: 1, maximum: 50 }) }),
+    parameters: z.object({ query: z.string().default(''), maxResults: z.number().int().min(1).max(50).default(10) }),
+    scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'gmail',
+      action: 'search_messages',
+      resourceType: 'gmail_message',
+      sensitiveFields: ['query'],
+      logEvents: ['tool.gmail.search_messages.requested', 'tool.gmail.search_messages.completed'],
+    },
+    executor: unavailableProvider('gmail', 'gmail'),
   },
-});
-
-export const runtimeTools = [
-  rememberPreferenceTool,
-  listMemoryTool,
-  createTaskTool,
-  listTasksTool,
-  webSearchTool(),
+  {
+    name: 'gmail.send_email',
+    description: 'Send an email from the connected Gmail account.',
+    inputSchema: objectSchema(
+      {
+        to: stringArraySchema('Recipient email addresses.'),
+        cc: stringArraySchema('CC recipient email addresses.'),
+        bcc: stringArraySchema('BCC recipient email addresses.'),
+        subject: stringSchema('Email subject.'),
+        body: stringSchema('Plain-text email body.'),
+      },
+      ['to', 'subject', 'body'],
+    ),
+    parameters: z.object({
+      to: z.array(z.string().email()).min(1),
+      cc: z.array(z.string().email()).default([]),
+      bcc: z.array(z.string().email()).default([]),
+      subject: z.string().min(1),
+      body: z.string().min(1),
+    }),
+    scopes: ['https://www.googleapis.com/auth/gmail.send'],
+    riskLevel: 'external_send',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'gmail',
+      action: 'send_email',
+      resourceType: 'email',
+      actorField: 'to',
+      sensitiveFields: ['to', 'cc', 'bcc', 'subject', 'body'],
+      logEvents: ['tool.gmail.send_email.approval_requested', 'tool.gmail.send_email.sent'],
+    },
+    executor: unavailableProvider('gmail', 'gmail'),
+  },
+  {
+    name: 'drive.search_files',
+    description: 'Search files in the connected drive provider.',
+    inputSchema: objectSchema({ query: stringSchema('Drive query or free-text search.'), maxResults: numberSchema('Maximum files.', { minimum: 1, maximum: 100 }) }),
+    parameters: z.object({ query: z.string().default(''), maxResults: z.number().int().min(1).max(100).default(20) }),
+    scopes: ['https://www.googleapis.com/auth/drive.metadata.readonly'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'drive',
+      action: 'search_files',
+      resourceType: 'drive_file',
+      sensitiveFields: ['query'],
+      logEvents: ['tool.drive.search_files.requested', 'tool.drive.search_files.completed'],
+    },
+    executor: unavailableProvider('drive', 'google-drive'),
+  },
+  {
+    name: 'drive.create_text_file',
+    description: 'Create a text file in the connected drive provider.',
+    inputSchema: objectSchema(
+      { name: stringSchema('File name.'), parentId: stringSchema('Parent folder ID.'), content: stringSchema('Text content to write.'), mimeType: stringSchema('MIME type.') },
+      ['name', 'content'],
+    ),
+    parameters: z.object({
+      name: z.string().min(1),
+      parentId: z.string().optional(),
+      content: z.string().min(1),
+      mimeType: z.string().default('text/plain'),
+    }),
+    scopes: ['https://www.googleapis.com/auth/drive.file'],
+    riskLevel: 'write',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'drive',
+      action: 'create_text_file',
+      resourceType: 'drive_file',
+      resourceIdField: 'parentId',
+      sensitiveFields: ['name', 'content'],
+      logEvents: ['tool.drive.create_text_file.approval_requested', 'tool.drive.create_text_file.completed'],
+    },
+    executor: unavailableProvider('drive', 'google-drive'),
+  },
+  {
+    name: 'sheets.read_range',
+    description: 'Read values from a spreadsheet range.',
+    inputSchema: objectSchema({ spreadsheetId: stringSchema('Spreadsheet ID.'), range: stringSchema('A1 notation range.') }, ['spreadsheetId', 'range']),
+    parameters: z.object({ spreadsheetId: z.string().min(1), range: z.string().min(1) }),
+    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'sheets',
+      action: 'read_range',
+      resourceType: 'spreadsheet_range',
+      resourceIdField: 'spreadsheetId',
+      sensitiveFields: ['range'],
+      logEvents: ['tool.sheets.read_range.requested', 'tool.sheets.read_range.completed'],
+    },
+    executor: unavailableProvider('sheets', 'google-sheets'),
+  },
+  {
+    name: 'sheets.update_range',
+    description: 'Update values in a spreadsheet range.',
+    inputSchema: objectSchema(
+      { spreadsheetId: stringSchema('Spreadsheet ID.'), range: stringSchema('A1 notation range.'), values: { type: 'array', description: 'Two-dimensional row values.', items: { type: 'array', items: {} } } },
+      ['spreadsheetId', 'range', 'values'],
+    ),
+    parameters: z.object({ spreadsheetId: z.string().min(1), range: z.string().min(1), values: z.array(z.array(z.unknown())) }),
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    riskLevel: 'write',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'sheets',
+      action: 'update_range',
+      resourceType: 'spreadsheet_range',
+      resourceIdField: 'spreadsheetId',
+      sensitiveFields: ['range', 'values'],
+      logEvents: ['tool.sheets.update_range.approval_requested', 'tool.sheets.update_range.completed'],
+    },
+    executor: unavailableProvider('sheets', 'google-sheets'),
+  },
+  {
+    name: 'crm.lookup_contact',
+    description: 'Look up CRM contacts by email, name, company, or provider-specific ID.',
+    inputSchema: objectSchema({ query: stringSchema('Contact lookup query.'), provider: stringSchema('CRM provider key, such as hubspot or salesforce.') }, ['query']),
+    parameters: z.object({ query: z.string().min(1), provider: z.string().default('default') }),
+    scopes: ['crm.contacts.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'crm',
+      action: 'lookup_contact',
+      resourceType: 'crm_contact',
+      sensitiveFields: ['query'],
+      logEvents: ['tool.crm.lookup_contact.requested', 'tool.crm.lookup_contact.completed'],
+    },
+    executor: unavailableProvider('crm', 'crm'),
+  },
+  {
+    name: 'crm.upsert_contact',
+    description: 'Create or update a CRM contact.',
+    inputSchema: objectSchema(
+      { email: stringSchema('Contact email.'), firstName: stringSchema('First name.'), lastName: stringSchema('Last name.'), company: stringSchema('Company.'), notes: stringSchema('Internal notes.') },
+      ['email'],
+    ),
+    parameters: z.object({ email: z.string().email(), firstName: z.string().optional(), lastName: z.string().optional(), company: z.string().optional(), notes: z.string().optional() }),
+    scopes: ['crm.contacts.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'crm',
+      action: 'upsert_contact',
+      resourceType: 'crm_contact',
+      resourceIdField: 'email',
+      sensitiveFields: ['email', 'firstName', 'lastName', 'company', 'notes'],
+      logEvents: ['tool.crm.upsert_contact.approval_requested', 'tool.crm.upsert_contact.completed'],
+    },
+    executor: unavailableProvider('crm', 'crm'),
+  },
+  {
+    name: 'clay.enrich_person',
+    description: 'Request a person enrichment from Clay or a compatible enrichment adapter.',
+    inputSchema: objectSchema({ email: stringSchema('Person email.'), linkedinUrl: stringSchema('LinkedIn profile URL.'), fullName: stringSchema('Full name.'), company: stringSchema('Company name.') }),
+    parameters: z.object({ email: z.string().email().optional(), linkedinUrl: z.string().url().optional(), fullName: z.string().optional(), company: z.string().optional() }),
+    scopes: ['clay.enrichments.write'],
+    riskLevel: 'purchase_or_commit',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'clay',
+      action: 'enrich_person',
+      resourceType: 'person_enrichment',
+      resourceIdField: 'email',
+      sensitiveFields: ['email', 'linkedinUrl', 'fullName', 'company'],
+      logEvents: ['tool.clay.enrich_person.approval_requested', 'tool.clay.enrich_person.completed'],
+    },
+    executor: unavailableProvider('clay', 'clay'),
+  },
+  {
+    name: 'leadgen.find_leads',
+    description: 'Find candidate leads by market, title, geography, and optional buying signals.',
+    inputSchema: objectSchema(
+      { market: stringSchema('Target market or ICP.'), titles: stringArraySchema('Target titles.'), geography: stringSchema('Target geography.'), limit: numberSchema('Maximum lead count.', { minimum: 1, maximum: 100 }) },
+      ['market'],
+    ),
+    parameters: z.object({ market: z.string().min(1), titles: z.array(z.string()).default([]), geography: z.string().optional(), limit: z.number().int().min(1).max(100).default(25) }),
+    scopes: ['leadgen.search.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'leadgen',
+      action: 'find_leads',
+      resourceType: 'lead',
+      sensitiveFields: ['market', 'titles', 'geography'],
+      logEvents: ['tool.leadgen.find_leads.requested', 'tool.leadgen.find_leads.completed'],
+    },
+    executor: unavailableProvider('leadgen', 'leadgen'),
+  },
+  {
+    name: 'leadgen.export_sequence',
+    description: 'Export approved leads into an outreach sequence or CRM campaign.',
+    inputSchema: objectSchema({ leadIds: stringArraySchema('Approved lead IDs.'), destination: stringSchema('Destination sequence or campaign identifier.') }, ['leadIds', 'destination']),
+    parameters: z.object({ leadIds: z.array(z.string()).min(1), destination: z.string().min(1) }),
+    scopes: ['leadgen.sequence.write', 'crm.contacts.write'],
+    riskLevel: 'external_send',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'leadgen',
+      action: 'export_sequence',
+      resourceType: 'lead_sequence',
+      resourceIdField: 'destination',
+      sensitiveFields: ['leadIds', 'destination'],
+      logEvents: ['tool.leadgen.export_sequence.approval_requested', 'tool.leadgen.export_sequence.completed'],
+    },
+    executor: unavailableProvider('leadgen', 'leadgen'),
+  },
+  {
+    name: 'voice.transcribe_audio',
+    description: 'Transcribe a previously uploaded audio artifact.',
+    inputSchema: objectSchema({ audioId: stringSchema('Runtime audio artifact ID.'), language: stringSchema('BCP-47 language hint.') }, ['audioId']),
+    parameters: z.object({ audioId: z.string().min(1), language: z.string().optional() }),
+    scopes: ['voice.transcription.create'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'voice',
+      action: 'transcribe_audio',
+      resourceType: 'audio_artifact',
+      resourceIdField: 'audioId',
+      sensitiveFields: ['audioId'],
+      logEvents: ['tool.voice.transcribe_audio.requested', 'tool.voice.transcribe_audio.completed'],
+    },
+    executor: unavailableProvider('voice', 'voice'),
+  },
+  {
+    name: 'voice.speak_text',
+    description: 'Render text to speech for a selected voice profile.',
+    inputSchema: objectSchema({ text: stringSchema('Text to render.'), voice: stringSchema('Voice profile key.'), delivery: stringSchema('Delivery mode: preview, call, or stream.') }, ['text']),
+    parameters: z.object({ text: z.string().min(1), voice: z.string().default('default'), delivery: z.enum(['preview', 'call', 'stream']).default('preview') }),
+    scopes: ['voice.speech.create'],
+    riskLevel: 'external_send',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'voice',
+      action: 'speak_text',
+      resourceType: 'speech_render',
+      sensitiveFields: ['text', 'voice', 'delivery'],
+      logEvents: ['tool.voice.speak_text.approval_requested', 'tool.voice.speak_text.completed'],
+    },
+    executor: unavailableProvider('voice', 'voice'),
+  },
+  {
+    name: 'memory.remember',
+    description: 'Persist a durable memory reference for the current Elora session.',
+    inputSchema: objectSchema({ text: stringSchema('Memory text to store.'), scope: stringSchema('Memory scope: user, project, or session.'), tags: stringArraySchema('Memory tags.') }, ['text']),
+    parameters: z.object({ text: z.string().min(1), scope: z.enum(['user', 'project', 'session']).default('session'), tags: z.array(z.string()).default([]) }),
+    scopes: ['runtime.memory.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'memory',
+      action: 'remember',
+      resourceType: 'memory_reference',
+      sensitiveFields: ['text', 'tags'],
+      logEvents: ['tool.memory.remember.requested', 'tool.memory.remember.completed'],
+    },
+    executor: async (input, context) => remember(context.sessionId, input.text, { scope: input.scope, tags: input.tags }),
+  },
+  {
+    name: 'memory.list',
+    description: 'List recent memory references available to Elora.',
+    inputSchema: objectSchema({ limit: numberSchema('Maximum memories.', { minimum: 1, maximum: 25 }) }),
+    parameters: z.object({ limit: z.number().int().min(1).max(25).default(10) }),
+    scopes: ['runtime.memory.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'memory',
+      action: 'list',
+      resourceType: 'memory_reference',
+      logEvents: ['tool.memory.list.requested', 'tool.memory.list.completed'],
+    },
+    executor: async (input, context) => listMemories(context.sessionId, input.limit),
+  },
+  {
+    name: 'delegation.create_task',
+    description: 'Create a tracked backend task for work that Elora should plan, execute, or await approval for.',
+    inputSchema: objectSchema({ title: stringSchema('Task title.'), notes: stringSchema('Task notes.') }, ['title']),
+    parameters: z.object({ title: z.string().min(1), notes: z.string().optional() }),
+    scopes: ['runtime.delegation.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'delegation',
+      action: 'create_task',
+      resourceType: 'agent_task',
+      sensitiveFields: ['title', 'notes'],
+      logEvents: ['tool.delegation.create_task.requested', 'tool.delegation.create_task.completed'],
+    },
+    executor: async (input, context) => createTask(context.sessionId, input.title, input.notes),
+  },
+  {
+    name: 'delegation.list_tasks',
+    description: 'List task statuses for the current Elora session.',
+    inputSchema: objectSchema({}),
+    parameters: z.object({}),
+    scopes: ['runtime.delegation.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'delegation',
+      action: 'list_tasks',
+      resourceType: 'agent_task',
+      logEvents: ['tool.delegation.list_tasks.requested', 'tool.delegation.list_tasks.completed'],
+    },
+    executor: async (_input, context) => listTasks(context.sessionId),
+  },
+  {
+    name: 'delegation.execute_code',
+    description: 'Reserve a reviewed code-execution task for a dedicated worker bridge; this does not execute code until an approved adapter is configured.',
+    inputSchema: objectSchema({ taskId: stringSchema('Delegation task ID.'), command: stringSchema('Command or script to execute.'), workingDirectory: stringSchema('Working directory.') }, ['taskId', 'command']),
+    parameters: z.object({ taskId: z.string().min(1), command: z.string().min(1), workingDirectory: z.string().default('.') }),
+    scopes: ['runtime.delegation.execute'],
+    riskLevel: 'code_execution',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'delegation',
+      action: 'execute_code',
+      resourceType: 'worker_execution',
+      resourceIdField: 'taskId',
+      sensitiveFields: ['command', 'workingDirectory'],
+      logEvents: ['tool.delegation.execute_code.approval_requested', 'tool.delegation.execute_code.completed'],
+    },
+    executor: unavailableProvider('delegation', 'worker-bridge'),
+  },
 ];
 
-export const toolManifest = runtimeTools.map((runtimeTool) => ({
-  name: runtimeTool.name,
-  description: runtimeTool.description,
-}));
+const registryByName = new Map(toolRegistry.map((definition) => [definition.name, definition]));
+
+function toRuntimeTool(definition: RegisteredToolDefinition) {
+  return tool({
+    name: definition.name,
+    description: definition.description,
+    parameters: definition.parameters,
+    async execute(input, runContext) {
+      const context = runContext.context as RuntimeContext;
+      const result = await definition.executor(input, context);
+      return {
+        ok: true,
+        tool: definition.name,
+        riskLevel: definition.riskLevel,
+        humanApprovalRequired: definition.humanApprovalRequired,
+        audit: {
+          ...definition.audit,
+          requestedAt: new Date().toISOString(),
+          sessionId: context.sessionId,
+        },
+        result,
+      };
+    },
+  });
+}
+
+export function getRegisteredTool(name: string) {
+  return registryByName.get(name);
+}
+
+export const runtimeTools = toolRegistry.map(toRuntimeTool);
+
+export const toolManifest = toolRegistry.map(({ executor: _executor, parameters: _parameters, ...definition }) => definition);
+
+export const toolCategories = [...new Set(toolRegistry.map((definition) => definition.audit.category))];

@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { toolManifest } from '../tools/registry.js';
+import { toolCategories, toolManifest } from '../tools/registry.js';
 
 export const toolsRouter = Router();
 
 toolsRouter.get('/', (_req, res) => {
-  res.json({ tools: toolManifest });
+  res.json({ categories: toolCategories, tools: toolManifest });
 });

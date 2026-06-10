@@ -1,4 +1,4 @@
-// Minimal visual-shell entrypoint retained for react-scripts; do not reconnect legacy providers here without review.
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';

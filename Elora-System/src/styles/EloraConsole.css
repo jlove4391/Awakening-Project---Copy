@@ -67,3 +67,15 @@
   font-weight: 700;
   padding: 0.75rem 1rem;
 }
+
+.runtime-list {
+  margin: 0.35rem 0 0.9rem;
+  padding-left: 1.25rem;
+  color: var(--text-secondary, #cfc7ff);
+}
+
+.console-input-form button:disabled,
+.console-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}

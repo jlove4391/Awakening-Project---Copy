@@ -61,7 +61,7 @@ export async function saveRecord(record: SessionRecord) {
   await fs.writeFile(recordPath(record.id), `${JSON.stringify(record, null, 2)}\n`);
 }
 
-export async function getRuntimeContext(sessionId = randomUUID()): Promise<RuntimeContext> {
+export async function getRuntimeContext(sessionId: string = randomUUID()): Promise<RuntimeContext> {
   const record = await loadRecord(sessionId);
   let session = sessions.get(sessionId);
 

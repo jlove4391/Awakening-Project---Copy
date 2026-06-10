@@ -29,10 +29,37 @@ export interface SessionRecord {
   updatedAt: string;
 }
 
+export type RuntimeChannel = 'text' | 'voice';
+
+export interface VoiceApprovalPolicy {
+  allowHighRiskActions: boolean;
+  maxHighRiskActions: number;
+  approvedHighRiskActions: number;
+  approvalNote?: string;
+  mode?: 'browser_session' | 'phone_call' | 'meeting';
+  lockedReason?: string;
+}
+
 export interface RuntimeContext {
   sessionId: string;
   session: Session;
   record: SessionRecord;
+  channel?: RuntimeChannel;
+  voiceSessionId?: string;
+  voiceApproval?: VoiceApprovalPolicy;
+}
+
+export interface AgentMessageRequest {
+  message?: string;
+  sessionId?: string;
+  channel?: RuntimeChannel;
+  voiceSessionId?: string;
+  voiceApproval?: VoiceApprovalPolicy;
+}
+
+export interface AgentMessageEvent {
+  event: 'session' | 'memory' | 'runtime_event' | 'delta' | 'completed' | 'error';
+  data: any;
 }
 
 export interface ChatRequestBody {

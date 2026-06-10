@@ -512,13 +512,62 @@ export const toolRegistry: RegisteredToolDefinition[] = [
 
 const registryByName = new Map(toolRegistry.map((definition) => [definition.name, definition]));
 
+function isHighRisk(definition: RegisteredToolDefinition) {
+  return definition.riskLevel !== 'read';
+}
+
+function approvalBlockedResult(definition: RegisteredToolDefinition, context: RuntimeContext, reason: string) {
+  return {
+    ok: false,
+    tool: definition.name,
+    riskLevel: definition.riskLevel,
+    humanApprovalRequired: definition.humanApprovalRequired,
+    audit: {
+      ...definition.audit,
+      blockedAt: new Date().toISOString(),
+      sessionId: context.sessionId,
+      channel: context.channel || 'text',
+      voiceSessionId: context.voiceSessionId,
+    },
+    result: {
+      status: 'approval_required',
+      reason,
+      message: context.voiceApproval?.lockedReason || `The ${definition.name} action requires explicit approval before it can run.`,
+    },
+  };
+}
+
+function enforceApprovalLimits(definition: RegisteredToolDefinition, input: any, context: RuntimeContext) {
+  if (definition.humanApprovalRequired && input?.confirmedByUser !== true) {
+    return approvalBlockedResult(definition, context, 'missing_explicit_user_approval');
+  }
+
+  if (context.channel === 'voice' && isHighRisk(definition)) {
+    const policy = context.voiceApproval;
+    if (!policy?.allowHighRiskActions) {
+      return approvalBlockedResult(definition, context, 'voice_high_risk_actions_not_approved');
+    }
+
+    if (policy.approvedHighRiskActions >= policy.maxHighRiskActions) {
+      return approvalBlockedResult(definition, context, 'voice_high_risk_action_limit_exhausted');
+    }
+
+    policy.approvedHighRiskActions += 1;
+  }
+
+  return undefined;
+}
+
 function toRuntimeTool(definition: RegisteredToolDefinition) {
   return tool({
     name: definition.name,
     description: definition.description,
-    parameters: definition.parameters,
-    async execute(input, runContext) {
-      const context = runContext.context as RuntimeContext;
+    parameters: definition.inputSchema as any,
+    async execute(input: any, runContext: any) {
+      const context = runContext?.context as RuntimeContext;
+      const approvalBlock = enforceApprovalLimits(definition, input, context);
+      if (approvalBlock) return approvalBlock;
+
       const result = await definition.executor(input, context);
       return {
         ok: true,
@@ -529,15 +578,17 @@ function toRuntimeTool(definition: RegisteredToolDefinition) {
           ...definition.audit,
           requestedAt: new Date().toISOString(),
           sessionId: context.sessionId,
+          channel: context.channel || 'text',
+          voiceSessionId: context.voiceSessionId,
         },
         result,
       };
     },
-  });
+  } as any);
 }
 
 export function getRegisteredTool(name: string) {
-  return registryByName.get(name);
+  return registryByName.get(name as RegisteredToolDefinition['name']);
 }
 
 export const runtimeTools = toolRegistry.map(toRuntimeTool);

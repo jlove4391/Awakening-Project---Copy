@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import '../styles/theme.css';
 import '../styles/EloraConsole.css';
 
@@ -28,17 +28,60 @@ const parseSseChunk = (chunk) => {
     .filter(Boolean);
 };
 
+const blobToBase64 = (blob) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result || '').split(',')[1] || '');
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
+const supportedRecorderMimeType = () => {
+  if (!window.MediaRecorder) return undefined;
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+  return candidates.find((candidate) => window.MediaRecorder.isTypeSupported(candidate));
+};
+
 const EloraConsole = () => {
   const [input, setInput] = useState('');
   const [log, setLog] = useState(initialLog);
   const [isStreaming, setIsStreaming] = useState(false);
   const [sessionId, setSessionId] = useState(() => window.localStorage.getItem('elora-session-id') || undefined);
+  const [voiceSessionId, setVoiceSessionId] = useState(() => window.localStorage.getItem('elora-voice-session-id') || undefined);
   const [toolEvents, setToolEvents] = useState([]);
   const [taskStatus, setTaskStatus] = useState('idle');
   const [memoryRefs, setMemoryRefs] = useState([]);
+  const [voiceConfig, setVoiceConfig] = useState(null);
+  const [selectedVoice, setSelectedVoice] = useState(() => window.localStorage.getItem('elora-voice-profile') || 'marin');
+  const [isRecording, setIsRecording] = useState(false);
+  const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
   const activeAssistantIndex = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const audioRef = useRef(null);
 
-  const statusText = useMemo(() => (isStreaming ? 'streaming' : 'ready'), [isStreaming]);
+  const statusText = useMemo(() => (isStreaming || isVoiceProcessing ? 'streaming' : 'ready'), [isStreaming, isVoiceProcessing]);
+  const voiceProviderStatus = voiceConfig?.provider === 'openai' ? 'OpenAI voice ready' : 'voice provider not configured';
+
+  useEffect(() => {
+    let mounted = true;
+    fetch(`${runtimeBaseUrl}/api/voice/config`)
+      .then((response) => (response.ok ? response.json() : undefined))
+      .then((config) => {
+        if (!mounted || !config) return;
+        setVoiceConfig(config);
+        setSelectedVoice((current) => (config.voices?.includes(current) ? current : config.defaultVoice || 'marin'));
+      })
+      .catch((error) => {
+        if (mounted) setVoiceConfig({ provider: 'not_configured', voices: ['marin'], defaultVoice: 'marin', error: error.message });
+      });
+    return () => {
+      mounted = false;
+      if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
+      mediaRecorderRef.current?.stream?.getTracks?.().forEach((track) => track.stop());
+    };
+  }, []);
 
   const logMessage = (text, from = 'elora') => {
     setLog((prev) => [...prev.slice(-100), { text, from, timestamp: Date.now() }]);
@@ -122,6 +165,104 @@ const EloraConsole = () => {
     if (buffer.trim()) parseSseChunk(buffer).forEach(handleRuntimeEvent);
   };
 
+  const ensureVoiceSession = async () => {
+    if (voiceSessionId) return voiceSessionId;
+    const response = await fetch(`${runtimeBaseUrl}/api/voice/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, speaker: 'user' }),
+    });
+    if (!response.ok) throw new Error(`Unable to create voice session (${response.status})`);
+    const data = await response.json();
+    const nextVoiceSessionId = data.voiceSession.id;
+    setVoiceSessionId(nextVoiceSessionId);
+    window.localStorage.setItem('elora-voice-session-id', nextVoiceSessionId);
+    if (data.voiceSession.agentSessionId) {
+      setSessionId(data.voiceSession.agentSessionId);
+      window.localStorage.setItem('elora-session-id', data.voiceSession.agentSessionId);
+    }
+    return nextVoiceSessionId;
+  };
+
+  const playVoiceAudio = async (synthesis) => {
+    if (!synthesis?.audioBase64 || !audioRef.current) return;
+    audioRef.current.src = `data:${synthesis.mimeType || 'audio/mpeg'};base64,${synthesis.audioBase64}`;
+    await audioRef.current.play();
+  };
+
+  const processVoiceBlob = async (blob) => {
+    setIsVoiceProcessing(true);
+    setTaskStatus('voice processing');
+    try {
+      const nextVoiceSessionId = await ensureVoiceSession();
+      const audioBase64 = await blobToBase64(blob);
+      const response = await fetch(`${runtimeBaseUrl}/api/voice/transcriptions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          voiceSessionId: nextVoiceSessionId,
+          audioBase64,
+          audioMimeType: blob.type || 'audio/webm',
+          voice: selectedVoice,
+          respond: true,
+        }),
+      });
+      if (!response.ok) throw new Error(`Voice runtime returned ${response.status}`);
+      const data = await response.json();
+      if (data.voiceSession?.agentSessionId) {
+        setSessionId(data.voiceSession.agentSessionId);
+        window.localStorage.setItem('elora-session-id', data.voiceSession.agentSessionId);
+      }
+      if (data.transcription?.text) logMessage(`> ${data.transcription.text}`, 'user');
+      if (data.agent?.text) logMessage(data.agent.text, 'elora');
+      if (data.synthesis?.status === 'completed') await playVoiceAudio(data.synthesis);
+      if (data.synthesis?.status === 'synthesis_pending') logMessage(data.synthesis.message, 'system');
+      setTaskStatus(data.status || 'voice completed');
+    } catch (error) {
+      setTaskStatus('voice error');
+      logMessage(`Voice error: ${error.message}`, 'system');
+    } finally {
+      setIsVoiceProcessing(false);
+    }
+  };
+
+  const handleStartRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      logMessage('This browser does not support MediaRecorder microphone capture.', 'system');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = supportedRecorderMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        stream.getTracks().forEach((track) => track.stop());
+        processVoiceBlob(blob);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+      setTaskStatus('listening');
+    } catch (error) {
+      logMessage(`Microphone unavailable: ${error.message}`, 'system');
+    }
+  };
+
+  const handleStopRecording = () => {
+    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
+    setIsRecording(false);
+  };
+
+  const handleVoiceChange = (event) => {
+    setSelectedVoice(event.target.value);
+    window.localStorage.setItem('elora-voice-profile', event.target.value);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     const trimmed = input.trim();
@@ -159,6 +300,8 @@ const EloraConsole = () => {
       <div className="console-metrics">
         <p>Runtime: {statusText}</p>
         <p>Session: {sessionId || 'pending backend session'}</p>
+        <p>Voice Session: {voiceSessionId || 'pending browser voice session'}</p>
+        <p>Voice Provider: {voiceProviderStatus}</p>
         <p>Task Status: {taskStatus}</p>
         <p>Tool Calls / Approvals:</p>
         <ul className="runtime-list">
@@ -168,6 +311,22 @@ const EloraConsole = () => {
         <ul className="runtime-list">
           {memoryRefs.length ? memoryRefs.map((item) => <li key={item.id}>{item.text}</li>) : <li>none yet</li>}
         </ul>
+      </div>
+
+      <div className="voice-controls" aria-label="Browser verbal chat controls">
+        <div>
+          <label htmlFor="voice-select">Elora voice</label>
+          <select id="voice-select" value={selectedVoice} onChange={handleVoiceChange} disabled={isRecording || isVoiceProcessing}>
+            {(voiceConfig?.voices || [selectedVoice]).map((voice) => (
+              <option key={voice} value={voice}>{voice}</option>
+            ))}
+          </select>
+        </div>
+        <button type="button" onClick={isRecording ? handleStopRecording : handleStartRecording} disabled={isVoiceProcessing || isStreaming}>
+          {isRecording ? 'Stop & Send' : 'Hold to Record Voice'}
+        </button>
+        <p>{voiceConfig?.disclosure || 'Elora voice responses are AI-generated audio when a provider is configured.'}</p>
+        <audio ref={audioRef} controls className="voice-playback">Your browser does not support audio playback.</audio>
       </div>
 
       <form onSubmit={handleSubmit} className="console-input-form">

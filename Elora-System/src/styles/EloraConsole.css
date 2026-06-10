@@ -79,3 +79,59 @@
   cursor: not-allowed;
   opacity: 0.65;
 }
+
+.voice-controls {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: end;
+  margin: 0 0 1rem;
+  padding: 1rem;
+  border: 1px solid rgba(255, 215, 0, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.voice-controls label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--text-secondary, #cfc7ff);
+  font-size: 0.9rem;
+}
+
+.voice-controls select {
+  width: 100%;
+  background: #111;
+  color: var(--text-primary, #f0f0f0);
+  border: 1px solid var(--gold, #ffd700);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+}
+
+.voice-controls button {
+  background: var(--gold-deep, #ad9142);
+  color: #080808;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
+}
+
+.voice-controls p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-secondary, #cfc7ff);
+  font-size: 0.9rem;
+}
+
+.voice-playback {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.voice-controls button:disabled,
+.voice-controls select:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}

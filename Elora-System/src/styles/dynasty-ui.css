@@ -286,3 +286,19 @@ body {
   line-height: 1.5;
   margin: 0.35rem 0 0;
 }
+
+.sidebar-link {
+  border-radius: 14px;
+  display: inline-flex;
+  line-height: 0;
+  outline: none;
+}
+
+.sidebar-link:focus-visible {
+  box-shadow: 0 0 0 2px rgba(255, 222, 172, 0.65);
+}
+
+.sidebar-link-active .sidebar-icon {
+  filter: brightness(1.2) drop-shadow(0 0 8px rgba(209, 170, 100, 0.55));
+  transform: scale(1.08);
+}

@@ -1,53 +1,33 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 
 import Sidebar from './components/UI/Sidebar';
 import HomeDashboard from './components/HomeDashboard';
 import EloraConsole from './components/EloraConsole';
+import NexoraConsole from './components/NexoraConsole';
+import RuntimeStatus from './components/RuntimeStatus';
 
 import './styles/dynasty-ui.css';
 import './styles/HomeDashboard.css';
 import './styles/EloraConsole.css';
 import './styles/nexoraConsole.css';
 
-const NexoraShell = () => (
-  <div className="console-panel">
+const NotFound = () => (
+  <section className="console-panel" aria-labelledby="not-found-title">
     <div className="console-header">
-      <img src="/assets/crests/nexora.png" alt="Nexora Crest" className="crest-icon" />
-      <h1>Nexora – Execution Shell</h1>
+      <img src="/assets/icons/scroll.png" alt="" className="crest-icon" aria-hidden="true" />
+      <h1 id="not-found-title">Route not found</h1>
     </div>
     <div className="console-log">
       <div>
-        <strong>Nexora:</strong> Backend bridge logic has been archived. This route now serves as a visual placeholder for the next implementation pass.
+        <strong>System:</strong> This path is outside the minimal Elora route tree.
       </div>
-    </div>
-    <div className="console-metrics">
-      <p>Execution Bridge: Archived</p>
-      <div className="bar-bg">
-        <div className="bar-fill" style={{ width: '12%', background: '#d1aa64' }} />
-      </div>
-      <p>Review archived code before reconnecting services.</p>
-    </div>
-  </div>
-);
-
-const SettingsStatusShell = () => (
-  <div className="console-panel">
-    <div className="console-header">
-      <img src="/assets/icons/override.png" alt="Settings" className="crest-icon" />
-      <h1>Settings / Status</h1>
-    </div>
-    <div className="console-log">
       <div>
-        <strong>System:</strong> The new app is a visual shell. Archived integrations are reference-only until reviewed and rebuilt.
+        Return to the <Link to="/">dashboard</Link>, or open <Link to="/elora">Elora</Link>,{' '}
+        <Link to="/nexora">Nexora</Link>, or <Link to="/status">status</Link>.
       </div>
     </div>
-    <div className="console-metrics">
-      <p>Visual shell: Active</p>
-      <p>Legacy imports: Disabled</p>
-      <p>Routes: Dashboard, Elora, Nexora, Settings/Status</p>
-    </div>
-  </div>
+  </section>
 );
 
 function App() {
@@ -59,10 +39,10 @@ function App() {
           <Routes>
             <Route path="/" element={<HomeDashboard />} />
             <Route path="/elora" element={<EloraConsole />} />
-            <Route path="/nexora" element={<NexoraShell />} />
-            <Route path="/settings" element={<SettingsStatusShell />} />
-            <Route path="/status" element={<SettingsStatusShell />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="/nexora" element={<NexoraConsole />} />
+            <Route path="/settings" element={<RuntimeStatus />} />
+            <Route path="/status" element={<RuntimeStatus />} />
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </main>
       </div>

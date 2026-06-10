@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import '../styles/dynasty-ui.css';
+import ExecutionReceiptsPanel from './ExecutionReceiptsPanel';
 import '../styles/HomeDashboard.css';
 
 const routeCards = [
@@ -86,6 +87,8 @@ const HomeDashboard = () => {
           </p>
         </div>
       </section>
+
+      <ExecutionReceiptsPanel />
 
       <section className="dynasty-section" aria-labelledby="route-card-title">
         <h2 id="route-card-title" className="section-title">Active Routes</h2>

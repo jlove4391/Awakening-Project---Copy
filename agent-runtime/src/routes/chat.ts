@@ -1,5 +1,6 @@
 import { Router } from 'express';
 
+import { runAgentMessage } from '../agentEndpoint.js';
 import { setupSse, sendEvent } from '../lib/sse.js';
 import type { ChatRequestBody } from '../types.js';
 
@@ -21,6 +22,9 @@ chatRouter.post('/', async (req, res, next) => {
   setupSse(res);
 
   try {
+    await runAgentMessage({ message, sessionId, agent }, async (runtimeEvent) => {
+      sendEvent(res, runtimeEvent.event, runtimeEvent.data);
+    });
 
     res.end();
   } catch (error) {

@@ -2,6 +2,12 @@ import { tool } from '@openai/agents';
 import { z } from 'zod';
 import { listMemories, remember } from '../memory/index.js';
 import { writeToolAuditLog, sanitizeAuditInput } from '../audit/auditLogger.js';
+import {
+  completeExecutionRecord,
+  createExecutionRecord,
+  summarizeProviderResponse,
+  writeExecutionRecord,
+} from '../executions.js';
 import { createCalendarEvent, listCalendarEvents } from '../providers/google/calendar.js';
 import { createDriveTextFile, searchDriveFiles } from '../providers/google/drive.js';
 import { searchGmailMessages, sendGmailEmail } from '../providers/google/gmail.js';
@@ -822,12 +828,10 @@ function toRuntimeTool(definition: RegisteredToolDefinition) {
     name: definition.name,
     description: definition.description,
     parameters: definition.parameters,
-    execute: async (input: any, runContext: any) => {
-      const context = runContext?.context as RuntimeContext;
-      const approved = input?.confirmedByUser === true || !definition.humanApprovalRequired;
-      const blocked = enforceApprovalLimits(definition, input, context);
-      if (blocked) return blocked;
 
+      });
+
+      await writeExecutionRecord(executionRecord);
       await writeToolAuditLog({
         event: definition.audit.logEvents[0] || `${definition.name}.requested`,
         tool: definition.name,
@@ -836,28 +840,9 @@ function toRuntimeTool(definition: RegisteredToolDefinition) {
         humanApprovalRequired: definition.humanApprovalRequired,
         approved,
         workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
-        input: sanitizeAuditInput(input || {}, definition.audit.sensitiveFields),
+        input: sanitizedInput,
       });
 
-      const result = await definition.executor(input, context);
-      await writeToolAuditLog({
-        event: definition.audit.logEvents.at(-1) || `${definition.name}.completed`,
-        tool: definition.name,
-        sessionId: context.sessionId,
-        riskLevel: definition.riskLevel,
-        humanApprovalRequired: definition.humanApprovalRequired,
-        approved,
-        workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
-        resultStatus: typeof result === 'object' && result && 'status' in result ? String((result as { status?: unknown }).status) : 'completed',
-      });
-      return {
-        ok: true,
-        tool: definition.name,
-        riskLevel: definition.riskLevel,
-        humanApprovalRequired: definition.humanApprovalRequired,
-        audit: definition.audit,
-        result,
-      };
     },
   } as any);
 }
@@ -867,8 +852,7 @@ export function getRegisteredTool(name: string) {
 }
 
 export function runtimeToolsForCategories(categories: ToolCategory[]) {
-  const selected = new Set(categories);
-  return toolRegistry.filter((definition) => selected.has(definition.audit.category)).map(toRuntimeTool);
+
 }
 
 export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'voice', 'memory', 'delegation'];

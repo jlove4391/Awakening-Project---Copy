@@ -6,6 +6,7 @@ import { chatRouter } from './routes/chat.js';
 import { toolsRouter } from './routes/tools.js';
 import { tasksRouter } from './routes/tasks.js';
 import { voiceRouter } from './routes/voice.js';
+import { executionsRouter } from './routes/executions.js';
 import { googleAuthRouter } from './providers/google/auth.js';
 import { attachTelephonyMediaStream } from './voice/telephonyStream.js';
 
@@ -22,6 +23,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/chat', chatRouter);
 app.use('/api/tools', toolsRouter);
 app.use('/api/tasks', tasksRouter);
+app.use('/api/executions', executionsRouter);
 app.use('/api/voice', voiceRouter);
 app.use('/api/auth/google', googleAuthRouter);
 

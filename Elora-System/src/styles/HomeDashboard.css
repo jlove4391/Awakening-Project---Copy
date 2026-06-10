@@ -168,3 +168,164 @@
   border-color: rgba(224, 92, 92, 0.55);
   color: #ffaaa3;
 }
+
+.execution-receipts-panel {
+  background: rgba(21, 18, 16, 0.94);
+  border: 1px solid var(--flame-border, rgba(209, 170, 100, 0.35));
+  border-radius: 18px;
+  box-shadow: 0 0 18px rgba(209, 170, 100, 0.12);
+  color: var(--flame-text, #e7cfa5);
+  display: grid;
+  gap: 1rem;
+  margin: 1.5rem 0;
+  padding: 1.25rem;
+}
+
+.execution-receipts-header {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.execution-status-ready {
+  border-color: #8bcf8b;
+  color: #a8f5a8;
+}
+
+.execution-status-loading {
+  border-color: #d1aa64;
+  color: #d1aa64;
+}
+
+.execution-status-error {
+  border-color: rgba(224, 92, 92, 0.75);
+  color: #ffaaa3;
+}
+
+.execution-panel-error,
+.execution-empty-state {
+  background: rgba(0, 0, 0, 0.24);
+  border: 1px solid rgba(209, 170, 100, 0.18);
+  border-radius: 12px;
+  color: #d9c8aa;
+  padding: 1rem;
+}
+
+.execution-panel-error {
+  border-color: rgba(224, 92, 92, 0.45);
+  color: #ffb7b0;
+}
+
+.execution-record-list {
+  display: grid;
+  gap: 0.85rem;
+  max-height: 620px;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
+.execution-record-card {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(209, 170, 100, 0.2);
+  border-radius: 14px;
+  display: grid;
+  gap: 0.65rem;
+  padding: 1rem;
+}
+
+.execution-record-topline,
+.execution-record-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  justify-content: space-between;
+}
+
+.execution-record-topline strong {
+  color: #ffe2aa;
+  letter-spacing: 0.02em;
+}
+
+.execution-record-meta {
+  color: #d9c8aa;
+  font-size: 0.82rem;
+  justify-content: flex-start;
+  text-transform: uppercase;
+}
+
+.execution-risk {
+  border: 1px solid rgba(209, 170, 100, 0.4);
+  border-radius: 999px;
+  color: #e7cfa5;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  text-transform: uppercase;
+}
+
+.execution-risk-read {
+  border-color: rgba(139, 207, 139, 0.5);
+  color: #a8f5a8;
+}
+
+.execution-risk-write,
+.execution-risk-external-send {
+  border-color: rgba(209, 170, 100, 0.75);
+  color: #f5c878;
+}
+
+.execution-risk-purchase-or-commit,
+.execution-risk-code-execution {
+  border-color: rgba(224, 92, 92, 0.75);
+  color: #ffaaa3;
+}
+
+.execution-receipt-summary,
+.execution-provider-summary,
+.execution-error-summary {
+  margin: 0;
+}
+
+.execution-receipt-summary {
+  color: #f4dfb7;
+  font-weight: 600;
+}
+
+.execution-provider-summary {
+  color: #cdbb9b;
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
+.execution-error-summary {
+  color: #ffaaa3;
+  font-size: 0.9rem;
+}
+
+.execution-detail-grid {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 0;
+}
+
+.execution-detail-grid div {
+  min-width: 0;
+}
+
+.execution-detail-grid dt {
+  color: #a88f66;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.execution-detail-grid dd {
+  color: #e7cfa5;
+  margin: 0.15rem 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

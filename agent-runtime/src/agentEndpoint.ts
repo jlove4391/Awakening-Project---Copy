@@ -1,7 +1,8 @@
 import { run } from '@openai/agents';
 import { elora } from './agents/elora.js';
+import { nexora } from './agents/nexora.js';
 import { getRuntimeContext, listMemories, persistRuntimeContext } from './memory/index.js';
-import type { AgentMessageEvent, AgentMessageRequest, RuntimeContext } from './types.js';
+import type { AgentMessageEvent, AgentMessageRequest, RuntimeAgentName, RuntimeContext } from './types.js';
 
 export function extractTextDelta(event: any) {
   if (event?.type === 'raw_model_stream_event') {
@@ -31,10 +32,14 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
   const trimmed = request.message?.trim();
   if (!trimmed) throw new Error('message is required');
 
+  const selectedAgent = (request.agent || 'elora') as RuntimeAgentName;
+  const agent = selectedAgent === 'nexora' ? nexora : elora;
+
   const context = await getRuntimeContext(request.sessionId);
   context.channel = request.channel || 'text';
   context.voiceSessionId = request.voiceSessionId;
   context.voiceApproval = request.voiceApproval;
+  context.agent = selectedAgent;
 
   await sink?.({
     event: 'session',
@@ -44,11 +49,12 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
       providerConversationId: context.record.providerConversationId,
       channel: context.channel,
       voiceSessionId: context.voiceSessionId,
+      agent: selectedAgent,
     },
   });
   await sink?.({ event: 'memory', data: { references: await listMemories(context.sessionId, 5) } });
 
-  const stream = await run(elora, trimmed, {
+  const stream = await run(agent, trimmed, {
     stream: true,
     session: context.session,
     context,
@@ -82,6 +88,7 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
       memories,
       channel: context.channel,
       voiceSessionId: context.voiceSessionId,
+      agent: selectedAgent,
     },
   });
 

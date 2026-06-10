@@ -93,3 +93,78 @@
   font-weight: bold;
   margin-left: 4px;
 }
+
+.google-connection-card {
+  background: rgba(21, 18, 16, 0.92);
+  border: 1px solid var(--flame-border, rgba(209, 170, 100, 0.35));
+  border-radius: 16px;
+  box-shadow: 0 0 14px rgba(209, 170, 100, 0.1);
+  color: var(--flame-text, #e7cfa5);
+  display: grid;
+  gap: 1rem;
+  margin: 1.25rem 0;
+  padding: 1.25rem;
+}
+
+.google-connection-status {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(209, 170, 100, 0.18);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.google-status-pill {
+  display: inline-flex;
+  margin-bottom: 0.6rem;
+}
+
+.google-status-linked {
+  border-color: #8bcf8b;
+  color: #a8f5a8;
+}
+
+.google-status-unlinked {
+  border-color: #d1aa64;
+  color: #d1aa64;
+}
+
+.google-connection-meta {
+  color: #d9c8aa;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 0.75rem 0 0;
+  padding-left: 1.25rem;
+  word-break: break-word;
+}
+
+.google-connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.google-action-button {
+  background: var(--flame-gold, #d1aa64);
+  border: 1px solid rgba(255, 222, 172, 0.35);
+  border-radius: 10px;
+  color: #080808;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.7rem 1rem;
+}
+
+.google-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.google-secondary-button {
+  background: transparent;
+  color: var(--flame-gold, #d1aa64);
+}
+
+.google-danger-button {
+  background: transparent;
+  border-color: rgba(224, 92, 92, 0.55);
+  color: #ffaaa3;
+}

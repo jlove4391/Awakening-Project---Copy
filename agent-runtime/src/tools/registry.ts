@@ -1,6 +1,10 @@
 import { tool } from '@openai/agents';
 import { z } from 'zod';
 import { createTask, listMemories, listTasks, remember } from '../memory/index.js';
+import { createCalendarEvent, listCalendarEvents } from '../providers/google/calendar.js';
+import { createDriveTextFile, searchDriveFiles } from '../providers/google/drive.js';
+import { searchGmailMessages, sendGmailEmail } from '../providers/google/gmail.js';
+import { readSheetRange, updateSheetRange } from '../providers/google/sheets.js';
 import type { RuntimeContext } from '../types.js';
 
 export type ToolCategory =
@@ -76,6 +80,11 @@ const stringArraySchema = (description: string) => ({
   description,
   items: { type: 'string' },
 });
+const approvalBooleanSchema = {
+  type: 'boolean',
+  description: 'Must be true only after explicit user approval for this write/send action.',
+};
+const approvalNoteSchema = stringSchema('Optional note describing the user approval that authorized this action.');
 
 export const toolRegistry: RegisteredToolDefinition[] = [
   {
@@ -107,7 +116,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['timeMin', 'timeMax'],
       logEvents: ['tool.calendar.list_events.requested', 'tool.calendar.list_events.completed'],
     },
-    executor: unavailableProvider('calendar', 'google-calendar'),
+    executor: listCalendarEvents,
   },
   {
     name: 'calendar.create_event',
@@ -120,6 +129,8 @@ export const toolRegistry: RegisteredToolDefinition[] = [
         start: stringSchema('ISO-8601 start time.'),
         end: stringSchema('ISO-8601 end time.'),
         attendees: stringArraySchema('Attendee email addresses.'),
+        confirmedByUser: approvalBooleanSchema,
+        approvalNote: approvalNoteSchema,
       },
       ['summary', 'start', 'end'],
     ),
@@ -130,6 +141,8 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       start: z.string().min(1),
       end: z.string().min(1),
       attendees: z.array(z.string().email()).default([]),
+      confirmedByUser: z.boolean().default(false),
+      approvalNote: z.string().optional(),
     }),
     scopes: ['https://www.googleapis.com/auth/calendar.events'],
     riskLevel: 'write',
@@ -142,7 +155,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['summary', 'description', 'attendees'],
       logEvents: ['tool.calendar.create_event.approval_requested', 'tool.calendar.create_event.completed'],
     },
-    executor: unavailableProvider('calendar', 'google-calendar'),
+    executor: createCalendarEvent,
   },
   {
     name: 'gmail.search_messages',
@@ -159,7 +172,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['query'],
       logEvents: ['tool.gmail.search_messages.requested', 'tool.gmail.search_messages.completed'],
     },
-    executor: unavailableProvider('gmail', 'gmail'),
+    executor: searchGmailMessages,
   },
   {
     name: 'gmail.send_email',
@@ -171,6 +184,8 @@ export const toolRegistry: RegisteredToolDefinition[] = [
         bcc: stringArraySchema('BCC recipient email addresses.'),
         subject: stringSchema('Email subject.'),
         body: stringSchema('Plain-text email body.'),
+        confirmedByUser: approvalBooleanSchema,
+        approvalNote: approvalNoteSchema,
       },
       ['to', 'subject', 'body'],
     ),
@@ -180,6 +195,8 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       bcc: z.array(z.string().email()).default([]),
       subject: z.string().min(1),
       body: z.string().min(1),
+      confirmedByUser: z.boolean().default(false),
+      approvalNote: z.string().optional(),
     }),
     scopes: ['https://www.googleapis.com/auth/gmail.send'],
     riskLevel: 'external_send',
@@ -192,7 +209,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['to', 'cc', 'bcc', 'subject', 'body'],
       logEvents: ['tool.gmail.send_email.approval_requested', 'tool.gmail.send_email.sent'],
     },
-    executor: unavailableProvider('gmail', 'gmail'),
+    executor: sendGmailEmail,
   },
   {
     name: 'drive.search_files',
@@ -209,13 +226,13 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['query'],
       logEvents: ['tool.drive.search_files.requested', 'tool.drive.search_files.completed'],
     },
-    executor: unavailableProvider('drive', 'google-drive'),
+    executor: searchDriveFiles,
   },
   {
     name: 'drive.create_text_file',
     description: 'Create a text file in the connected drive provider.',
     inputSchema: objectSchema(
-      { name: stringSchema('File name.'), parentId: stringSchema('Parent folder ID.'), content: stringSchema('Text content to write.'), mimeType: stringSchema('MIME type.') },
+      { name: stringSchema('File name.'), parentId: stringSchema('Parent folder ID.'), content: stringSchema('Text content to write.'), mimeType: stringSchema('MIME type.'), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema },
       ['name', 'content'],
     ),
     parameters: z.object({
@@ -223,6 +240,8 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       parentId: z.string().optional(),
       content: z.string().min(1),
       mimeType: z.string().default('text/plain'),
+      confirmedByUser: z.boolean().default(false),
+      approvalNote: z.string().optional(),
     }),
     scopes: ['https://www.googleapis.com/auth/drive.file'],
     riskLevel: 'write',
@@ -235,7 +254,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['name', 'content'],
       logEvents: ['tool.drive.create_text_file.approval_requested', 'tool.drive.create_text_file.completed'],
     },
-    executor: unavailableProvider('drive', 'google-drive'),
+    executor: createDriveTextFile,
   },
   {
     name: 'sheets.read_range',
@@ -253,16 +272,16 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['range'],
       logEvents: ['tool.sheets.read_range.requested', 'tool.sheets.read_range.completed'],
     },
-    executor: unavailableProvider('sheets', 'google-sheets'),
+    executor: readSheetRange,
   },
   {
     name: 'sheets.update_range',
     description: 'Update values in a spreadsheet range.',
     inputSchema: objectSchema(
-      { spreadsheetId: stringSchema('Spreadsheet ID.'), range: stringSchema('A1 notation range.'), values: { type: 'array', description: 'Two-dimensional row values.', items: { type: 'array', items: {} } } },
+      { spreadsheetId: stringSchema('Spreadsheet ID.'), range: stringSchema('A1 notation range.'), values: { type: 'array', description: 'Two-dimensional row values.', items: { type: 'array', items: {} } }, confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema },
       ['spreadsheetId', 'range', 'values'],
     ),
-    parameters: z.object({ spreadsheetId: z.string().min(1), range: z.string().min(1), values: z.array(z.array(z.unknown())) }),
+    parameters: z.object({ spreadsheetId: z.string().min(1), range: z.string().min(1), values: z.array(z.array(z.unknown())), confirmedByUser: z.boolean().default(false), approvalNote: z.string().optional() }),
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     riskLevel: 'write',
     humanApprovalRequired: true,
@@ -274,7 +293,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['range', 'values'],
       logEvents: ['tool.sheets.update_range.approval_requested', 'tool.sheets.update_range.completed'],
     },
-    executor: unavailableProvider('sheets', 'google-sheets'),
+    executor: updateSheetRange,
   },
   {
     name: 'crm.lookup_contact',

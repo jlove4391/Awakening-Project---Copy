@@ -10,3 +10,5 @@ dist/
 coverage/
 *.zip
 *.log
+# Agent runtime local state
+agent-runtime/.runtime-data/

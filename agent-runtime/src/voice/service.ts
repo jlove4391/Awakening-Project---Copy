@@ -155,7 +155,12 @@ export function getVoiceRuntimeConfig() {
     defaultVoice: normalizeVoice(runtimeConfig.voiceSpeechVoice),
     voices: OPENAI_TTS_VOICES,
     responseFormat: normalizeAudioFormat(runtimeConfig.voiceSpeechFormat),
-    disclosure: 'Elora voice responses are AI-generated audio.',
+    disclosure: 'Elora browser voice is limited to the conversational text loop; phone telephony remains gated until runtime approvals, receipts, and delegation are stable.',
+    telephony: {
+      provider: 'twilio',
+      configured: isTwilioConfigured(),
+      ...telephonyReadiness(),
+    },
   };
 }
 
@@ -238,7 +243,9 @@ function strictCallApprovalPolicy(approvalNote?: string): VoiceApprovalPolicy {
     approvedHighRiskActions: 0,
     approvalNote,
     mode: 'phone_call',
-    lockedReason: 'Phone-call sessions cannot execute write, external-send, purchase/commit, or code-execution tools. Escalate to text approval after the call.',
+    lockedReason: 'Phone-call sessions cannot execute write, external-send, purchase/commit, or any code tools. Escalate to text approval after the call.',
+    lockedToolCategories: ['code'],
+    lockedRiskLevels: ['write', 'external_send', 'purchase_or_commit', 'code_execution'],
   };
 }
 
@@ -274,6 +281,23 @@ function isTwilioConfigured() {
   return Boolean(runtimeConfig.twilioAccountSid && runtimeConfig.twilioAuthToken && runtimeConfig.twilioFromNumber);
 }
 
+function telephonyReadiness() {
+  const checks = {
+    textLoop: runtimeConfig.voiceTextLoopReady,
+    approvalUi: runtimeConfig.voiceApprovalUiReady,
+    executionReceipts: runtimeConfig.voiceExecutionReceiptsReady,
+    delegationE2E: runtimeConfig.voiceDelegationE2EReady,
+  };
+  const missing = Object.entries(checks)
+    .filter(([, ready]) => !ready)
+    .map(([name]) => name);
+  return { ready: missing.length === 0, missing };
+}
+
+function telephonyNotReadyMessage(missing: string[]) {
+  return `Telephony is gated until voice prerequisites pass: ${missing.join(', ')}.`;
+}
+
 function callbackApprovalRequired(message: string) {
   return {
     status: 'approval_required' as const,
@@ -288,6 +312,16 @@ function callbackApprovalRequired(message: string) {
 }
 
 async function createTwilioOutboundCall(input: { to: string; from?: string; voiceSessionId: string }) {
+  const readiness = telephonyReadiness();
+  if (!readiness.ready) {
+    return {
+      provider: 'twilio' as const,
+      status: 'not_ready' as const,
+      message: telephonyNotReadyMessage(readiness.missing),
+      missingPrerequisites: readiness.missing,
+    };
+  }
+
   if (!isTwilioConfigured()) {
     return {
       provider: 'twilio' as const,
@@ -562,9 +596,11 @@ export async function initiateOutboundCall(input: {
     provider: providerResult.provider,
     providerResult,
     message:
-      providerResult.status === 'not_configured'
-        ? 'Outbound call approval was recorded, but no telephony adapter credentials are configured yet.'
-        : 'Outbound call submitted to the telephony provider.',
+      providerResult.status === 'not_ready'
+        ? providerResult.message
+        : providerResult.status === 'not_configured'
+          ? 'Outbound call approval was recorded, but no telephony adapter credentials are configured yet.'
+          : 'Outbound call submitted to the telephony provider.',
   };
 }
 
@@ -689,6 +725,16 @@ export async function createInboundTelephonyWebhook(input: {
   callSid?: string;
   accountSid?: string;
 }) {
+  const readiness = telephonyReadiness();
+  if (!readiness.ready) {
+    return {
+      status: 'not_ready' as const,
+      message: telephonyNotReadyMessage(readiness.missing),
+      missingPrerequisites: readiness.missing,
+      twiml: '<Response><Say>Elora phone voice is not enabled yet.</Say></Response>',
+    };
+  }
+
   const voiceSession = await createInboundVoiceSession({
     caller: input.from,
     callee: input.to,
@@ -989,7 +1035,12 @@ export async function transcribeAudio(input: { voiceSessionId: string; audioId?:
     voiceSession: updated,
     transcription: { text, language: input.language, speaker: input.speaker },
     agent: { text: assistantText, finalOutput: agentResult.finalOutput, runtimeEvents: agentResult.runtimeEvents },
-    synthesis: await synthesizeSpeech({ voiceSession: updated, text: assistantText, voice: input.voice, delivery: record.direction === 'meeting' ? 'preview' : 'call' }),
+    synthesis: await synthesizeSpeech({
+      voiceSession: updated,
+      text: assistantText,
+      voice: input.voice,
+      delivery: record.channelKind === 'phone_call' ? 'call' : 'preview',
+    }),
   };
 }
 

@@ -25,6 +25,7 @@
     "test": "npm run test:shared && npm run test:agent-runtime && npm run test:web",
     "test:web": "npm --workspace @awakening/web run test -- --watchAll=false",
     "test:agent-runtime": "npm --workspace @awakening/agent-runtime run test",
-    "test:shared": "npm --workspace @awakening/shared run test"
+    "test:shared": "npm --workspace @awakening/shared run test",
+    "smoke:chat": "npm --workspace @awakening/agent-runtime run smoke:chat --"
   }
 }

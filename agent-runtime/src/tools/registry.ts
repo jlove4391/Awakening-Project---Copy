@@ -875,6 +875,115 @@ function normalizeToolInput(input: unknown): Record<string, unknown> {
   return { value: input };
 }
 
+export async function executeRegisteredTool(name: string, input: unknown, context: RuntimeContext) {
+  const definition = getRegisteredTool(name);
+  if (!definition) throw new Error(`Unknown registered tool: ${name}`);
+  if (!context?.sessionId) throw new Error(`Runtime context is missing for ${definition.name}`);
+
+  const normalizedInput = normalizeToolInput(input);
+  const parsedInput = definition.parameters.parse(normalizedInput) as Record<string, unknown>;
+  const sanitizedInput = sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []);
+  const approved = !definition.humanApprovalRequired || parsedInput.confirmedByUser === true;
+  const executionRecord = createExecutionRecord({
+    kind: 'tool_call',
+    whoRequested: 'user',
+    chosenByAgent: context.agent || 'elora',
+    action: definition.name,
+    inputPayload: sanitizedInput,
+    riskLevel: definition.riskLevel,
+    approvalStatus: definition.humanApprovalRequired ? (approved ? 'approved' : 'pending') : 'not_required',
+    linkedIds: {
+      sessionId: context.sessionId,
+      voiceSessionId: context.voiceSessionId,
+    },
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    receiptSummary: `${definition.name} requested`,
+  });
+
+  await writeToolAuditLog({
+    event: definition.audit.logEvents[0] || `${definition.name}.requested`,
+    tool: definition.name,
+    sessionId: context.sessionId,
+    riskLevel: definition.riskLevel,
+    humanApprovalRequired: definition.humanApprovalRequired,
+    approved,
+    workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
+    input: sanitizedInput,
+  });
+
+  const approvalBlock = enforceApprovalLimits(definition, parsedInput, context);
+  if (approvalBlock) {
+    const blockedRecord = completeExecutionRecord(executionRecord, {
+      status: 'blocked',
+      executionResult: approvalBlock,
+      providerResponseSummary: summarizeProviderResponse(approvalBlock),
+      approvalStatus: 'pending',
+      receiptSummary: `${definition.name} blocked pending approval`,
+    });
+    await writeExecutionRecord(blockedRecord);
+    await writeToolAuditLog({
+      event: `${definition.name}.approval_required`,
+      tool: definition.name,
+      sessionId: context.sessionId,
+      riskLevel: definition.riskLevel,
+      humanApprovalRequired: definition.humanApprovalRequired,
+      approved: false,
+      workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
+      input: sanitizedInput,
+      resultStatus: 'approval_required',
+    });
+    return approvalBlock;
+  }
+
+  try {
+    const result = await definition.executor(parsedInput, context);
+    const completedRecord = completeExecutionRecord(executionRecord, {
+      status: 'completed',
+      executionResult: result,
+      providerResponseSummary: summarizeProviderResponse(result),
+      approvalStatus: approved ? 'approved' : 'not_required',
+      receiptSummary: `${definition.name} completed`,
+    });
+    await writeExecutionRecord(completedRecord);
+    await writeToolAuditLog({
+      event: definition.audit.logEvents[1] || `${definition.name}.completed`,
+      tool: definition.name,
+      sessionId: context.sessionId,
+      riskLevel: definition.riskLevel,
+      humanApprovalRequired: definition.humanApprovalRequired,
+      approved,
+      workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
+      input: sanitizedInput,
+      resultStatus: 'completed',
+    });
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const failedRecord = completeExecutionRecord(executionRecord, {
+      status: 'failed',
+      errors: [message],
+      providerResponseSummary: message,
+      approvalStatus: approved ? 'approved' : 'unknown',
+      receiptSummary: `${definition.name} failed: ${message}`,
+    });
+    await writeExecutionRecord(failedRecord);
+    await writeToolAuditLog({
+      event: `${definition.name}.failed`,
+      tool: definition.name,
+      sessionId: context.sessionId,
+      riskLevel: definition.riskLevel,
+      humanApprovalRequired: definition.humanApprovalRequired,
+      approved,
+      workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
+      input: sanitizedInput,
+      resultStatus: 'failed',
+      error: message,
+    });
+    throw error;
+  }
+}
+
 function toRuntimeTool(definition: RegisteredToolDefinition) {
   return tool({
     name: definition.name,
@@ -884,109 +993,8 @@ function toRuntimeTool(definition: RegisteredToolDefinition) {
     needsApproval: false,
     execute: async (input: any, runContext: any) => {
       const context = runContext?.context as RuntimeContext | undefined;
-      if (!context?.sessionId) throw new Error(`Runtime context is missing for ${definition.name}`);
-
-      const normalizedInput = normalizeToolInput(input);
-      const sanitizedInput = sanitizeAuditInput(normalizedInput, definition.audit.sensitiveFields || []);
-      const approved = !definition.humanApprovalRequired || normalizedInput.confirmedByUser === true;
-      const executionRecord = createExecutionRecord({
-        kind: 'tool_call',
-        whoRequested: 'user',
-        chosenByAgent: context.agent || 'elora',
-        action: definition.name,
-        inputPayload: sanitizedInput,
-        riskLevel: definition.riskLevel,
-        approvalStatus: definition.humanApprovalRequired ? (approved ? 'approved' : 'pending') : 'not_required',
-        linkedIds: {
-          sessionId: context.sessionId,
-          voiceSessionId: context.voiceSessionId,
-        },
-        status: 'running',
-        startedAt: new Date().toISOString(),
-        receiptSummary: `${definition.name} requested`,
-      });
-
-      await writeToolAuditLog({
-        event: definition.audit.logEvents[0] || `${definition.name}.requested`,
-        tool: definition.name,
-        sessionId: context.sessionId,
-        riskLevel: definition.riskLevel,
-        humanApprovalRequired: definition.humanApprovalRequired,
-        approved,
-        workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
-        input: sanitizedInput,
-      });
-
-      const approvalBlock = enforceApprovalLimits(definition, normalizedInput, context);
-      if (approvalBlock) {
-        const blockedRecord = completeExecutionRecord(executionRecord, {
-          status: 'blocked',
-          executionResult: approvalBlock,
-          providerResponseSummary: summarizeProviderResponse(approvalBlock),
-          approvalStatus: 'pending',
-          receiptSummary: `${definition.name} blocked pending approval`,
-        });
-        await writeExecutionRecord(blockedRecord);
-        await writeToolAuditLog({
-          event: `${definition.name}.approval_required`,
-          tool: definition.name,
-          sessionId: context.sessionId,
-          riskLevel: definition.riskLevel,
-          humanApprovalRequired: definition.humanApprovalRequired,
-          approved: false,
-          workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
-          input: sanitizedInput,
-          resultStatus: 'approval_required',
-        });
-        return approvalBlock;
-      }
-
-      try {
-        const result = await definition.executor(input, context);
-        const completedRecord = completeExecutionRecord(executionRecord, {
-          status: 'completed',
-          executionResult: result,
-          providerResponseSummary: summarizeProviderResponse(result),
-          approvalStatus: approved ? 'approved' : 'not_required',
-          receiptSummary: `${definition.name} completed`,
-        });
-        await writeExecutionRecord(completedRecord);
-        await writeToolAuditLog({
-          event: definition.audit.logEvents[1] || `${definition.name}.completed`,
-          tool: definition.name,
-          sessionId: context.sessionId,
-          riskLevel: definition.riskLevel,
-          humanApprovalRequired: definition.humanApprovalRequired,
-          approved,
-          workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
-          input: sanitizedInput,
-          resultStatus: 'completed',
-        });
-        return result;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const failedRecord = completeExecutionRecord(executionRecord, {
-          status: 'failed',
-          errors: [message],
-          providerResponseSummary: message,
-          approvalStatus: approved ? 'approved' : 'unknown',
-          receiptSummary: `${definition.name} failed: ${message}`,
-        });
-        await writeExecutionRecord(failedRecord);
-        await writeToolAuditLog({
-          event: `${definition.name}.failed`,
-          tool: definition.name,
-          sessionId: context.sessionId,
-          riskLevel: definition.riskLevel,
-          humanApprovalRequired: definition.humanApprovalRequired,
-          approved,
-          workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
-          input: sanitizedInput,
-          resultStatus: 'failed',
-          error: message,
-        });
-        throw error;
-      }
+      if (!context) throw new Error(`Runtime context is missing for ${definition.name}`);
+      return executeRegisteredTool(definition.name, input, context);
     },
   } as any);
 }

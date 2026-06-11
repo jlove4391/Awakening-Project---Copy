@@ -53,6 +53,8 @@ export interface VoiceApprovalPolicy {
   approvalNote?: string;
   mode?: 'browser_session' | 'phone_call' | 'meeting';
   lockedReason?: string;
+  lockedToolCategories?: string[];
+  lockedRiskLevels?: string[];
 }
 
 export interface RuntimeContext {

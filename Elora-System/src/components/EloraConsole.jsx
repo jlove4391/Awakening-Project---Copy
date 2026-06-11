@@ -49,6 +49,8 @@ const approvalReasonLabels = {
     "Voice-originated high-risk actions require a browser approval card before execution.",
   voice_high_risk_action_limit_exhausted:
     "The approved voice high-risk action limit was exhausted.",
+  voice_policy_locked_tool:
+    "Phone-call voice sessions cannot run write, send, purchase/commit, code-execution, or code workspace tools during the call.",
 };
 
 const isApprovalRuntimeEvent = (data) => {
@@ -117,6 +119,13 @@ const EloraConsole = () => {
     voiceConfig?.provider === "openai"
       ? "OpenAI voice ready"
       : "voice provider not configured";
+  const telephonyStatus = voiceConfig?.telephony?.ready
+    ? "phone voice gated checks passed"
+    : `phone voice gated${
+        voiceConfig?.telephony?.missing?.length
+          ? `: waiting on ${voiceConfig.telephony.missing.join(", ")}`
+          : ""
+      }`;
 
   const refreshExecutions = () => setExecutionsRefreshKey((key) => key + 1);
 
@@ -488,6 +497,7 @@ const EloraConsole = () => {
           Voice Session: {voiceSessionId || "pending browser voice session"}
         </p>
         <p>Voice Provider: {voiceProviderStatus}</p>
+        <p>Phone Voice: {telephonyStatus}</p>
         <p>Task Status: {taskStatus}</p>
         <p>Tool Calls / Approvals:</p>
         <ul className="runtime-list">
@@ -614,7 +624,7 @@ const EloraConsole = () => {
         </button>
         <p>
           {voiceConfig?.disclosure ||
-            "Elora voice responses are AI-generated audio when a provider is configured."}
+            "Browser voice records a conversational prompt, sends it through the text-loop runtime, and previews AI-generated audio when a provider is configured."}
         </p>
         <audio ref={audioRef} controls className="voice-playback">
           Your browser does not support audio playback.

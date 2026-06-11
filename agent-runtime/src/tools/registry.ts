@@ -875,17 +875,26 @@ function enforceApprovalLimits(definition: RegisteredToolDefinition, input: any,
     return approvalBlockedResult(definition, context, reason, executionId, sanitizedInput);
   }
 
-  if (context.channel === 'voice' && isHighRisk(definition)) {
+  if (context.channel === 'voice') {
     const policy = context.voiceApproval;
-    if (!policy?.allowHighRiskActions) {
-      return approvalBlockedResult(definition, context, 'voice_high_risk_actions_not_approved', executionId, sanitizedInput);
+    const lockedToolCategories = new Set(policy?.lockedToolCategories || []);
+    const lockedRiskLevels = new Set(policy?.lockedRiskLevels || []);
+
+    if (lockedToolCategories.has(definition.audit.category) || lockedRiskLevels.has(definition.riskLevel)) {
+      return approvalBlockedResult(definition, context, 'voice_policy_locked_tool', executionId, sanitizedInput);
     }
 
-    if (policy.approvedHighRiskActions >= policy.maxHighRiskActions) {
-      return approvalBlockedResult(definition, context, 'voice_high_risk_action_limit_exhausted', executionId, sanitizedInput);
-    }
+    if (isHighRisk(definition)) {
+      if (!policy?.allowHighRiskActions) {
+        return approvalBlockedResult(definition, context, 'voice_high_risk_actions_not_approved', executionId, sanitizedInput);
+      }
 
-    policy.approvedHighRiskActions += 1;
+      if (policy.approvedHighRiskActions >= policy.maxHighRiskActions) {
+        return approvalBlockedResult(definition, context, 'voice_high_risk_action_limit_exhausted', executionId, sanitizedInput);
+      }
+
+      policy.approvedHighRiskActions += 1;
+    }
   }
 
   return undefined;

@@ -66,6 +66,18 @@ OAuth endpoints:
 - `GET /api/auth/google/status` reports linked/scope/expiry metadata without access or refresh tokens.
 - `DELETE /api/auth/google/tokens` removes the stored Google tokens.
 
+### Local Google Calendar smoke path
+
+1. Copy `agent-runtime/.env.example` to the runtime env file you use for local development (for example `agent-runtime/.env` or root `.env`, depending on where you start the runtime). Fill in `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, and either `GOOGLE_TOKEN_STORE_KEY` or `MASTER_KEY`. Use `http://localhost:4317/api/auth/google/callback` as the local redirect URI unless you changed `AGENT_RUNTIME_PORT`.
+2. Start the runtime with `npm run dev:agent-runtime`.
+3. Open `GET http://localhost:4317/api/auth/google/start`, copy the returned `url`, complete Google consent, and let Google redirect to `GET /api/auth/google/callback`.
+4. Confirm `GET http://localhost:4317/api/auth/google/status` returns `google.linked: true`.
+5. Run `npm --workspace @awakening/agent-runtime run smoke:google-calendar`. The script calls `calendar.list_events` directly through the same registry execution path used by Elora, prints calendar events (or an empty `events` array), the latest execution receipt, and the matching tool-audit JSONL entry.
+6. Confirm receipts are visible through `GET http://localhost:4317/api/executions?sessionId=local-google-calendar-smoke&limit=5`; `ExecutionReceiptsPanel` polls `/api/executions` and displays the same receipt in the web shell.
+7. Confirm the audit entry exists at `${AGENT_RUNTIME_DATA_DIR:-agent-runtime/.runtime-data}/audit/tool-audit.jsonl`.
+
+Optional smoke variables: `GOOGLE_CALENDAR_ID`, `SMOKE_SESSION_ID`, `SMOKE_TIME_MIN`, `SMOKE_TIME_MAX`, and `SMOKE_MAX_RESULTS`.
+
 Read/list tools execute directly once OAuth is connected. Google write/send tools (`calendar.create_event`, `gmail.send_email`, `drive.create_text_file`, and `sheets.update_range`) are registered with `humanApprovalRequired: true` and fail closed until their input includes `confirmedByUser: true` after explicit user approval.
 
 ## Tool Registry

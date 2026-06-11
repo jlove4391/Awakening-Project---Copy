@@ -7,6 +7,17 @@ This repository uses one clean layout before adding new runtime features:
 - `packages/shared/` — shared task, tool, and runtime event TypeScript contracts.
 - `legacy/` — archived bridge services and older app snapshots retained for reference only.
 
+
+## Local environment files
+
+Use the checked-in example files as safe local templates before starting the web shell or agent runtime:
+
+1. Copy `agent-runtime/.env.example` to `agent-runtime/.env`.
+2. Copy `Elora-System/.env.example` to `Elora-System/.env`.
+3. Fill in only the keys needed for the current phase. Leave unused secrets blank.
+4. Do not commit real `.env` files or local secret values.
+5. Confirm `.gitignore` excludes `.env`, `.env.local`, and runtime data directories while allowing `.env.example` templates to be tracked.
+
 ## Common scripts
 
 Run commands from the repository root after installing dependencies with `npm install`.

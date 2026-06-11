@@ -9,6 +9,9 @@ import {
   writeExecutionRecord,
 } from '../executions.js';
 import { createCalendarEvent, listCalendarEvents } from '../providers/google/calendar.js';
+import { lookupCrmContact, upsertCrmContact } from '../providers/crm/index.js';
+import { enrichPersonWithClay } from '../providers/clay/index.js';
+import { exportSequence, findLeadsWorkflow } from '../workflows/leadgen/index.js';
 import { createDriveTextFile, searchDriveFiles } from '../providers/google/drive.js';
 import { searchGmailMessages, sendGmailEmail } from '../providers/google/gmail.js';
 import { readSheetRange, updateSheetRange } from '../providers/google/sheets.js';
@@ -339,7 +342,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['query'],
       logEvents: ['tool.crm.lookup_contact.requested', 'tool.crm.lookup_contact.completed'],
     },
-    executor: unavailableProvider('crm', 'crm'),
+    executor: lookupCrmContact,
   },
   {
     name: 'crm.upsert_contact',
@@ -360,7 +363,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['email', 'firstName', 'lastName', 'company', 'notes'],
       logEvents: ['tool.crm.upsert_contact.approval_requested', 'tool.crm.upsert_contact.completed'],
     },
-    executor: unavailableProvider('crm', 'crm'),
+    executor: upsertCrmContact,
   },
   {
     name: 'clay.enrich_person',
@@ -378,16 +381,16 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['email', 'linkedinUrl', 'fullName', 'company'],
       logEvents: ['tool.clay.enrich_person.approval_requested', 'tool.clay.enrich_person.completed'],
     },
-    executor: unavailableProvider('clay', 'clay'),
+    executor: enrichPersonWithClay,
   },
   {
     name: 'leadgen.find_leads',
     description: 'Find candidate leads by market, title, geography, and optional buying signals.',
     inputSchema: objectSchema(
-      { market: stringSchema('Target market or ICP.'), titles: stringArraySchema('Target titles.'), geography: stringSchema('Target geography.'), limit: numberSchema('Maximum lead count.', { minimum: 1, maximum: 100 }) },
+      { market: stringSchema('Target market or ICP.'), titles: stringArraySchema('Target titles.'), geography: stringSchema('Target geography.'), buyingSignals: stringArraySchema('Optional buying signals to prioritize.'), limit: numberSchema('Maximum lead count.', { minimum: 1, maximum: 100 }) },
       ['market'],
     ),
-    parameters: z.object({ market: z.string().min(1), titles: z.array(z.string()).default([]), geography: z.string().default(''), limit: z.number().int().min(1).max(100).default(25) }),
+    parameters: z.object({ market: z.string().min(1), titles: z.array(z.string()).default([]), geography: z.string().default(''), buyingSignals: z.array(z.string()).default([]), limit: z.number().int().min(1).max(100).default(25) }),
     scopes: ['leadgen.search.read'],
     riskLevel: 'read',
     humanApprovalRequired: false,
@@ -398,13 +401,13 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['market', 'titles', 'geography'],
       logEvents: ['tool.leadgen.find_leads.requested', 'tool.leadgen.find_leads.completed'],
     },
-    executor: unavailableProvider('leadgen', 'leadgen'),
+    executor: findLeadsWorkflow,
   },
   {
     name: 'leadgen.export_sequence',
     description: 'Export approved leads into an outreach sequence or CRM campaign.',
-    inputSchema: objectSchema({ leadIds: stringArraySchema('Approved lead IDs.'), destination: stringSchema('Destination sequence or campaign identifier.'), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema }, ['leadIds', 'destination']),
-    parameters: z.object({ leadIds: z.array(z.string()).min(1), destination: z.string().min(1), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
+    inputSchema: objectSchema({ leadIds: stringArraySchema('Approved lead IDs.'), destination: stringSchema('Destination sequence or campaign identifier.'), writeToCrm: { type: 'boolean', description: 'Whether to create/update CRM contacts for exported leads.' }, sendExternally: { type: 'boolean', description: 'Whether this export should initiate an external send via the destination adapter.' }, followUpDays: numberSchema('Days until follow-up is due.', { minimum: 1, maximum: 60 }), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema }, ['leadIds', 'destination']),
+    parameters: z.object({ leadIds: z.array(z.string()).min(1), destination: z.string().min(1), writeToCrm: z.boolean().default(false), sendExternally: z.boolean().default(false), followUpDays: z.number().int().min(1).max(60).default(3), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
     scopes: ['leadgen.sequence.write', 'crm.contacts.write'],
     riskLevel: 'external_send',
     humanApprovalRequired: true,
@@ -416,7 +419,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['leadIds', 'destination'],
       logEvents: ['tool.leadgen.export_sequence.approval_requested', 'tool.leadgen.export_sequence.completed'],
     },
-    executor: unavailableProvider('leadgen', 'leadgen'),
+    executor: exportSequence,
   },
   {
     name: 'voice.transcribe_audio',

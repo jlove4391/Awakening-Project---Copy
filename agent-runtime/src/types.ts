@@ -63,6 +63,7 @@ export interface RuntimeContext {
   voiceSessionId?: string;
   voiceApproval?: VoiceApprovalPolicy;
   agent?: RuntimeAgentName;
+  approvedExecutionId?: string;
 }
 
 export interface AgentMessageRequest {
@@ -72,6 +73,7 @@ export interface AgentMessageRequest {
   voiceSessionId?: string;
   voiceApproval?: VoiceApprovalPolicy;
   agent?: RuntimeAgentName;
+  approvedExecutionId?: string;
 }
 
 export interface AgentMessageEvent {
@@ -83,4 +85,5 @@ export interface ChatRequestBody {
   message?: string;
   sessionId?: string;
   agent?: RuntimeAgentName;
+  approvedExecutionId?: string;
 }

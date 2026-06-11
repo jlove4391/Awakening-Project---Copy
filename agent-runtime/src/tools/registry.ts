@@ -828,7 +828,16 @@ function isHighRisk(definition: RegisteredToolDefinition) {
   return definition.riskLevel !== 'read';
 }
 
-function approvalBlockedResult(definition: RegisteredToolDefinition, context: RuntimeContext, reason: string) {
+function summarizeApprovalInput(input: Record<string, unknown>) {
+  try {
+    const serialized = JSON.stringify(input);
+    return serialized.length > 700 ? `${serialized.slice(0, 697)}...` : serialized;
+  } catch (_error) {
+    return 'Input summary unavailable.';
+  }
+}
+
+function approvalBlockedResult(definition: RegisteredToolDefinition, context: RuntimeContext, reason: string, executionId?: string, sanitizedInput?: Record<string, unknown>) {
   return {
     ok: false,
     tool: definition.name,
@@ -841,27 +850,36 @@ function approvalBlockedResult(definition: RegisteredToolDefinition, context: Ru
       channel: context.channel || 'text',
       voiceSessionId: context.voiceSessionId,
     },
+    approval: {
+      executionId,
+      toolName: definition.name,
+      riskLevel: definition.riskLevel,
+      requestedAction: definition.audit.action,
+      sanitizedInputSummary: sanitizedInput ? summarizeApprovalInput(sanitizedInput) : 'Input summary unavailable.',
+      reason,
+    },
     result: {
       status: 'approval_required',
       reason,
-      message: context.voiceApproval?.lockedReason || `The ${definition.name} action requires explicit approval before it can run.`,
+      message: context.voiceApproval?.lockedReason || `The ${definition.name} action requires explicit approval in the React approval UI before it can run.`,
     },
   };
 }
 
-function enforceApprovalLimits(definition: RegisteredToolDefinition, input: any, context: RuntimeContext) {
-  if (definition.humanApprovalRequired && input?.confirmedByUser !== true) {
-    return approvalBlockedResult(definition, context, 'missing_explicit_user_approval');
+function enforceApprovalLimits(definition: RegisteredToolDefinition, input: any, context: RuntimeContext, approvedThroughUi: boolean, executionId?: string, sanitizedInput?: Record<string, unknown>) {
+  if (definition.humanApprovalRequired && !approvedThroughUi) {
+    const reason = input?.confirmedByUser === true ? 'missing_react_ui_approval_context' : 'missing_explicit_user_approval';
+    return approvalBlockedResult(definition, context, reason, executionId, sanitizedInput);
   }
 
   if (context.channel === 'voice' && isHighRisk(definition)) {
     const policy = context.voiceApproval;
     if (!policy?.allowHighRiskActions) {
-      return approvalBlockedResult(definition, context, 'voice_high_risk_actions_not_approved');
+      return approvalBlockedResult(definition, context, 'voice_high_risk_actions_not_approved', executionId, sanitizedInput);
     }
 
     if (policy.approvedHighRiskActions >= policy.maxHighRiskActions) {
-      return approvalBlockedResult(definition, context, 'voice_high_risk_action_limit_exhausted');
+      return approvalBlockedResult(definition, context, 'voice_high_risk_action_limit_exhausted', executionId, sanitizedInput);
     }
 
     policy.approvedHighRiskActions += 1;
@@ -883,7 +901,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   const normalizedInput = normalizeToolInput(input);
   const parsedInput = definition.parameters.parse(normalizedInput) as Record<string, unknown>;
   const sanitizedInput = sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []);
-  const approved = !definition.humanApprovalRequired || parsedInput.confirmedByUser === true;
+  const approved = !definition.humanApprovalRequired || Boolean(parsedInput.confirmedByUser === true && context.approvedExecutionId);
   const executionRecord = createExecutionRecord({
     kind: 'tool_call',
     whoRequested: 'user',
@@ -912,7 +930,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
     input: sanitizedInput,
   });
 
-  const approvalBlock = enforceApprovalLimits(definition, parsedInput, context);
+  const approvalBlock = enforceApprovalLimits(definition, parsedInput, context, Boolean(approved), executionRecord.id, sanitizedInput);
   if (approvalBlock) {
     const blockedRecord = completeExecutionRecord(executionRecord, {
       status: 'blocked',
@@ -921,6 +939,14 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       approvalStatus: 'pending',
       receiptSummary: `${definition.name} blocked pending approval`,
     });
+    blockedRecord.approvalRequest = {
+      toolName: definition.name,
+      requestedAction: definition.audit.action,
+      sanitizedInputSummary: summarizeApprovalInput(sanitizedInput),
+      reason: approvalBlock.result.reason,
+      originalInput: parsedInput,
+      requestedAt: executionRecord.timestamps.requestedAt,
+    };
     await writeExecutionRecord(blockedRecord);
     await writeToolAuditLog({
       event: `${definition.name}.approval_required`,

@@ -8,6 +8,16 @@ export type ExecutionKind = 'tool_call' | 'delegated_task' | 'runtime_action';
 export type ExecutionApprovalStatus = 'not_required' | 'approved' | 'blocked' | 'pending' | 'rejected' | 'unknown';
 export type ExecutionStatus = 'requested' | 'running' | 'completed' | 'blocked' | 'failed';
 
+export interface ExecutionApprovalRequest {
+  toolName: string;
+  requestedAction: string;
+  sanitizedInputSummary: string;
+  reason: string;
+  originalInput: Record<string, unknown>;
+  requestedAt: string;
+  approvalNote?: string;
+}
+
 export interface ExecutionRecord {
   id: string;
   kind: ExecutionKind;
@@ -17,6 +27,7 @@ export interface ExecutionRecord {
   inputPayload: unknown;
   riskLevel: ToolRiskLevel | 'unknown';
   approvalStatus: ExecutionApprovalStatus;
+  approvalRequest?: ExecutionApprovalRequest;
   executionResult?: unknown;
   providerResponseSummary?: string;
   errors: string[];
@@ -100,6 +111,7 @@ export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'times
     inputPayload: input.inputPayload,
     riskLevel: input.riskLevel,
     approvalStatus: input.approvalStatus,
+    approvalRequest: input.approvalRequest,
     executionResult: input.executionResult,
     providerResponseSummary: input.providerResponseSummary,
     errors: input.errors || [],
@@ -134,6 +146,7 @@ export function completeExecutionRecord(
     ...record,
     status: patch.status,
     approvalStatus: patch.approvalStatus || record.approvalStatus,
+    approvalRequest: record.approvalRequest,
     executionResult: patch.executionResult,
     providerResponseSummary: patch.providerResponseSummary ?? summarizeProviderResponse(patch.executionResult),
     errors: patch.errors || record.errors,
@@ -149,18 +162,56 @@ export function completeExecutionRecord(
   };
 }
 
+
+async function readSessionRecords(sessionId: string) {
+  try {
+    return JSON.parse(await fs.readFile(sessionExecutionPath(sessionId), 'utf8')) as ExecutionRecord[];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+async function writeSessionRecords(sessionId: string, records: ExecutionRecord[]) {
+  await fs.writeFile(sessionExecutionPath(sessionId), `${JSON.stringify(records.slice(0, 250), null, 2)}\n`);
+}
+
+async function readGlobalRecords() {
+  try {
+    const raw = await fs.readFile(executionLogPath, 'utf8');
+    return raw
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as ExecutionRecord);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+async function writeGlobalRecords(records: ExecutionRecord[]) {
+  await fs.writeFile(executionLogPath, records.map((record) => JSON.stringify(record)).join('\n') + (records.length ? '\n' : ''));
+}
+
+
+function publicExecutionRecord(record: ExecutionRecord): ExecutionRecord {
+  if (!record.approvalRequest) return record;
+  return {
+    ...record,
+    approvalRequest: {
+      ...record.approvalRequest,
+      originalInput: {},
+    },
+  };
+}
+
 async function appendSessionRecord(record: ExecutionRecord) {
   const sessionId = record.linkedIds.sessionId;
   if (!sessionId) return;
-  const filePath = sessionExecutionPath(sessionId);
-  let records: ExecutionRecord[] = [];
-  try {
-    records = JSON.parse(await fs.readFile(filePath, 'utf8')) as ExecutionRecord[];
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
+  const records = await readSessionRecords(sessionId);
   records.unshift(record);
-  await fs.writeFile(filePath, `${JSON.stringify(records.slice(0, 250), null, 2)}\n`);
+  await writeSessionRecords(sessionId, records);
 }
 
 export async function writeExecutionRecord(record: ExecutionRecord) {
@@ -176,8 +227,8 @@ export async function listExecutionRecords(options: { sessionId?: string; limit?
 
   if (options.sessionId) {
     try {
-      const records = JSON.parse(await fs.readFile(sessionExecutionPath(options.sessionId), 'utf8')) as ExecutionRecord[];
-      return records.slice(0, limit);
+      const records = await readSessionRecords(options.sessionId);
+      return records.slice(0, limit).map(publicExecutionRecord);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw error;
@@ -185,16 +236,37 @@ export async function listExecutionRecords(options: { sessionId?: string; limit?
   }
 
   try {
-    const raw = await fs.readFile(executionLogPath, 'utf8');
-    return raw
-      .trim()
-      .split('\n')
-      .filter(Boolean)
-      .slice(-limit)
-      .reverse()
-      .map((line) => JSON.parse(line) as ExecutionRecord);
+    const records = await readGlobalRecords();
+    return records.slice(-limit).reverse().map(publicExecutionRecord);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw error;
   }
+}
+
+
+export async function getExecutionRecord(id: string) {
+  await ensureStore();
+  const records = await readGlobalRecords();
+  return records.find((record) => record.id === id);
+}
+
+export async function updateExecutionRecord(updatedRecord: ExecutionRecord) {
+  await ensureStore();
+  const records = await readGlobalRecords();
+  const index = records.findIndex((record) => record.id === updatedRecord.id);
+  if (index === -1) throw new Error(`Execution record not found: ${updatedRecord.id}`);
+  records[index] = updatedRecord;
+  await writeGlobalRecords(records);
+
+  const sessionId = updatedRecord.linkedIds.sessionId;
+  if (sessionId) {
+    const sessionRecords = await readSessionRecords(sessionId);
+    const sessionIndex = sessionRecords.findIndex((record) => record.id === updatedRecord.id);
+    if (sessionIndex === -1) sessionRecords.unshift(updatedRecord);
+    else sessionRecords[sessionIndex] = updatedRecord;
+    await writeSessionRecords(sessionId, sessionRecords);
+  }
+
+  return updatedRecord;
 }

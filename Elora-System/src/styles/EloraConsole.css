@@ -135,3 +135,122 @@
   cursor: not-allowed;
   opacity: 0.65;
 }
+
+.approval-workflow {
+  margin: 1.25rem 0;
+  padding: 1rem;
+  border: 1px solid rgba(255, 180, 60, 0.45);
+  border-radius: 12px;
+  background: rgba(255, 180, 60, 0.08);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+}
+
+.approval-workflow-header,
+.approval-card-topline,
+.approval-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.approval-workflow-header h2 {
+  margin: 0.15rem 0 0;
+}
+
+.approval-eyebrow,
+.approval-note-label {
+  margin: 0;
+  color: var(--gold, #ffd700);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.approval-workflow textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0.5rem 0 1rem;
+  resize: vertical;
+  background: #111;
+  color: var(--text-primary, #f0f0f0);
+  border: 1px solid rgba(255, 215, 0, 0.45);
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+}
+
+.approval-card-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.approval-card {
+  padding: 0.95rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.26);
+}
+
+.approval-risk {
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  color: #080808;
+  background: var(--gold, #ffd700);
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.approval-risk-external-send,
+.approval-risk-purchase-or-commit,
+.approval-risk-code-execution {
+  background: #ff7b7b;
+}
+
+.approval-detail-grid {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.9rem 0;
+}
+
+.approval-detail-grid dt {
+  color: var(--text-secondary, #cfc7ff);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.approval-detail-grid dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.approval-detail-grid code {
+  white-space: pre-wrap;
+  color: #fff3b0;
+}
+
+.approval-actions {
+  justify-content: flex-end;
+}
+
+.approval-actions button {
+  background: var(--gold-deep, #ad9142);
+  color: #080808;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 800;
+  padding: 0.65rem 0.95rem;
+}
+
+.approval-actions .approval-deny-button {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary, #f0f0f0);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.approval-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}

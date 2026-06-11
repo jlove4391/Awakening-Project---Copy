@@ -6,6 +6,8 @@ import { chatRouter } from './routes/chat.js';
 import { toolsRouter } from './routes/tools.js';
 import { tasksRouter } from './routes/tasks.js';
 import { voiceRouter } from './routes/voice.js';
+import { executionsRouter } from './routes/executions.js';
+import { memoryRouter } from './routes/memory.js';
 
 import { googleAuthRouter } from './providers/google/auth.js';
 import { attachTelephonyMediaStream } from './voice/telephonyStream.js';

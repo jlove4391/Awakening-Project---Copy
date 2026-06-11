@@ -1,16 +1,63 @@
 import { taskEvents } from './events.js';
-import { getDelegatedTask, updateDelegatedTask } from './store.js';
+import { getDelegatedTask, listDelegatedTasks, updateDelegatedTask } from './store.js';
 import type { DelegatedTask } from './types.js';
 
-export type DelegatedTaskHandler = (task: DelegatedTask) => Promise<void>;
+export type DelegatedTaskHandlerResult = boolean | void;
+export type DelegatedTaskHandler = (task: DelegatedTask) => Promise<DelegatedTaskHandlerResult>;
+
+function taskNeedsSafeDemoWorker(task: DelegatedTask) {
+  const objective = task.objective.toLowerCase();
+  const requiredTools = task.requiredTools.map((tool) => tool.toLowerCase());
+  return (
+    objective.includes('safe demo') ||
+    objective.includes('delegation smoke') ||
+    requiredTools.includes('nexora.demo.complete') ||
+    requiredTools.includes('delegation.smoke.safe_demo')
+  );
+}
+
+async function completeSafeDemoTask(task: DelegatedTask) {
+  await updateDelegatedTask(task.id, {
+    status: 'completed',
+    result: {
+      ok: true,
+      summary: 'Nexora completed the safe local delegation smoke task.',
+      data: {
+        handledBy: 'nexora.safe-demo-worker',
+        objective: task.objective,
+        constraints: task.constraints,
+        requiredTools: task.requiredTools,
+        approvalRequirements: task.approvalRequirements,
+      },
+    },
+    log: 'Nexora safe demo worker completed the task without external side effects.',
+    event: {
+      type: 'task.completed',
+      actor: 'nexora',
+      summary: 'Nexora safe demo worker recorded terminal completion.',
+      details: {
+        worker: 'nexora.safe-demo-worker',
+        safeLocalOnly: true,
+      },
+    },
+  });
+}
 
 class DurableTaskQueue {
   private pendingIds: string[] = [];
   private active = false;
-  private handler?: DelegatedTaskHandler;
+  private handlers: DelegatedTaskHandler[] = [];
 
   setHandler(handler: DelegatedTaskHandler) {
-    this.handler = handler;
+    this.handlers = [handler];
+  }
+
+  addHandler(handler: DelegatedTaskHandler) {
+    this.handlers.push(handler);
+  }
+
+  clearHandlers() {
+    this.handlers = [];
   }
 
   enqueue(task: DelegatedTask | string) {
@@ -58,15 +105,17 @@ class DurableTaskQueue {
       },
     });
 
-    if (this.handler) {
-      const latest = await getDelegatedTask(task.id);
-      if (latest) await this.handler(latest);
-      return;
+    const latest = await getDelegatedTask(task.id);
+    if (!latest) return;
+
+    for (const handler of this.handlers) {
+      const handled = await handler(latest);
+      if (handled !== false) return;
     }
 
     await updateDelegatedTask(task.id, {
       status: 'blocked',
-      log: 'No Nexora worker handler is configured yet; task is durably recorded and awaiting worker pickup.',
+      log: 'No Nexora worker handler is configured for this task yet; task is durably recorded and awaiting worker pickup.',
       event: {
         type: 'task.blocked',
         actor: 'system',
@@ -77,6 +126,20 @@ class DurableTaskQueue {
 }
 
 export const durableTaskQueue = new DurableTaskQueue();
+
+export const nexoraSafeDemoWorker: DelegatedTaskHandler = async (task) => {
+  if (!taskNeedsSafeDemoWorker(task)) return false;
+  await completeSafeDemoTask(task);
+  return true;
+};
+
+durableTaskQueue.addHandler(nexoraSafeDemoWorker);
+
+export async function enqueuePersistedQueuedTasks() {
+  const queuedTasks = (await listDelegatedTasks()).filter((task) => task.status === 'queued');
+  queuedTasks.forEach((task) => durableTaskQueue.enqueue(task));
+  return queuedTasks;
+}
 
 // Automatically queue tasks once approval requirements are satisfied.
 taskEvents.on('task.created', (task: DelegatedTask) => {

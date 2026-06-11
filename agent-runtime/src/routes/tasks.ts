@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { durableTaskQueue } from '../tasks/queue.js';
 import { createDelegatedTask, getDelegatedTask, listDelegatedTasks, updateDelegatedTask } from '../tasks/store.js';
-import type { DelegatedTaskStatus } from '../tasks/types.js';
+import type { ApprovalRequirement, DelegatedTaskStatus } from '../tasks/types.js';
 
 export const tasksRouter = Router();
 
@@ -9,6 +9,29 @@ function stringArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean);
   if (typeof value === 'string') return value.split(',').map((item) => item.trim()).filter(Boolean);
   return [];
+}
+
+function approvalRequirementArray(value: unknown): Array<Partial<ApprovalRequirement> | string> {
+  if (!Array.isArray(value)) {
+    if (typeof value === 'string') return stringArray(value);
+    return [];
+  }
+  return value
+    .map((item) => {
+      if (typeof item === 'string') return item.trim();
+      if (!item || typeof item !== 'object') return '';
+      const requirement = item as Record<string, unknown>;
+      return {
+        required: typeof requirement.required === 'boolean' ? requirement.required : undefined,
+        status: typeof requirement.status === 'string' ? (requirement.status as ApprovalRequirement['status']) : undefined,
+        approver: typeof requirement.approver === 'string' ? requirement.approver : undefined,
+        approvedAt: typeof requirement.approvedAt === 'string' ? requirement.approvedAt : undefined,
+        rejectedAt: typeof requirement.rejectedAt === 'string' ? requirement.rejectedAt : undefined,
+        note: typeof requirement.note === 'string' ? requirement.note : undefined,
+        reason: typeof requirement.reason === 'string' ? requirement.reason : undefined,
+      } satisfies Partial<ApprovalRequirement>;
+    })
+    .filter((item) => (typeof item === 'string' ? Boolean(item) : Boolean(item.reason || item.note || item.approver || item.status)));
 }
 
 tasksRouter.get('/', async (req, res, next) => {
@@ -60,7 +83,7 @@ tasksRouter.post('/', async (req, res, next) => {
       objective: taskObjective,
       constraints: stringArray(constraints),
       requiredTools: stringArray(requiredTools),
-      approvalRequirements: stringArray(approvalRequirements),
+      approvalRequirements: approvalRequirementArray(approvalRequirements),
       initialLog: String(initialLog || notes || '').trim() || undefined,
     });
 

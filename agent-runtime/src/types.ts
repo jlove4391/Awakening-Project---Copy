@@ -1,7 +1,5 @@
 import type { Session } from '@openai/agents';
-import type { RuntimeAgentName } from '@awakening/shared';
-
-export type { RuntimeAgentName } from '@awakening/shared';
+export type RuntimeAgentName = 'elora' | 'nexora';
 
 export type TaskStatus = 'queued' | 'running' | 'blocked' | 'completed' | 'failed';
 

@@ -29,6 +29,31 @@ Set `OPENAI_API_KEY` to enable the SDK's `OpenAIConversationsSession`; otherwise
 
 The chat endpoint defaults to Elora. Pass `agent: "nexora"` in `POST /api/chat` to run the Nexora definition with the same session and memory store plus code/VS Code tools.
 
+## Local Elora Text Loop Smoke Test
+
+Use the smoke-chat script to verify that the local Elora text loop can accept a chat request, stream the expected SSE lifecycle, and persist the session record. The script sends the default prompt `Hello Elora. Confirm the runtime loop is alive.` to `POST /api/chat` with `agent: "elora"`.
+
+From the repository root, start the runtime and web shell in separate terminals:
+
+```bash
+npm run dev:agent-runtime
+npm run dev:web
+```
+
+Then run the smoke test from a third terminal:
+
+```bash
+npm run smoke:chat
+```
+
+The script checks for `session`, `memory`, at least one `delta` frame or a usable `completed.finalOutput` payload, and `completed`. It also verifies that a session JSON file exists under `${AGENT_RUNTIME_DATA_DIR}/sessions/`, defaulting to `agent-runtime/.runtime-data/sessions/`. Set `AGENT_RUNTIME_URL`, `AGENT_RUNTIME_DATA_DIR`, or pass flags if your local runtime uses non-default locations:
+
+```bash
+AGENT_RUNTIME_URL=http://localhost:4317 AGENT_RUNTIME_DATA_DIR=/tmp/awakening-runtime npm run smoke:chat -- --timeout-ms 180000
+```
+
+The runtime must be configured with the same credentials you use for normal local chat runs, including `OPENAI_API_KEY` when the selected model/provider requires it.
+
 
 ## Google Provider Adapters
 

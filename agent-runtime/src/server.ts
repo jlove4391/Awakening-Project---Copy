@@ -8,6 +8,7 @@ import { tasksRouter } from './routes/tasks.js';
 import { voiceRouter } from './routes/voice.js';
 import { executionsRouter } from './routes/executions.js';
 import { memoryRouter } from './routes/memory.js';
+import { enqueuePersistedQueuedTasks } from './tasks/queue.js';
 
 import { googleAuthRouter } from './providers/google/auth.js';
 import { attachTelephonyMediaStream } from './voice/telephonyStream.js';
@@ -37,6 +38,13 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 
 const server = app.listen(runtimeConfig.port, () => {
   console.log(`agent-runtime listening on http://localhost:${runtimeConfig.port}`);
+  enqueuePersistedQueuedTasks()
+    .then((tasks) => {
+      if (tasks.length) console.log(`re-queued ${tasks.length} persisted delegated task(s)`);
+    })
+    .catch((error) => {
+      console.error('failed to enqueue persisted delegated tasks', error);
+    });
 });
 
 attachTelephonyMediaStream(server);

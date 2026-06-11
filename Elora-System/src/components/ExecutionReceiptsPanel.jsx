@@ -27,6 +27,7 @@ const ExecutionReceiptsPanel = ({
   refreshNonce = 0,
 }) => {
   const [executions, setExecutions] = useState([]);
+  const [delegatedTasks, setDelegatedTasks] = useState([]);
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
 
@@ -41,14 +42,24 @@ const ExecutionReceiptsPanel = ({
     const loadExecutions = async () => {
       try {
         setStatus("loading");
-        const response = await fetch(
-          `${runtimeBaseUrl}/api/executions?${query}`,
-        );
+        const taskParams = new URLSearchParams();
+        if (sessionId) taskParams.set("sessionId", sessionId);
+        else taskParams.set("includeAllSessions", "true");
+        const [response, taskResponse] = await Promise.all([
+          fetch(`${runtimeBaseUrl}/api/executions?${query}`),
+          fetch(`${runtimeBaseUrl}/api/tasks?${taskParams.toString()}`),
+        ]);
         if (!response.ok)
           throw new Error(`runtime returned ${response.status}`);
-        const payload = await response.json();
+        if (!taskResponse.ok)
+          throw new Error(`task runtime returned ${taskResponse.status}`);
+        const [payload, taskPayload] = await Promise.all([
+          response.json(),
+          taskResponse.json(),
+        ]);
         if (!mounted) return;
         setExecutions(payload.executions || []);
+        setDelegatedTasks(taskPayload.tasks || []);
         setStatus("ready");
         setError("");
       } catch (loadError) {
@@ -68,7 +79,7 @@ const ExecutionReceiptsPanel = ({
       mounted = false;
       window.clearInterval(interval);
     };
-  }, [query, refreshNonce]);
+  }, [query, refreshNonce, sessionId]);
 
   return (
     <section
@@ -89,7 +100,7 @@ const ExecutionReceiptsPanel = ({
 
       <p className="core-card-copy">
         Recent tool calls and delegated tasks persisted by the backend runtime,
-        including approval, risk, linked IDs, and receipt summaries.
+        including approval, risk, linked IDs, task receipts, and receipt summaries.
       </p>
 
       {error && (
@@ -99,9 +110,64 @@ const ExecutionReceiptsPanel = ({
       )}
 
       <div className="execution-record-list">
-        {executions.length === 0 && !error ? (
+        {delegatedTasks.map((task) => (
+          <article
+            className="execution-record-card delegated-task-card"
+            key={`${task.id}-${task.updatedAt}`}
+          >
+            <div className="execution-record-topline">
+              <strong>{task.objective}</strong>
+              <span className={`execution-risk task-status-${task.status}`}>
+                {task.status}
+              </span>
+            </div>
+
+            <div className="execution-record-meta">
+              <span>{task.parentAgent} → {task.assignedAgent}</span>
+              <span>events: {task.auditTrail?.length || 0}</span>
+              <span>tools: {task.requiredTools?.join(", ") || "none"}</span>
+            </div>
+
+            <p className="execution-receipt-summary">
+              {task.receipt?.summary || task.result?.summary || "Task receipt pending"}
+            </p>
+
+            <dl className="execution-detail-grid">
+              <div>
+                <dt>Session</dt>
+                <dd>{task.sessionId || "—"}</dd>
+              </div>
+              <div>
+                <dt>Approvals</dt>
+                <dd>
+                  {task.approvalRequirements?.length
+                    ? task.approvalRequirements
+                        .map((item) => item.status || "pending")
+                        .join(", ")
+                    : "not required"}
+                </dd>
+              </div>
+              <div>
+                <dt>Receipt</dt>
+                <dd>{task.receipt?.id || "—"}</dd>
+              </div>
+              <div>
+                <dt>Updated</dt>
+                <dd>{formatDateTime(task.updatedAt || task.createdAt)}</dd>
+              </div>
+            </dl>
+
+            {task.constraints?.length > 0 && (
+              <p className="execution-provider-summary">
+                Constraints: {task.constraints.join("; ")}
+              </p>
+            )}
+          </article>
+        ))}
+
+        {executions.length === 0 && delegatedTasks.length === 0 && !error ? (
           <div className="execution-empty-state">
-            No execution records have been issued yet.
+            No execution records or delegated tasks have been issued yet.
           </div>
         ) : (
           executions.map((execution) => (

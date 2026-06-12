@@ -1,5 +1,7 @@
 import { run } from '@openai/agents';
 import { elora } from './agents/elora.js';
+import { jynx } from './agents/jynx.js';
+import { kaz } from './agents/kaz.js';
 import { nexora } from './agents/nexora.js';
 import { getRuntimeContext, listMemories, persistRuntimeContext } from './memory/index.js';
 import type { AgentMessageEvent, AgentMessageRequest, RuntimeAgentName, RuntimeContext } from './types.js';
@@ -17,6 +19,17 @@ export function isToolishEvent(event: any) {
   return type.includes('tool') || type.includes('approval') || type.includes('handoff');
 }
 
+const runtimeAgents = {
+  elora,
+  nexora,
+  kaz,
+  jynx,
+} as const satisfies Record<RuntimeAgentName, unknown>;
+
+function isRuntimeAgentName(agent: unknown): agent is RuntimeAgentName {
+  return typeof agent === 'string' && agent in runtimeAgents;
+}
+
 export type AgentMessageSink = (event: AgentMessageEvent) => void | Promise<void>;
 
 export interface AgentMessageResult {
@@ -32,8 +45,11 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
   const trimmed = request.message?.trim();
   if (!trimmed) throw new Error('message is required');
 
-  const selectedAgent = (request.agent || 'elora') as RuntimeAgentName;
-  const agent = selectedAgent === 'nexora' ? nexora : elora;
+  const selectedAgent = request.agent ?? 'elora';
+  if (!isRuntimeAgentName(selectedAgent)) {
+    throw new Error(`invalid agent: ${selectedAgent}`);
+  }
+  const agent = runtimeAgents[selectedAgent];
 
   const context = await getRuntimeContext(request.sessionId);
   context.channel = request.channel || 'text';

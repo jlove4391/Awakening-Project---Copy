@@ -4,6 +4,9 @@ import { runAgentMessage } from '../agentEndpoint.js';
 import { setupSse, sendEvent } from '../lib/sse.js';
 import type { ChatRequestBody } from '../types.js';
 
+const allowedAgents = new Set(['elora', 'nexora', 'kaz', 'jynx']);
+const allowedAgentList = Array.from(allowedAgents).join(', ');
+
 export const chatRouter = Router();
 
 chatRouter.post('/', async (req, res, next) => {
@@ -14,8 +17,8 @@ chatRouter.post('/', async (req, res, next) => {
     return;
   }
 
-  if (agent !== 'elora' && agent !== 'nexora') {
-    res.status(400).json({ error: 'agent must be elora or nexora' });
+  if (!allowedAgents.has(agent)) {
+    res.status(400).json({ error: `agent must be one of: ${allowedAgentList}` });
     return;
   }
 

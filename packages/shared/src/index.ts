@@ -139,3 +139,137 @@ export interface UpdateDelegatedTaskInput {
     details?: Record<string, unknown>;
   };
 }
+export type SharedRecordValue = string | number | boolean | null;
+
+export interface LeadRecord {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: string;
+  sessionId?: string;
+  intakeId?: string;
+  clientId?: string;
+  name?: string;
+  email?: string;
+  company?: string;
+  source?: string;
+  tags?: string[];
+  notes?: string;
+  metadata?: Record<string, SharedRecordValue>;
+}
+
+export interface IntakeRecord {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: string;
+  leadId?: string;
+  clientId?: string;
+  sessionId?: string;
+  submittedAt?: string;
+  summary?: string;
+  responses?: Record<string, SharedRecordValue>;
+  metadata?: Record<string, SharedRecordValue>;
+}
+
+export interface ClientRecord {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: string;
+  leadId?: string;
+  intakeId?: string;
+  sessionId?: string;
+  name?: string;
+  email?: string;
+  company?: string;
+  tags?: string[];
+  notes?: string;
+  metadata?: Record<string, SharedRecordValue>;
+}
+
+export interface DeliverableRecord {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: string;
+  clientId?: string;
+  intakeId?: string;
+  proposalId?: string;
+  sessionId?: string;
+  title?: string;
+  description?: string;
+  dueAt?: string;
+  deliveredAt?: string;
+  artifactIds?: string[];
+  metadata?: Record<string, SharedRecordValue>;
+}
+
+export interface ProposalRecord {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: string;
+  leadId?: string;
+  clientId?: string;
+  intakeId?: string;
+  sessionId?: string;
+  title?: string;
+  summary?: string;
+  totalAmount?: number;
+  currency?: string;
+  validUntil?: string;
+  acceptedAt?: string;
+  metadata?: Record<string, SharedRecordValue>;
+}
+
+export interface CallTranscriptRecord {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: string;
+  leadId?: string;
+  clientId?: string;
+  proposalId?: string;
+  sessionId?: string;
+  startedAt?: string;
+  endedAt?: string;
+  participantIds?: string[];
+  transcript?: string;
+  summary?: string;
+  metadata?: Record<string, SharedRecordValue>;
+}
+
+export interface ObjectionRecord {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: string;
+  leadId?: string;
+  clientId?: string;
+  proposalId?: string;
+  sessionId?: string;
+  callTranscriptId?: string;
+  category?: string;
+  summary?: string;
+  resolution?: string;
+  metadata?: Record<string, SharedRecordValue>;
+}
+
+export interface FollowUpRecord {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: string;
+  leadId?: string;
+  clientId?: string;
+  intakeId?: string;
+  proposalId?: string;
+  sessionId?: string;
+  objectionId?: string;
+  dueAt?: string;
+  completedAt?: string;
+  channel?: string;
+  note?: string;
+  metadata?: Record<string, SharedRecordValue>;
+}

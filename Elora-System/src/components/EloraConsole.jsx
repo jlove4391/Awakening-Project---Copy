@@ -238,16 +238,28 @@ const EloraConsole = () => {
       }
     }
 
-    if (event === "delta") appendAssistantDelta(data.text);
+   if (event === 'delta') {
+  // Suppress raw structured JSON stream; show finalOutput.visibleReply on completion.
+  return;
+}
 
-    if (event === "completed") {
-      activeAssistantIndex.current = null;
-      setTaskStatus(data.finalOutput?.taskStatus || "completed");
-      if (data.finalOutput?.visibleReply)
-        logMessage(data.finalOutput.visibleReply);
-      loadPendingApprovals().catch(() => undefined);
-      refreshExecutions();
-    }
+   if (event === "completed") {
+  activeAssistantIndex.current = null;
+
+  const visibleReply =
+    data.finalOutput?.visibleReply ||
+    (typeof data.finalOutput === "string" ? data.finalOutput : "");
+
+  setTaskStatus(data.finalOutput?.taskStatus || "completed");
+
+  if (visibleReply) {
+    logMessage(visibleReply, "elora");
+    void speakText(visibleReply);
+  }
+
+  loadPendingApprovals().catch(() => undefined);
+  refreshExecutions();
+}
 
     if (event === "error") {
       activeAssistantIndex.current = null;
@@ -313,10 +325,67 @@ const EloraConsole = () => {
   };
 
   const playVoiceAudio = async (synthesis) => {
-    if (!synthesis?.audioBase64 || !audioRef.current) return;
-    audioRef.current.src = `data:${synthesis.mimeType || "audio/mpeg"};base64,${synthesis.audioBase64}`;
+  console.log('[voice] synthesis response:', synthesis);
+
+  if (!synthesis?.audioBase64) {
+    logMessage('Voice playback unavailable: no audio was returned from the speech endpoint.', 'system');
+    return;
+  }
+
+  if (!audioRef.current) {
+    logMessage('Voice playback unavailable: audio player is not mounted.', 'system');
+    return;
+  }
+
+  const mimeType = synthesis.mimeType || 'audio/mpeg';
+  audioRef.current.pause();
+  audioRef.current.src = `data:${mimeType};base64,${synthesis.audioBase64}`;
+  audioRef.current.load();
+
+  try {
     await audioRef.current.play();
-  };
+    console.log('[voice] playback started');
+  } catch (error) {
+    console.error('[voice] browser playback failed:', error);
+    logMessage(`Voice generated, but browser playback was blocked: ${error.message}. Press play on the audio bar.`, 'system');
+  }
+};
+
+const speakText = async (text) => {
+  const cleanText = String(text || '').trim();
+
+  console.log('[voice] speakText called:', cleanText);
+
+  if (!cleanText) {
+    console.log('[voice] no text supplied to speakText');
+    return;
+  }
+
+  try {
+    const response = await fetch(`${runtimeBaseUrl}/api/voice/speech`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: cleanText,
+        voice: selectedVoice,
+        responseFormat: voiceConfig?.responseFormat || 'mp3',
+      }),
+    });
+
+    console.log('[voice] /api/voice/speech status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Speech runtime returned ${response.status}: ${errorText}`);
+    }
+
+    const synthesis = await response.json();
+    await playVoiceAudio(synthesis);
+  } catch (error) {
+    console.error('[voice] speakText failed:', error);
+    logMessage(`Voice playback unavailable: ${error.message}`, 'system');
+  }
+};
 
   const processVoiceBlob = async (blob) => {
     setIsVoiceProcessing(true);

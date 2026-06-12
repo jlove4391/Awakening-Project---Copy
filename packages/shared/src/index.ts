@@ -141,11 +141,97 @@ export interface UpdateDelegatedTaskInput {
 }
 export type SharedRecordValue = string | number | boolean | null;
 
+export type LeadStatus =
+  | 'new'
+  | 'discovered'
+  | 'enriched'
+  | 'scored'
+  | 'approved'
+  | 'exported'
+  | 'contacted'
+  | 'follow_up_due'
+  | 'follow_up_scheduled'
+  | 'responded'
+  | 'qualified'
+  | 'disqualified'
+  | 'converted'
+  | 'lost'
+  | 'archived'
+  | (string & {});
+
+export type FollowUpStatus =
+  | 'not_scheduled'
+  | 'scheduled'
+  | 'due'
+  | 'sent'
+  | 'completed'
+  | 'skipped'
+  | 'cancelled'
+  | 'failed'
+  | (string & {});
+
+export interface ApprovalRequest {
+  id: string;
+  leadId?: string;
+  action: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled' | (string & {});
+  requestedBy: string;
+  requestedAt: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  note?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface LeadScoreDimensions {
+  industryFit?: number;
+  localServiceFit?: number;
+  missedCallLikelihood?: number;
+  followUpPainLikelihood?: number;
+  aiAutomationFit?: number;
+  abilityToPay?: number;
+  decisionMakerIdentified?: number;
+  emailPhoneConfidence?: number;
+  complianceRisk?: number;
+  estimatedValue?: number;
+  recommendedFirstOffer?: string;
+  [dimension: string]: number | string | undefined;
+}
+
+export interface LeadScore {
+  value: number;
+  dimensions?: LeadScoreDimensions;
+  reasons?: string[];
+  scoredAt?: string;
+  scoredBy?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface LeadInboxItem {
+  id: string;
+  leadId: string;
+  title: string;
+  company?: string;
+  contactName?: string;
+  status: LeadStatus;
+  score?: LeadScore;
+  followUpStatus?: FollowUpStatus;
+  approvalRequest?: ApprovalRequest;
+  priority?: 'low' | 'medium' | 'high' | 'urgent' | (string & {});
+  source?: string;
+  tags?: string[];
+  assignedTo?: string;
+  dueAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface LeadRecord {
   id: string;
   createdAt: string;
   updatedAt: string;
-  status: string;
+  status: LeadStatus;
   sessionId?: string;
   intakeId?: string;
   clientId?: string;
@@ -155,6 +241,10 @@ export interface LeadRecord {
   source?: string;
   tags?: string[];
   notes?: string;
+  score?: number;
+  scoreDetails?: LeadScore;
+  followUpStatus?: FollowUpStatus;
+  approvalRequest?: ApprovalRequest;
   metadata?: Record<string, SharedRecordValue>;
 }
 

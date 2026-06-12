@@ -23,6 +23,48 @@ export interface LeadgenIcp {
 }
 
 
+export type LeadStatus =
+  | 'new'
+  | 'discovered'
+  | 'enriched'
+  | 'scored'
+  | 'approved'
+  | 'exported'
+  | 'contacted'
+  | 'follow_up_due'
+  | 'follow_up_scheduled'
+  | 'responded'
+  | 'qualified'
+  | 'disqualified'
+  | 'converted'
+  | 'lost'
+  | 'archived'
+  | (string & {});
+
+export type FollowUpStatus =
+  | 'not_scheduled'
+  | 'scheduled'
+  | 'due'
+  | 'sent'
+  | 'completed'
+  | 'skipped'
+  | 'cancelled'
+  | 'failed'
+  | (string & {});
+
+export interface ApprovalRequest {
+  id: string;
+  leadId?: string;
+  action: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled' | (string & {});
+  requestedBy: string;
+  requestedAt: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  note?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface LeadScoreDimensions {
   industryFit: number;
   localServiceFit: number;
@@ -37,6 +79,35 @@ export interface LeadScoreDimensions {
   recommendedFirstOffer: string;
 }
 
+export interface LeadScore {
+  value: number;
+  dimensions?: LeadScoreDimensions;
+  reasons?: string[];
+  scoredAt?: string;
+  scoredBy?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface LeadInboxItem {
+  id: string;
+  leadId: string;
+  title: string;
+  company?: string;
+  contactName?: string;
+  status: LeadStatus;
+  score?: LeadScore;
+  followUpStatus?: FollowUpStatus;
+  approvalRequest?: ApprovalRequest;
+  priority?: 'low' | 'medium' | 'high' | 'urgent' | (string & {});
+  source?: string;
+  tags?: string[];
+  assignedTo?: string;
+  dueAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface LeadRecord {
   id: string;
   fullName: string;
@@ -48,8 +119,9 @@ export interface LeadRecord {
   market: string;
   signals: string[];
   source: string;
-  status: 'discovered' | 'enriched' | 'scored' | 'approved' | 'exported' | 'contacted' | 'follow_up_due';
+  status: LeadStatus;
   score?: number;
+  scoreDetails?: LeadScore;
   scoreDimensions?: LeadScoreDimensions;
   scoreReasons?: string[];
   enrichment?: Record<string, unknown>;

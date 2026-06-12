@@ -3,6 +3,13 @@ import { completeExecutionRecord, getExecutionRecord, listExecutionRecords, upda
 import { summarizeProviderResponse } from '../executions.js';
 import { getRuntimeContext } from '../memory/index.js';
 import { executeRegisteredTool, getRegisteredTool } from '../tools/registry.js';
+import type { RuntimeAgentName } from '../types.js';
+
+const runtimeAgentNames = new Set<RuntimeAgentName>(['elora', 'nexora', 'kaz', 'jynx']);
+
+function resolveRuntimeAgentName(agent: string | undefined): RuntimeAgentName {
+  return runtimeAgentNames.has(agent as RuntimeAgentName) ? (agent as RuntimeAgentName) : 'elora';
+}
 
 export const executionsRouter = Router();
 
@@ -56,7 +63,7 @@ executionsRouter.post('/:id/approval', async (req, res, next) => {
     }
 
     const context = await getRuntimeContext(record.linkedIds.sessionId);
-    context.agent = record.chosenByAgent === 'nexora' ? 'nexora' : 'elora';
+    context.agent = resolveRuntimeAgentName(record.chosenByAgent);
     context.voiceSessionId = record.linkedIds.voiceSessionId;
     context.approvedExecutionId = record.id;
 

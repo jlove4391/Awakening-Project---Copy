@@ -10,7 +10,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsc -p tsconfig.json --noEmit",
-    "smoke:voice": "tsx scripts/smoke-voice.ts"
+    "smoke:chat": "tsx scripts/smoke-chat.mjs",
+    "smoke:voice": "tsx scripts/smoke-voice.ts",
+    "smoke:google-calendar": "tsx scripts/smoke-google-calendar.ts"
   },
   "dependencies": {
     "@openai/agents": "latest",

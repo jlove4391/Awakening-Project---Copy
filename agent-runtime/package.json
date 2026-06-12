@@ -12,7 +12,8 @@
     "test": "tsc -p tsconfig.json --noEmit",
     "smoke:chat": "tsx scripts/smoke-chat.mjs",
     "smoke:voice": "tsx scripts/smoke-voice.ts",
-    "smoke:google-calendar": "tsx scripts/smoke-google-calendar.ts"
+    "smoke:google-calendar": "tsx scripts/smoke-google-calendar.ts",
+    "smoke:specialists": "tsx scripts/smoke-specialist-routing.ts"
   },
   "dependencies": {
     "@openai/agents": "latest",

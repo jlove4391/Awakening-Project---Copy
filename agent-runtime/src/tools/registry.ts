@@ -12,6 +12,10 @@ import { createCalendarEvent, listCalendarEvents } from '../providers/google/cal
 import { lookupCrmContact, upsertCrmContact } from '../providers/crm/index.js';
 import { enrichPersonWithClay } from '../providers/clay/index.js';
 import { exportSequence, findLeadsWorkflow } from '../workflows/leadgen/index.js';
+import { classifyIntake } from '../workflows/intake/classifyIntake.js';
+import { createIntakeRecord } from '../workflows/intake/createIntakeRecord.js';
+import { packageForReview } from '../workflows/intake/packageForReview.js';
+import { routeSpecialist } from '../workflows/intake/routeSpecialist.js';
 import { createDriveTextFile, searchDriveFiles } from '../providers/google/drive.js';
 import { searchGmailMessages, sendGmailEmail } from '../providers/google/gmail.js';
 import { readSheetRange, updateSheetRange } from '../providers/google/sheets.js';
@@ -44,6 +48,7 @@ export type ToolCategory =
   | 'crm'
   | 'clay'
   | 'leadgen'
+  | 'intake'
   | 'voice'
   | 'memory'
   | 'delegation'
@@ -117,6 +122,34 @@ const approvalBooleanSchema = {
 };
 const approvalNoteSchema = stringSchema('Optional note describing the user approval that authorized this action.');
 const relativePathSchema = stringSchema('Workspace-relative path under the configured Nexora workspace root. Absolute paths and parent traversal are rejected.');
+const intakeFormSchemaProperties = {
+  businessName: stringSchema('Business name from the intake form.'),
+  contactName: stringSchema('Primary contact name from the intake form.'),
+  email: stringSchema('Primary contact email address.'),
+  phone: stringSchema('Primary contact phone number.'),
+  website: stringSchema('Business website.'),
+  industry: stringSchema('Business industry or niche.'),
+  teamSize: stringSchema('Team size or operating scale.'),
+  currentTools: stringArraySchema('Current tools, systems, and software used by the business.'),
+  currentCrm: stringSchema('Current CRM or customer database.'),
+  mainBottleneck: stringSchema('Main bottleneck described by the client.'),
+  leadCustomerFlow: stringSchema('Lead, customer, or client journey flow notes.'),
+  missedCallFollowUpIssue: stringSchema('Missed-call or follow-up gaps.'),
+  financePricingCashFlowIssue: stringSchema('Finance, pricing, cash-flow, invoice, or payment issues.'),
+  operationsSopIssue: stringSchema('Operations, SOP, handoff, or fulfillment issues.'),
+  techAutomationIssue: stringSchema('Tech, tooling, integration, or automation issues.'),
+  desiredOutcome: stringSchema('Desired outcome from the engagement.'),
+  timeline: stringSchema('Desired timeline.'),
+  budgetComfortRange: stringSchema('Budget comfort range.'),
+  uploadedNotesFilesMetadata: {
+    type: 'array',
+    description: 'Metadata for uploaded intake notes/files; file contents are not sent externally by these tools.',
+    items: { type: 'object', additionalProperties: true },
+  },
+  permissionToContact: { type: 'boolean', description: 'Whether the intake form says the contact permits follow-up; these tools still do not send externally.' },
+};
+const intakeRecordSchema = { type: 'object', additionalProperties: true, description: 'IntakeRecord produced by intake.create_record.' };
+const intakeClassificationSchema = { type: 'object', additionalProperties: true, description: 'Classification result produced by intake.classify.' };
 
 export const toolRegistry: RegisteredToolDefinition[] = [
   {
@@ -420,6 +453,182 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       logEvents: ['tool.leadgen.export_sequence.approval_requested', 'tool.leadgen.export_sequence.completed'],
     },
     executor: exportSequence,
+  },
+  {
+    name: 'intake.create_record',
+    description: 'Create an internal intake record and memory reference from submitted intake details. Draft-safe: records context only and never sends externally.',
+    inputSchema: objectSchema(
+      {
+        ...intakeFormSchemaProperties,
+        sessionId: stringSchema('Optional source session ID; runtime context is used when omitted.'),
+        leadId: stringSchema('Optional linked lead ID.'),
+        clientId: stringSchema('Optional linked client ID.'),
+        submittedAt: stringSchema('Optional intake submission timestamp.'),
+        memoryScope: stringSchema('Optional memory scope override for the internal intake memory.'),
+      },
+      ['businessName', 'contactName'],
+    ),
+    parameters: z.object({
+      businessName: z.string().min(1),
+      contactName: z.string().min(1),
+      email: z.string().default(''),
+      phone: z.string().default(''),
+      website: z.string().default(''),
+      industry: z.string().default(''),
+      teamSize: z.string().default(''),
+      currentTools: z.array(z.string()).default([]),
+      currentCrm: z.string().default(''),
+      mainBottleneck: z.string().default(''),
+      leadCustomerFlow: z.string().default(''),
+      missedCallFollowUpIssue: z.string().default(''),
+      financePricingCashFlowIssue: z.string().default(''),
+      operationsSopIssue: z.string().default(''),
+      techAutomationIssue: z.string().default(''),
+      desiredOutcome: z.string().default(''),
+      timeline: z.string().default(''),
+      budgetComfortRange: z.string().default(''),
+      uploadedNotesFilesMetadata: z.array(z.unknown()).default([]),
+      permissionToContact: z.boolean().default(false),
+      sessionId: z.string().default(''),
+      leadId: z.string().default(''),
+      clientId: z.string().default(''),
+      submittedAt: z.string().default(''),
+      memoryScope: z.string().default(''),
+    }),
+    scopes: ['runtime.intake.write', 'runtime.memory.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'intake',
+      action: 'create_record',
+      resourceType: 'intake_record',
+      resourceIdField: 'businessName',
+      sensitiveFields: ['businessName', 'contactName', 'email', 'phone', 'website', 'mainBottleneck', 'desiredOutcome'],
+      logEvents: ['tool.intake.create_record.requested', 'tool.intake.create_record.completed'],
+    },
+    executor: async (input, context) =>
+      createIntakeRecord(input, {
+        sessionId: context.sessionId,
+        leadId: typeof input.leadId === 'string' && input.leadId ? input.leadId : undefined,
+        clientId: typeof input.clientId === 'string' && input.clientId ? input.clientId : undefined,
+        submittedAt: typeof input.submittedAt === 'string' && input.submittedAt ? input.submittedAt : undefined,
+        memoryScope: typeof input.memoryScope === 'string' && input.memoryScope ? input.memoryScope : undefined,
+      }),
+  },
+  {
+    name: 'intake.classify',
+    description: 'Classify an intake into the best internal specialist route with reasons and risk flags. Draft-safe and internal only.',
+    inputSchema: objectSchema(intakeFormSchemaProperties, ['businessName', 'contactName']),
+    parameters: z.object({
+      businessName: z.string().min(1),
+      contactName: z.string().min(1),
+      email: z.string().default(''),
+      phone: z.string().default(''),
+      website: z.string().default(''),
+      industry: z.string().default(''),
+      teamSize: z.string().default(''),
+      currentTools: z.array(z.string()).default([]),
+      currentCrm: z.string().default(''),
+      mainBottleneck: z.string().default(''),
+      leadCustomerFlow: z.string().default(''),
+      missedCallFollowUpIssue: z.string().default(''),
+      financePricingCashFlowIssue: z.string().default(''),
+      operationsSopIssue: z.string().default(''),
+      techAutomationIssue: z.string().default(''),
+      desiredOutcome: z.string().default(''),
+      timeline: z.string().default(''),
+      budgetComfortRange: z.string().default(''),
+      uploadedNotesFilesMetadata: z.array(z.unknown()).default([]),
+      permissionToContact: z.boolean().default(false),
+    }),
+    scopes: ['runtime.intake.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'intake',
+      action: 'classify',
+      resourceType: 'intake_classification',
+      sensitiveFields: ['businessName', 'contactName', 'email', 'phone', 'website', 'mainBottleneck', 'desiredOutcome'],
+      logEvents: ['tool.intake.classify.requested', 'tool.intake.classify.completed'],
+    },
+    executor: async (input) => classifyIntake(input),
+  },
+  {
+    name: 'intake.route_specialist',
+    description: 'Create an internal draft request for the selected specialist from an intake record. Draft-safe: creates only internal deliverable/memory placeholders and never sends externally.',
+    inputSchema: objectSchema(
+      { intakeRecord: intakeRecordSchema, requestedAt: stringSchema('Optional routing request timestamp.'), memoryScope: stringSchema('Optional memory scope override for the internal deliverable memory.') },
+      ['intakeRecord'],
+    ),
+    parameters: z.object({
+      intakeRecord: z.any(),
+      requestedAt: z.string().default(''),
+      memoryScope: z.string().default(''),
+    }),
+    scopes: ['runtime.intake.write', 'runtime.memory.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'intake',
+      action: 'route_specialist',
+      resourceType: 'specialist_draft_request',
+      resourceIdField: 'intakeRecord',
+      sensitiveFields: ['intakeRecord'],
+      logEvents: ['tool.intake.route_specialist.requested', 'tool.intake.route_specialist.completed'],
+    },
+    executor: async (input, context) => {
+      const intakeRecord = { ...input.intakeRecord, sessionId: input.intakeRecord?.sessionId ?? context.sessionId };
+      return routeSpecialist(intakeRecord, {
+        requestedAt: typeof input.requestedAt === 'string' && input.requestedAt ? input.requestedAt : undefined,
+        memoryScope: typeof input.memoryScope === 'string' && input.memoryScope ? input.memoryScope : undefined,
+      });
+    },
+  },
+  {
+    name: 'intake.package_for_review',
+    description: 'Package an internal specialist draft for Jordan review. Draft-safe: marks output as not approved for external send.',
+    inputSchema: objectSchema(
+      {
+        intakeRecord: intakeRecordSchema,
+        classification: intakeClassificationSchema,
+        specialistDraftContent: {
+          description: 'Internal specialist draft content to package for human review.',
+          oneOf: [{ type: 'string' }, { type: 'object', additionalProperties: true }],
+        },
+        riskFlags: { type: 'array', description: 'Optional risk flags to include; defaults to classification risk flags.', items: { type: 'object', additionalProperties: true } },
+        recommendedNextStep: stringSchema('Suggested next action for Jordan to review.'),
+        packagedAt: stringSchema('Optional package creation timestamp.'),
+      },
+      ['intakeRecord', 'classification', 'specialistDraftContent', 'recommendedNextStep'],
+    ),
+    parameters: z.object({
+      intakeRecord: z.any(),
+      classification: z.any(),
+      specialistDraftContent: z.union([z.string(), z.record(z.string(), z.unknown())]),
+      riskFlags: z.array(z.any()).optional(),
+      recommendedNextStep: z.string().min(1),
+      packagedAt: z.string().default(''),
+    }),
+    scopes: ['runtime.intake.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'intake',
+      action: 'package_for_review',
+      resourceType: 'intake_review_package',
+      resourceIdField: 'intakeRecord',
+      sensitiveFields: ['intakeRecord', 'specialistDraftContent'],
+      logEvents: ['tool.intake.package_for_review.requested', 'tool.intake.package_for_review.completed'],
+    },
+    executor: async (input) =>
+      packageForReview({
+        intakeRecord: input.intakeRecord,
+        classification: input.classification,
+        specialistDraftContent: input.specialistDraftContent,
+        riskFlags: input.riskFlags,
+        recommendedNextStep: input.recommendedNextStep,
+        packagedAt: input.packagedAt || undefined,
+      }),
   },
   {
     name: 'voice.transcribe_audio',
@@ -1051,7 +1260,7 @@ export function runtimeToolsForRiskLevels(riskLevels: ToolRiskLevel[]) {
   return toolRegistry.filter((definition) => desired.has(definition.riskLevel)).map(toRuntimeTool);
 }
 
-export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'voice', 'memory', 'delegation'];
+export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'intake', 'voice', 'memory', 'delegation'];
 export const nexoraRuntimeToolCategories: ToolCategory[] = [...sharedRuntimeToolCategories, 'code', 'vscode'];
 
 export const runtimeTools = runtimeToolsForCategories(sharedRuntimeToolCategories);

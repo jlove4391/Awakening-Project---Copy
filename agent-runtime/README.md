@@ -54,6 +54,40 @@ AGENT_RUNTIME_URL=http://localhost:4317 AGENT_RUNTIME_DATA_DIR=/tmp/awakening-ru
 
 The runtime must be configured with the same credentials you use for normal local chat runs, including `OPENAI_API_KEY` when the selected model/provider requires it.
 
+## Manual Session Persistence Checklist
+
+Use this short manual check when you need to confirm Elora can resume a conversation after the runtime process restarts. Do not add automated process management for this path unless a later task requires it.
+
+- [ ] Start the runtime with the normal development command:
+
+  ```bash
+  npm run dev:agent-runtime
+  ```
+
+- [ ] Send a chat message to Elora that includes memorable context. The exact API endpoint is `POST http://localhost:4317/api/chat`, and the request body shape is:
+
+  ```json
+  {
+    "agent": "elora",
+    "message": "Hi ELORA, remember that my test phrase is blue lantern over Cedar Bay."
+  }
+  ```
+
+- [ ] Save the returned `sessionId` from either the `session` SSE event or the final `completed` SSE event. Expected success criteria: the response streams server-sent events, includes a non-empty `sessionId`, and ends with a `completed` event for `agent: "elora"`.
+- [ ] Stop the runtime process.
+- [ ] Restart the runtime with `npm run dev:agent-runtime`.
+- [ ] Send a new message using the saved `sessionId`. Use the same endpoint, `POST http://localhost:4317/api/chat`, with this request body shape:
+
+  ```json
+  {
+    "agent": "elora",
+    "sessionId": "<saved-session-id>",
+    "message": "What memorable test phrase did I ask you to remember?"
+  }
+  ```
+
+- [ ] Confirm ELORA references the prior context. Expected success criteria: the response streams to `completed`, the `completed.sessionId` matches the saved `sessionId`, and the answer mentions the prior phrase, such as `blue lantern over Cedar Bay`.
+
 
 ## Google Provider Adapters
 

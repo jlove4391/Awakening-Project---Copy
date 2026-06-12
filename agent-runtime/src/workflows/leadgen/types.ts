@@ -22,6 +22,21 @@ export interface LeadgenIcp {
   summary: string;
 }
 
+
+export interface LeadScoreDimensions {
+  industryFit: number;
+  localServiceFit: number;
+  missedCallLikelihood: number;
+  followUpPainLikelihood: number;
+  aiAutomationFit: number;
+  abilityToPay: number;
+  decisionMakerIdentified: number;
+  emailPhoneConfidence: number;
+  complianceRisk: number;
+  estimatedValue: number;
+  recommendedFirstOffer: string;
+}
+
 export interface LeadRecord {
   id: string;
   fullName: string;
@@ -35,6 +50,7 @@ export interface LeadRecord {
   source: string;
   status: 'discovered' | 'enriched' | 'scored' | 'approved' | 'exported' | 'contacted' | 'follow_up_due';
   score?: number;
+  scoreDimensions?: LeadScoreDimensions;
   scoreReasons?: string[];
   enrichment?: Record<string, unknown>;
   outreachDraft?: OutreachDraft;

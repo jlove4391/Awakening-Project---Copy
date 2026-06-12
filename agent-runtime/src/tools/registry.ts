@@ -1046,10 +1046,16 @@ export function runtimeToolsForCategories(categories: ToolCategory[]) {
   return toolRegistry.filter((definition) => desired.has(definition.audit.category)).map(toRuntimeTool);
 }
 
+export function runtimeToolsForRiskLevels(riskLevels: ToolRiskLevel[]) {
+  const desired = new Set(riskLevels);
+  return toolRegistry.filter((definition) => desired.has(definition.riskLevel)).map(toRuntimeTool);
+}
+
 export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'voice', 'memory', 'delegation'];
 export const nexoraRuntimeToolCategories: ToolCategory[] = [...sharedRuntimeToolCategories, 'code', 'vscode'];
 
 export const runtimeTools = runtimeToolsForCategories(sharedRuntimeToolCategories);
+export const safeRuntimeTools = runtimeToolsForRiskLevels(['read']);
 export const nexoraRuntimeTools = runtimeToolsForCategories(nexoraRuntimeToolCategories);
 
 export const toolManifest = toolRegistry.map(({ executor: _executor, parameters: _parameters, ...definition }) => definition);

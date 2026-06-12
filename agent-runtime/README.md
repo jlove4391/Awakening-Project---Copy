@@ -114,5 +114,7 @@ Optional smoke variables: `GOOGLE_CALENDAR_ID`, `SMOKE_SESSION_ID`, `SMOKE_TIME_
 
 Read/list tools execute directly once OAuth is connected. Google write/send tools (`calendar.create_event`, `gmail.send_email`, `drive.create_text_file`, and `sheets.update_range`) are registered with `humanApprovalRequired: true` and fail closed until their input includes `confirmedByUser: true` after explicit user approval.
 
+See `docs/approvals.md` for the Phase 1 approval replay checklist covering pending execution discovery, approval replay, Google Calendar event confirmation, and execution receipt verification.
+
 ## Tool Registry
 

@@ -13,7 +13,8 @@
     "smoke:chat": "tsx scripts/smoke-chat.mjs",
     "smoke:voice": "tsx scripts/smoke-voice.ts",
     "smoke:google-calendar": "tsx scripts/smoke-google-calendar.ts",
-    "smoke:specialists": "tsx scripts/smoke-specialist-routing.ts"
+    "smoke:specialists": "tsx scripts/smoke-specialist-routing.ts",
+    "smoke:intake-routing": "tsx scripts/smoke-intake-routing.ts"
   },
   "dependencies": {
     "@openai/agents": "latest",

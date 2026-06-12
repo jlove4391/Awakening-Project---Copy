@@ -28,6 +28,7 @@
     "test:shared": "npm --workspace @awakening/shared run test",
     "smoke:chat": "npm --workspace @awakening/agent-runtime run smoke:chat --",
     "smoke:voice": "npm --workspace @awakening/agent-runtime run smoke:voice",
-    "smoke:specialists": "npm --workspace @awakening/agent-runtime run smoke:specialists --"
+    "smoke:specialists": "npm --workspace @awakening/agent-runtime run smoke:specialists --",
+    "smoke:intake-routing": "npm --workspace @awakening/agent-runtime run smoke:intake-routing --"
   }
 }

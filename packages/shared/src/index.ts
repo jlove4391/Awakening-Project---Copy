@@ -1,4 +1,4 @@
-export type RuntimeAgentName = 'elora' | 'nexora';
+export type RuntimeAgentName = 'elora' | 'nexora' | 'kaz' | 'jynx';
 
 export interface ToolInvocation {
   id: string;
@@ -102,7 +102,7 @@ export interface DelegatedTask {
   id: string;
   sessionId: string;
   parentAgent: 'elora';
-  assignedAgent: 'nexora';
+  assignedAgent: Exclude<RuntimeAgentName, 'elora'>;
   objective: string;
   constraints: string[];
   requiredTools: string[];

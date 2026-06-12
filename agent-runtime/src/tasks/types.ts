@@ -1,4 +1,4 @@
-export type RuntimeAgentName = 'elora' | 'nexora';
+export type RuntimeAgentName = 'elora' | 'nexora' | 'kaz' | 'jynx';
 
 export type DelegatedTaskStatus = 'queued' | 'pending_approval' | 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled';
 
@@ -68,7 +68,7 @@ export interface DelegatedTask {
   id: string;
   sessionId: string;
   parentAgent: 'elora';
-  assignedAgent: 'nexora';
+  assignedAgent: Exclude<RuntimeAgentName, 'elora'>;
   objective: string;
   constraints: string[];
   requiredTools: string[];

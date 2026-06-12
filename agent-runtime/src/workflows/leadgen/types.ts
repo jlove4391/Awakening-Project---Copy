@@ -41,6 +41,14 @@ export type LeadStatus =
   | 'archived'
   | (string & {});
 
+
+export type LeadReviewStatus =
+  | 'ready_for_review'
+  | 'needs_scoring'
+  | 'manually_approved_compliance_risk'
+  | 'manual_review_required'
+  | (string & {});
+
 export type FollowUpStatus =
   | 'not_scheduled'
   | 'scheduled'
@@ -103,6 +111,8 @@ export interface LeadInboxItem {
   tags?: string[];
   assignedTo?: string;
   dueAt?: string;
+  recommendedFirstOffer?: string;
+  reviewStatus?: LeadReviewStatus;
   createdAt: string;
   updatedAt: string;
   metadata?: Record<string, unknown>;

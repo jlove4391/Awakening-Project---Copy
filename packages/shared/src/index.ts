@@ -248,6 +248,35 @@ export interface LeadRecord {
   metadata?: Record<string, SharedRecordValue>;
 }
 
+export type QualificationSource = 'form' | 'transcript' | 'manual';
+
+export type QualificationStatus =
+  | 'draft'
+  | 'needs_review'
+  | 'qualified'
+  | 'disqualified'
+  | 'archived'
+  | (string & {});
+
+export interface QualificationRecord {
+  id: string;
+  leadId: string;
+  intakeId: string;
+  source: QualificationSource;
+  monthlyLeadVolume: number;
+  responseSpeed: string;
+  missedCallsMessages: number;
+  crmTrackingSystem: string;
+  averageJobCustomerValue: number;
+  closeRate: number;
+  crackFallthroughPoints: string[];
+  desired30DayImprovement: string;
+  qualificationScore: number;
+  status: QualificationStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface IntakeRecord {
   id: string;
   createdAt: string;

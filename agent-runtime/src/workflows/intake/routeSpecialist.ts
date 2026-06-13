@@ -117,6 +117,16 @@ const SPECIALIST_DELIVERABLES: Record<
       'Do not contact the client, assign work externally, or present the draft as a finalized deliverable.',
     ],
   },
+  kalyra: {
+    label: 'Kalyra Buyer Readiness Draft',
+    deliverableType: 'buyer_readiness_draft',
+    objective: 'Create an internal buyer-readiness draft that maps pain points, buyer priorities, objection prep, follow-up questions, value proposition refinements, missed buying signals, and respectful confidence-building language.',
+    instructions: [
+      'Focus on personalized offer draft angles, proposal review call scripts, buyer priorities, objection handling prep, follow-up question banks, closing conversation notes, and welcome language.',
+      'Avoid manipulative pressure, false urgency, deceptive persuasion, or coercive tactics; keep recommendations transparent and buyer-centered.',
+      'Do not send externally or make client-facing promises without Jordan approval.',
+    ],
+  },
   jynx: {
     label: 'Jynx Finance Operations Draft',
     deliverableType: 'finance_operations_diagnostic_draft',

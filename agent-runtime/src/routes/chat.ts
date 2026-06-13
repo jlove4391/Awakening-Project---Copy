@@ -4,7 +4,7 @@ import { runAgentMessage } from '../agentEndpoint.js';
 import { setupSse, sendEvent } from '../lib/sse.js';
 import type { ChatRequestBody } from '../types.js';
 
-const allowedAgents = new Set(['elora', 'nexora', 'kaz', 'jynx']);
+const allowedAgents = new Set(['elora', 'nexora', 'kaz', 'jynx', 'kalyra']);
 const allowedAgentList = Array.from(allowedAgents).join(', ');
 
 export const chatRouter = Router();

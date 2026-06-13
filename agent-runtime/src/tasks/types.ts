@@ -1,4 +1,4 @@
-export type RuntimeAgentName = 'elora' | 'nexora' | 'kaz' | 'jynx';
+export type RuntimeAgentName = 'elora' | 'nexora' | 'kaz' | 'jynx' | 'kalyra';
 
 export type DelegatedTaskStatus = 'queued' | 'pending_approval' | 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled';
 

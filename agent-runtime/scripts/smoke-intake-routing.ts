@@ -4,7 +4,7 @@ import 'dotenv/config';
 import { executeRegisteredTool } from '../src/tools/registry.js';
 import type { RuntimeContext } from '../src/types.js';
 
-type IntakeSpecialist = 'nexora' | 'kaz' | 'jynx';
+type IntakeSpecialist = 'nexora' | 'kaz' | 'jynx' | 'kalyra';
 
 type SmokeCase = {
   label: string;
@@ -63,6 +63,27 @@ const smokeCases: SmokeCase[] = [
       desiredOutcome: 'Create a process map and priority SOP backlog for the operating team.',
       timeline: '45 days',
       budgetComfortRange: '$4k-$7k',
+      permissionToContact: true,
+    },
+  },
+
+  {
+    label: 'Buyer-readiness and proposal signals route to Kalyra',
+    expectedSpecialist: 'kalyra',
+    intake: {
+      businessName: 'Lumen Advisory Collective',
+      contactName: 'Serena Hale',
+      email: 'serena@example.com',
+      phone: '+1 555 0133',
+      website: 'https://lumen.example.com',
+      industry: 'Professional services consulting',
+      teamSize: '5',
+      currentTools: [],
+      currentCrm: '',
+      mainBottleneck: 'Proposal review calls miss buyer pain points, decision criteria, objections, buying signals, and confidence-building next steps.',
+      desiredOutcome: 'Refine the offer, value proposition, follow-up question bank, buyer priority map, and welcome language for a respectful close.',
+      timeline: '30 days',
+      budgetComfortRange: '$5k-$9k',
       permissionToContact: true,
     },
   },

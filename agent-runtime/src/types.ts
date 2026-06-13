@@ -1,5 +1,5 @@
 import type { Session } from '@openai/agents';
-export type RuntimeAgentName = 'elora' | 'nexora' | 'kaz' | 'jynx';
+export type RuntimeAgentName = 'elora' | 'nexora' | 'kaz' | 'jynx' | 'kalyra';
 
 export type TaskStatus = 'queued' | 'running' | 'blocked' | 'completed' | 'failed';
 

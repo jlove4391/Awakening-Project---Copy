@@ -10,7 +10,7 @@ import {
   writeExecutionRecord,
 } from '../executions.js';
 import { createCalendarEvent, listCalendarEvents } from '../providers/google/calendar.js';
-import { lookupCrmContact, upsertCrmContact } from '../providers/crm/index.js';
+import { appendActivity, lookupCrmContact, updateLeadStatus, upsertCrmContact } from '../providers/crm/index.js';
 import { enrichPersonWithClay } from '../providers/clay/index.js';
 import { exportSequence, findLeadsWorkflow } from '../workflows/leadgen/index.js';
 import { classifyReply } from '../workflows/outreach/classifyReply.js';
@@ -691,6 +691,48 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       logEvents: ['tool.crm.upsert_contact.approval_requested', 'tool.crm.upsert_contact.completed'],
     },
     executor: upsertCrmContact,
+  },
+  {
+    name: 'crm.update_lead_status',
+    description: 'Update CRM lead status through the configured CRM provider.',
+    inputSchema: objectSchema(
+      { contactId: stringSchema('CRM contact ID.'), email: stringSchema('Contact email.'), leadId: stringSchema('Workflow lead ID.'), status: stringSchema('New lead status.'), statusNote: stringSchema('Status note.'), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema },
+      ['status'],
+    ),
+    parameters: z.object({ contactId: z.string().default(''), email: z.string().default(''), leadId: z.string().default(''), status: z.string().min(1), statusNote: z.string().default(''), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
+    scopes: ['crm.contacts.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'crm',
+      action: 'update_lead_status',
+      resourceType: 'crm_contact',
+      resourceIdField: 'contactId',
+      sensitiveFields: ['contactId', 'email', 'leadId', 'status', 'statusNote'],
+      logEvents: ['tool.crm.update_lead_status.approval_requested', 'tool.crm.update_lead_status.completed'],
+    },
+    executor: updateLeadStatus,
+  },
+  {
+    name: 'crm.append_activity',
+    description: 'Append a CRM activity to a contact or lead through the configured CRM provider.',
+    inputSchema: objectSchema(
+      { contactId: stringSchema('CRM contact ID.'), email: stringSchema('Contact email.'), leadId: stringSchema('Workflow lead ID.'), activityType: stringSchema('Activity type.'), title: stringSchema('Activity title.'), body: stringSchema('Activity details.'), occurredAt: stringSchema('Activity timestamp.'), metadata: { type: 'object', description: 'Provider-specific activity metadata.', additionalProperties: true }, confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema },
+      ['activityType', 'title'],
+    ),
+    parameters: z.object({ contactId: z.string().default(''), email: z.string().default(''), leadId: z.string().default(''), activityType: z.string().min(1), title: z.string().min(1), body: z.string().default(''), occurredAt: z.string().default(''), metadata: z.record(z.string(), z.unknown()).default({}), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
+    scopes: ['crm.contacts.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'crm',
+      action: 'append_activity',
+      resourceType: 'crm_activity',
+      resourceIdField: 'contactId',
+      sensitiveFields: ['contactId', 'email', 'leadId', 'activityType', 'title', 'body', 'metadata'],
+      logEvents: ['tool.crm.append_activity.approval_requested', 'tool.crm.append_activity.completed'],
+    },
+    executor: appendActivity,
   },
   {
     name: 'clay.enrich_person',

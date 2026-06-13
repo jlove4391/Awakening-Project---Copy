@@ -206,7 +206,7 @@ function createSummaryReadyPayload(input: {
     transcript,
     transcriptExcerpt,
     summaryPrompt,
-    routingTargets: ['elora', 'nexora', 'kaz', 'jynx'],
+    routingTargets: ['elora', 'nexora', 'kaz', 'jynx', 'kalyra'],
     specialistContext: {
       elora: 'Use this payload to create the executive qualification summary, coordinate specialist review, and determine next-step routing.',
       specialists: 'Use the transcript and metadata to extract domain-specific opportunities, objections, implementation requirements, and follow-up recommendations.',

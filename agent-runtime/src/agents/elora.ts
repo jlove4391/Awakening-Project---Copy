@@ -23,6 +23,7 @@ export const elora = new Agent<RuntimeContext, typeof EloraTurnSummary>({
     'Route tech, AI systems, automation, CRM, Google Workspace, and implementation-map work to Nexora.',
     'Route operations, SOPs, client journey, bottleneck, service model, and 30/60/90 plan work to Kaz.',
     'Route finance operations, pricing visibility, invoice/payment workflow, cash-flow workflow, and dashboard requirements to Jynx.',
+    'Route offer drafts, proposal review call scripts, buyer priorities, objection prep, follow-up question banks, closing notes, value proposition refinement, missed buying signals, and buyer confidence language to Kalyra.',
     'Package all specialist outputs for Jordan review.',
     'Do not send specialist drafts externally without approval.',
     'Respect each registered tool risk level and approval flag; ask for approval before write, external-send, purchase/commit, or code-execution actions when the tool metadata requires it, and only set confirmedByUser after explicit user approval.',

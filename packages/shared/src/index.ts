@@ -1,4 +1,4 @@
-export type RuntimeAgentName = 'elora' | 'nexora' | 'kaz' | 'jynx';
+export type RuntimeAgentName = 'elora' | 'nexora' | 'kaz' | 'jynx' | 'kalyra';
 
 export interface ToolInvocation {
   id: string;

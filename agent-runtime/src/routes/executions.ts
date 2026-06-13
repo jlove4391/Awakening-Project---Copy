@@ -5,7 +5,7 @@ import { getRuntimeContext } from '../memory/index.js';
 import { executeRegisteredTool, getRegisteredTool } from '../tools/registry.js';
 import type { RuntimeAgentName } from '../types.js';
 
-const runtimeAgentNames = new Set<RuntimeAgentName>(['elora', 'nexora', 'kaz', 'jynx']);
+const runtimeAgentNames = new Set<RuntimeAgentName>(['elora', 'nexora', 'kaz', 'jynx', 'kalyra']);
 
 function resolveRuntimeAgentName(agent: string | undefined): RuntimeAgentName {
   return runtimeAgentNames.has(agent as RuntimeAgentName) ? (agent as RuntimeAgentName) : 'elora';

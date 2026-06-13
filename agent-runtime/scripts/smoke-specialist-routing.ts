@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 
-type RuntimeAgentName = 'nexora' | 'kaz' | 'jynx';
+type RuntimeAgentName = 'nexora' | 'kaz' | 'jynx' | 'kalyra';
 
 type SmokeCase = {
   agent: RuntimeAgentName;
@@ -54,6 +54,17 @@ const smokeCases: SmokeCase[] = [
       'Create a concise internal SOP/process draft for a client onboarding handoff with unclear owners, bottlenecks, and missing quality checks.',
       'Do not call tools or send anything externally.',
       'Include either the phrase "Specialist: Kaz" or the heading "SOP/Process Draft" in the visible response.',
+    ].join(' '),
+  },
+
+  {
+    agent: 'kalyra',
+    label: 'Kalyra buyer-readiness draft',
+    expected: ['kalyra', 'buyer-readiness draft', 'buyer readiness draft'],
+    prompt: [
+      'Create a concise internal buyer-readiness draft for a proposal review call with buyer priorities, pain points, objections, missed buying signals, and welcome language.',
+      'Do not call tools or send anything externally. Do not use manipulative pressure or make promises without Jordan approval.',
+      'Include either the phrase "Specialist: Kalyra" or the heading "Buyer-Readiness Draft" in the visible response.',
     ].join(' '),
   },
   {

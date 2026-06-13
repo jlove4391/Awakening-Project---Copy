@@ -1,6 +1,7 @@
 import { run } from '@openai/agents';
 import { elora } from './agents/elora.js';
 import { jynx } from './agents/jynx.js';
+import { kalyra } from './agents/kalyra.js';
 import { kaz } from './agents/kaz.js';
 import { nexora } from './agents/nexora.js';
 import { getRuntimeContext, listMemories, persistRuntimeContext } from './memory/index.js';
@@ -24,6 +25,7 @@ const runtimeAgents = {
   nexora,
   kaz,
   jynx,
+  kalyra,
 } as const satisfies Record<RuntimeAgentName, unknown>;
 
 function isRuntimeAgentName(agent: unknown): agent is RuntimeAgentName {

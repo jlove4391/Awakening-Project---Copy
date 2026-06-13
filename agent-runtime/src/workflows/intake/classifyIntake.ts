@@ -48,7 +48,7 @@ type KeywordSignal = {
   label: string;
 };
 
-const SPECIALIST_ORDER: IntakeSpecialist[] = ['nexora', 'kaz', 'jynx'];
+const SPECIALIST_ORDER: IntakeSpecialist[] = ['nexora', 'kaz', 'jynx', 'kalyra'];
 
 const FIELD_SIGNALS: SpecialistSignal[] = [
   { specialist: 'nexora', field: 'techAutomationIssue', signal: 'reported tech or automation issue', weight: 5 },
@@ -61,6 +61,9 @@ const FIELD_SIGNALS: SpecialistSignal[] = [
   { specialist: 'kaz', field: 'missedCallFollowUpIssue', signal: 'follow-up process gap', weight: 2 },
   { specialist: 'jynx', field: 'financePricingCashFlowIssue', signal: 'reported finance, pricing, cash-flow, or invoice issue', weight: 5 },
   { specialist: 'jynx', field: 'budgetComfortRange', signal: 'budget or pricing context', weight: 1 },
+  { specialist: 'kalyra', field: 'desiredOutcome', signal: 'buyer desired outcome or value proposition context', weight: 3 },
+  { specialist: 'kalyra', field: 'mainBottleneck', signal: 'buyer pain point context', weight: 1 },
+  { specialist: 'kalyra', field: 'budgetComfortRange', signal: 'buyer priority or offer-fit context', weight: 1 },
 ];
 
 const KEYWORD_SIGNALS: KeywordSignal[] = [
@@ -119,6 +122,33 @@ const KEYWORD_SIGNALS: KeywordSignal[] = [
     ],
     weight: 2,
     label: 'operations/SOP/process keyword',
+  },
+
+  {
+    specialist: 'kalyra',
+    keywords: [
+      'offer',
+      'proposal',
+      'close',
+      'closing',
+      'sales call',
+      'buyer',
+      'objection',
+      'follow-up question',
+      'follow up question',
+      'priority',
+      'pain point',
+      'value proposition',
+      'buying signal',
+      'confidence',
+      'welcome language',
+      'review call',
+      'decision criteria',
+      'stakeholder',
+      'roi',
+    ],
+    weight: 2,
+    label: 'sales enablement/buyer-readiness keyword',
   },
   {
     specialist: 'jynx',
@@ -312,7 +342,7 @@ function createConfidence(scores: Record<IntakeSpecialist, number>, primary: Int
 
 export function classifyIntake(rawInput: unknown): IntakeClassificationResult {
   const form = IntakeFormSchema.parse(rawInput);
-  const scores: Record<IntakeSpecialist, number> = { nexora: 0, kaz: 0, jynx: 0 };
+  const scores: Record<IntakeSpecialist, number> = { nexora: 0, kaz: 0, jynx: 0, kalyra: 0 };
   const matchedSignals: IntakeClassificationReason[] = [];
 
   for (const signal of FIELD_SIGNALS) {

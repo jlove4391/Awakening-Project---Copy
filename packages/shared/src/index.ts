@@ -324,6 +324,36 @@ export interface DeliverableRecord {
   metadata?: Record<string, SharedRecordValue>;
 }
 
+export interface OfferTemplateRecord {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: string;
+  name: string;
+  description?: string;
+  recommendedSolution?: string;
+  implementationScope?: string[];
+  included?: string[];
+  notIncluded?: string[];
+  timeline?: string;
+  priceOptions?: string[];
+  quickWinPromise?: string;
+  metadata?: Record<string, SharedRecordValue>;
+}
+
+export interface ProposalReviewCall {
+  id: string;
+  proposalId: string;
+  createdAt: string;
+  updatedAt: string;
+  status: string;
+  scheduledFor?: string;
+  agenda: string[];
+  unresolvedQuestions?: string[];
+  notes?: string;
+  metadata?: Record<string, SharedRecordValue>;
+}
+
 export interface ProposalRecord {
   id: string;
   createdAt: string;
@@ -333,8 +363,24 @@ export interface ProposalRecord {
   clientId?: string;
   intakeId?: string;
   sessionId?: string;
+  offerTemplateId?: string;
   title?: string;
   summary?: string;
+  painSummaryInProspectLanguage?: string;
+  currentState?: string;
+  costOfInaction?: string;
+  desiredOutcome?: string;
+  recommendedSolution?: string;
+  first30DayPlan?: string;
+  quickWinPromise?: string;
+  implementationScope?: string[];
+  included?: string[];
+  notIncluded?: string[];
+  timeline?: string;
+  priceOptions?: string[];
+  reviewCallAgenda?: string[];
+  unresolvedQuestions?: string[];
+  reviewCall?: ProposalReviewCall;
   totalAmount?: number;
   currency?: string;
   validUntil?: string;

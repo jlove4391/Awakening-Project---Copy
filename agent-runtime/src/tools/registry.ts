@@ -16,6 +16,10 @@ import { classifyIntake } from '../workflows/intake/classifyIntake.js';
 import { createIntakeRecord } from '../workflows/intake/createIntakeRecord.js';
 import { packageForReview } from '../workflows/intake/packageForReview.js';
 import { routeSpecialist } from '../workflows/intake/routeSpecialist.js';
+import { importTranscript } from '../workflows/qualification/importTranscript.js';
+import { checkQualificationGate } from '../workflows/qualification/qualificationGate.js';
+import { scoreQualification } from '../workflows/qualification/scoreQualification.js';
+import { QualificationRecordSchema, type QualificationRecord } from '../workflows/qualification/types.js';
 import { createDriveTextFile, searchDriveFiles } from '../providers/google/drive.js';
 import { searchGmailMessages, sendGmailEmail } from '../providers/google/gmail.js';
 import { readSheetRange, updateSheetRange } from '../providers/google/sheets.js';
@@ -49,6 +53,7 @@ export type ToolCategory =
   | 'clay'
   | 'leadgen'
   | 'intake'
+  | 'qualification'
   | 'voice'
   | 'memory'
   | 'delegation'
@@ -150,6 +155,59 @@ const intakeFormSchemaProperties = {
 };
 const intakeRecordSchema = { type: 'object', additionalProperties: true, description: 'IntakeRecord produced by intake.create_record.' };
 const intakeClassificationSchema = { type: 'object', additionalProperties: true, description: 'Classification result produced by intake.classify.' };
+const qualificationRecordJsonSchema = { type: 'object', additionalProperties: true, description: 'Internal QualificationRecord.' };
+const callTranscriptRecordJsonSchema = { type: 'object', additionalProperties: true, description: 'Internal CallTranscriptRecord.' };
+const qualificationFormSchemaProperties = {
+  leadId: stringSchema('Lead ID to attach this qualification record to.'),
+  intakeId: stringSchema('Intake ID or form submission ID that produced these answers.'),
+  source: stringSchema('Qualification source; defaults to form for create_from_form.'),
+  monthlyLeadVolume: numberSchema('Approximate monthly lead volume.', { minimum: 0 }),
+  responseSpeed: stringSchema('Typical response speed to new leads.'),
+  missedCallsMessages: numberSchema('Estimated missed calls, messages, or unresponded leads per month.', { minimum: 0 }),
+  crmTrackingSystem: stringSchema('CRM, spreadsheet, or tracking system currently used.'),
+  averageJobCustomerValue: numberSchema('Average job, customer, or case value in dollars.', { minimum: 0 }),
+  closeRate: numberSchema('Approximate close rate as a percentage from 0 to 100.', { minimum: 0, maximum: 100 }),
+  crackFallthroughPoints: stringArraySchema('Known places where leads fall through the cracks.'),
+  desired30DayImprovement: stringSchema('Improvement the lead wants in the next 30 days.'),
+  qualificationScore: numberSchema('Optional existing qualification score from 0 to 100; score tool can recompute it.', { minimum: 0, maximum: 100 }),
+  status: stringSchema('Internal qualification status; defaults to needs_review.'),
+  createdAt: stringSchema('Optional creation timestamp.'),
+  updatedAt: stringSchema('Optional update timestamp.'),
+  memoryScope: stringSchema('Optional memory scope for the internal qualification memory.'),
+};
+const qualificationRecordStore = new Map<string, QualificationRecord>();
+
+function compactString(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function qualificationTimestamp(value: unknown) {
+  const text = compactString(value);
+  return text ? new Date(text).toISOString() : new Date().toISOString();
+}
+
+function stableQualificationId(input: Record<string, unknown>) {
+  const serialized = JSON.stringify(input);
+  let hash = 0;
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash = (hash * 31 + serialized.charCodeAt(index)) >>> 0;
+  }
+  return `qualification_${hash.toString(16).padStart(8, '0')}`;
+}
+
+function createQualificationMemoryText(record: QualificationRecord) {
+  return [
+    `Qualification record ${record.id} created for lead ${record.leadId}.`,
+    `Source: ${record.source}.`,
+    `Monthly lead volume: ${record.monthlyLeadVolume}.`,
+    `Missed calls/messages: ${record.missedCallsMessages}.`,
+    `Average customer value: $${record.averageJobCustomerValue}.`,
+    `Close rate: ${record.closeRate}%.`,
+    record.desired30DayImprovement ? `Desired 30-day improvement: ${record.desired30DayImprovement}.` : undefined,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
 
 export const toolRegistry: RegisteredToolDefinition[] = [
   {
@@ -629,6 +687,194 @@ export const toolRegistry: RegisteredToolDefinition[] = [
         recommendedNextStep: input.recommendedNextStep,
         packagedAt: input.packagedAt || undefined,
       }),
+  },
+  {
+    name: 'qualification.create_from_form',
+    description: 'Create an internal qualification record from submitted qualification form details. Internal-only: does not schedule calls, send messages, or contact anyone.',
+    inputSchema: objectSchema(qualificationFormSchemaProperties, ['leadId', 'intakeId']),
+    parameters: z.object({
+      leadId: z.string().min(1),
+      intakeId: z.string().min(1),
+      source: z.enum(['form', 'transcript', 'manual']).default('form'),
+      monthlyLeadVolume: z.number().int().nonnegative().default(0),
+      responseSpeed: z.string().default(''),
+      missedCallsMessages: z.number().int().nonnegative().default(0),
+      crmTrackingSystem: z.string().default(''),
+      averageJobCustomerValue: z.number().nonnegative().default(0),
+      closeRate: z.number().min(0).max(100).default(0),
+      crackFallthroughPoints: z.array(z.string()).default([]),
+      desired30DayImprovement: z.string().default(''),
+      qualificationScore: z.number().min(0).max(100).default(0),
+      status: z.string().default('needs_review'),
+      createdAt: z.string().default(''),
+      updatedAt: z.string().default(''),
+      memoryScope: z.string().default(''),
+    }),
+    scopes: ['runtime.qualification.write', 'runtime.memory.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'qualification',
+      action: 'create_from_form',
+      resourceType: 'qualification_record',
+      resourceIdField: 'leadId',
+      sensitiveFields: ['leadId', 'intakeId', 'responseSpeed', 'crmTrackingSystem', 'crackFallthroughPoints', 'desired30DayImprovement'],
+      logEvents: ['tool.qualification.create_from_form.requested', 'tool.qualification.create_from_form.completed'],
+    },
+    executor: async (input, context) => {
+      const createdAt = qualificationTimestamp(input.createdAt);
+      const updatedAt = compactString(input.updatedAt) ? qualificationTimestamp(input.updatedAt) : createdAt;
+      const record = QualificationRecordSchema.parse({
+        id: stableQualificationId({ leadId: input.leadId, intakeId: input.intakeId, source: input.source, createdAt }),
+        leadId: input.leadId,
+        intakeId: input.intakeId,
+        source: input.source,
+        monthlyLeadVolume: input.monthlyLeadVolume,
+        responseSpeed: input.responseSpeed,
+        missedCallsMessages: input.missedCallsMessages,
+        crmTrackingSystem: input.crmTrackingSystem,
+        averageJobCustomerValue: input.averageJobCustomerValue,
+        closeRate: input.closeRate,
+        crackFallthroughPoints: input.crackFallthroughPoints,
+        desired30DayImprovement: input.desired30DayImprovement,
+        qualificationScore: input.qualificationScore,
+        status: input.status,
+        createdAt,
+        updatedAt,
+      });
+      const memory = await remember(context.sessionId, createQualificationMemoryText(record), {
+        id: record.id,
+        scope: input.memoryScope || 'business_context',
+        tags: ['qualification', 'record', record.leadId, record.source],
+        metadata: { qualificationRecord: record, internalOnly: true, externalCommunication: false, scheduling: false },
+        importance: 0.85,
+        source: 'api',
+        createdAt,
+      });
+      qualificationRecordStore.set(record.id, record);
+      return { record, memoryId: memory.id, memory, internalOnly: true, scheduling: false, externalCommunication: false };
+    },
+  },
+  {
+    name: 'qualification.import_transcript',
+    description: 'Import a qualification call transcript into internal records and memory for summarization/routing. Internal-only: does not schedule follow-ups or send communications.',
+    inputSchema: objectSchema(
+      {
+        transcript: stringSchema('Full call transcript text.'),
+        leadId: stringSchema('Lead ID connected to the transcript.'),
+        callDate: stringSchema('Call date or start timestamp.'),
+        participants: stringArraySchema('Call participant names or IDs.'),
+        source: stringSchema('Transcript source, such as uploaded_file, voice_call, zoom, or manual.'),
+        recordingLink: stringSchema('Optional recording link stored internally; this tool does not share it externally.'),
+        sessionId: stringSchema('Optional source session ID; runtime context is used when omitted.'),
+        clientId: stringSchema('Optional linked client ID.'),
+        proposalId: stringSchema('Optional linked proposal ID.'),
+        endedAt: stringSchema('Optional call end timestamp.'),
+        status: stringSchema('Optional internal transcript status; defaults to imported.'),
+        memoryScope: stringSchema('Optional memory scope for the internal transcript memory.'),
+      },
+      ['transcript', 'leadId', 'callDate', 'source'],
+    ),
+    parameters: z.object({
+      transcript: z.string().min(1),
+      leadId: z.string().min(1),
+      callDate: z.string().min(1),
+      participants: z.array(z.string()).default([]),
+      source: z.string().min(1),
+      recordingLink: z.string().default(''),
+      sessionId: z.string().default(''),
+      clientId: z.string().default(''),
+      proposalId: z.string().default(''),
+      endedAt: z.string().default(''),
+      status: z.string().default('imported'),
+      memoryScope: z.string().default(''),
+    }),
+    scopes: ['runtime.qualification.write', 'runtime.memory.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'qualification',
+      action: 'import_transcript',
+      resourceType: 'call_transcript',
+      resourceIdField: 'leadId',
+      sensitiveFields: ['transcript', 'participants', 'recordingLink'],
+      logEvents: ['tool.qualification.import_transcript.requested', 'tool.qualification.import_transcript.completed'],
+    },
+    executor: async (input, context) =>
+      importTranscript({
+        ...input,
+        sessionId: compactString(input.sessionId) || context.sessionId,
+        recordingLink: compactString(input.recordingLink) || undefined,
+        clientId: compactString(input.clientId) || undefined,
+        proposalId: compactString(input.proposalId) || undefined,
+        endedAt: compactString(input.endedAt) || undefined,
+        memoryScope: compactString(input.memoryScope) || undefined,
+      }),
+  },
+  {
+    name: 'qualification.score',
+    description: 'Score an internal qualification record and recommend the next internal action. Does not book meetings, send outreach, or update external systems.',
+    inputSchema: objectSchema({ record: qualificationRecordJsonSchema }, ['record']),
+    parameters: z.object({ record: QualificationRecordSchema }),
+    scopes: ['runtime.qualification.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'qualification',
+      action: 'score',
+      resourceType: 'qualification_score',
+      resourceIdField: 'record',
+      sensitiveFields: ['record'],
+      logEvents: ['tool.qualification.score.requested', 'tool.qualification.score.completed'],
+    },
+    executor: async (input) => scoreQualification(input.record),
+  },
+  {
+    name: 'qualification.check_gate',
+    description: 'Check whether internal qualification evidence exists before proposal review call creation. This only returns a gate decision; scheduling remains a separate approval-gated action.',
+    inputSchema: objectSchema(
+      {
+        leadId: stringSchema('Optional lead ID to check.'),
+        lead: { type: 'object', additionalProperties: true, description: 'Optional lead record summary.' },
+        intakeRecords: { type: 'array', description: 'Optional internal intake records to inspect.', items: { type: 'object', additionalProperties: true } },
+        callTranscripts: { type: 'array', description: 'Optional internal call transcript records to inspect.', items: callTranscriptRecordJsonSchema },
+        qualificationRecords: { type: 'array', description: 'Optional internal qualification records to inspect.', items: qualificationRecordJsonSchema },
+        hasSubmittedIntakeForm: { type: 'boolean', description: 'Whether trusted internal state says a submitted intake form exists.' },
+        hasImportedCallTranscript: { type: 'boolean', description: 'Whether trusted internal state says an imported call transcript exists.' },
+        hasQualificationRecord: { type: 'boolean', description: 'Whether trusted internal state says a qualification record exists.' },
+      },
+    ),
+    parameters: z.object({
+      leadId: z.string().default(''),
+      lead: z.record(z.string(), z.unknown()).nullable().optional(),
+      intakeRecords: z.array(z.record(z.string(), z.unknown()).nullable().optional()).default([]),
+      callTranscripts: z.array(z.record(z.string(), z.unknown()).nullable().optional()).default([]),
+      qualificationRecords: z.array(z.record(z.string(), z.unknown()).nullable().optional()).default([]),
+      hasSubmittedIntakeForm: z.boolean().default(false),
+      hasImportedCallTranscript: z.boolean().default(false),
+      hasQualificationRecord: z.boolean().default(false),
+    }),
+    scopes: ['runtime.qualification.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'qualification',
+      action: 'check_gate',
+      resourceType: 'qualification_gate',
+      resourceIdField: 'leadId',
+      sensitiveFields: ['lead', 'intakeRecords', 'callTranscripts', 'qualificationRecords'],
+      logEvents: ['tool.qualification.check_gate.requested', 'tool.qualification.check_gate.completed'],
+    },
+    executor: async (input) => {
+      const storedQualificationRecords = input.leadId
+        ? [...qualificationRecordStore.values()].filter((record) => record.leadId === input.leadId)
+        : [...qualificationRecordStore.values()];
+      return checkQualificationGate({
+        ...input,
+        leadId: compactString(input.leadId) || undefined,
+        qualificationRecords: [...input.qualificationRecords, ...storedQualificationRecords],
+      });
+    },
   },
   {
     name: 'voice.transcribe_audio',
@@ -1260,7 +1506,7 @@ export function runtimeToolsForRiskLevels(riskLevels: ToolRiskLevel[]) {
   return toolRegistry.filter((definition) => desired.has(definition.riskLevel)).map(toRuntimeTool);
 }
 
-export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'intake', 'voice', 'memory', 'delegation'];
+export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'intake', 'qualification', 'voice', 'memory', 'delegation'];
 export const nexoraRuntimeToolCategories: ToolCategory[] = [...sharedRuntimeToolCategories, 'code', 'vscode'];
 
 export const runtimeTools = runtimeToolsForCategories(sharedRuntimeToolCategories);

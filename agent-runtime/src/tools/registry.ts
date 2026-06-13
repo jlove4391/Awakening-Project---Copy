@@ -25,6 +25,9 @@ import { importTranscript } from '../workflows/qualification/importTranscript.js
 import { checkQualificationGate } from '../workflows/qualification/qualificationGate.js';
 import { scoreQualification } from '../workflows/qualification/scoreQualification.js';
 import { QualificationRecordSchema, type QualificationRecord } from '../workflows/qualification/types.js';
+import { createProposalPackage } from '../workflows/proposals/createProposalPackage.js';
+import { createProposalReviewCallGate } from '../workflows/proposals/reviewCallGate.js';
+import { ProposalRecordSchema } from '../workflows/proposals/types.js';
 import { createDriveTextFile, searchDriveFiles } from '../providers/google/drive.js';
 import { searchGmailMessages, sendGmailEmail } from '../providers/google/gmail.js';
 import { readSheetRange, updateSheetRange } from '../providers/google/sheets.js';
@@ -60,6 +63,7 @@ export type ToolCategory =
   | 'outreach'
   | 'intake'
   | 'qualification'
+  | 'proposal'
   | 'voice'
   | 'memory'
   | 'delegation'
@@ -163,6 +167,8 @@ const intakeRecordSchema = { type: 'object', additionalProperties: true, descrip
 const intakeClassificationSchema = { type: 'object', additionalProperties: true, description: 'Classification result produced by intake.classify.' };
 const qualificationRecordJsonSchema = { type: 'object', additionalProperties: true, description: 'Internal QualificationRecord.' };
 const callTranscriptRecordJsonSchema = { type: 'object', additionalProperties: true, description: 'Internal CallTranscriptRecord.' };
+const proposalRecordJsonSchema = { type: 'object', additionalProperties: true, description: 'Internal ProposalRecord.' };
+const proposalReviewCallJsonSchema = { type: 'object', additionalProperties: true, description: 'Internal ProposalReviewCall.' };
 const qualificationFormSchemaProperties = {
   leadId: stringSchema('Lead ID to attach this qualification record to.'),
   intakeId: stringSchema('Intake ID or form submission ID that produced these answers.'),
@@ -281,6 +287,67 @@ function createQualificationMemoryText(record: QualificationRecord) {
   ]
     .filter(Boolean)
     .join(' ');
+}
+
+function createProposalReviewScript(input: Record<string, unknown>) {
+  const proposal = ProposalRecordSchema.parse(input.proposal);
+  const reviewCall = input.reviewCall && typeof input.reviewCall === 'object' ? (input.reviewCall as Record<string, unknown>) : {};
+  const opener =
+    compactString(input.opener) ||
+    'I prepared the proposal and would like to walk you through it so we can confirm fit, scope, and next steps together.';
+  const agenda = Array.isArray(reviewCall.agenda) && reviewCall.agenda.length
+    ? reviewCall.agenda.map((item) => compactString(item)).filter(Boolean)
+    : proposal.reviewCallAgenda.length
+      ? proposal.reviewCallAgenda
+      : [
+          'Confirm the current pain and desired outcome in the prospect’s words.',
+          'Walk through the recommended solution and first 30-day plan.',
+          'Review scope, timeline, pricing, and open questions.',
+          'Agree on the safest next step after Jordan review.',
+        ];
+  const unresolvedQuestions = proposal.unresolvedQuestions.length
+    ? proposal.unresolvedQuestions
+    : Array.isArray(reviewCall.unresolvedQuestions)
+      ? reviewCall.unresolvedQuestions.map((item) => compactString(item)).filter(Boolean)
+      : [];
+
+  return {
+    ok: true,
+    status: 'created',
+    workflow: 'proposal',
+    reviewRequiredBy: 'Jordan',
+    externalSend: false,
+    script: {
+      id: compactString(input.scriptId) || `proposal_review_script_${proposal.id}`,
+      proposalId: proposal.id,
+      title: `Review call script: ${proposal.title || proposal.id}`,
+      opener,
+      agenda,
+      discoveryPrompts: [
+        proposal.painSummaryInProspectLanguage ? `When you think about "${proposal.painSummaryInProspectLanguage}", what feels most urgent to fix first?` : 'What feels most urgent to fix first?',
+        proposal.desiredOutcome ? `If we delivered ${proposal.desiredOutcome}, what would change operationally?` : 'What would make this engagement a clear win?',
+        'Who else needs to be involved before we finalize scope and timing?',
+      ],
+      scopeWalkthrough: [
+        proposal.recommendedSolution,
+        proposal.first30DayPlan,
+        ...proposal.implementationScope,
+      ].filter(Boolean),
+      objectionPrep: [
+        'If timing is the concern, isolate the smallest approved first step.',
+        'If price is the concern, reconnect scope to the cost of inaction and confirm budget comfort.',
+        'If access or implementation capacity is the concern, park the item for Jordan review before promising delivery.',
+      ],
+      close: 'The best next step is to confirm what you want adjusted, then Jordan can approve the final client-facing version before anything is sent externally.',
+      unresolvedQuestions,
+      guardrails: [
+        'Do not send the full proposal externally from this script.',
+        'Use the approved walkthrough message rather than a full-proposal email as the main close.',
+        'Jordan must approve final client-facing proposal language and any Google Calendar scheduling.',
+      ],
+      metadata: { source: 'proposal.create_review_script', internalOnly: true, ...(input.metadata as Record<string, unknown> | undefined) },
+    },
+  };
 }
 
 export const toolRegistry: RegisteredToolDefinition[] = [
@@ -1061,6 +1128,177 @@ export const toolRegistry: RegisteredToolDefinition[] = [
     },
   },
   {
+    name: 'proposal.create_package',
+    description: 'Create an internal ELORA final proposal package for Jordan review. Internal-only: does not send the proposal externally.',
+    inputSchema: objectSchema(
+      {
+        crmLeadData: { type: 'object', additionalProperties: true, description: 'Optional CRM lead data snapshot.' },
+        transcriptRecords: { type: 'array', description: 'Optional call transcript records.', items: callTranscriptRecordJsonSchema },
+        notes: { type: 'array', description: 'Optional proposal notes.', items: { oneOf: [{ type: 'string' }, { type: 'object', additionalProperties: true }] } },
+        offerTemplate: { type: 'object', additionalProperties: true, description: 'OfferTemplateRecord for the proposed offer.' },
+        intakeRecord: intakeRecordSchema,
+        domainSpecialistDraft: {
+          description: 'Optional domain specialist draft content.',
+          oneOf: [{ type: 'string' }, { type: 'object', additionalProperties: true }],
+        },
+        createdAt: stringSchema('Optional package creation timestamp.'),
+        packageId: stringSchema('Optional package ID.'),
+      },
+      ['offerTemplate', 'intakeRecord'],
+    ),
+    parameters: z.object({
+      crmLeadData: z.record(z.string(), z.unknown()).optional(),
+      transcriptRecords: z.array(z.object({}).passthrough()).default([]),
+      notes: z.array(z.union([z.string(), z.object({}).passthrough()])).default([]),
+      offerTemplate: z.object({}).passthrough(),
+      intakeRecord: z.object({}).passthrough(),
+      domainSpecialistDraft: z.union([z.string(), z.object({}).passthrough()]).optional(),
+      createdAt: z.string().default(''),
+      packageId: z.string().default(''),
+    }),
+    scopes: ['runtime.proposal.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'proposal',
+      action: 'create_package',
+      resourceType: 'proposal_package',
+      resourceIdField: 'packageId',
+      sensitiveFields: ['crmLeadData', 'transcriptRecords', 'notes', 'intakeRecord', 'domainSpecialistDraft'],
+      logEvents: ['tool.proposal.create_package.requested', 'tool.proposal.create_package.completed'],
+    },
+    executor: async (input) =>
+      createProposalPackage({
+        crmLeadData: input.crmLeadData,
+        transcriptRecords: input.transcriptRecords as any,
+        notes: input.notes as any,
+        offerTemplate: input.offerTemplate as any,
+        intakeRecord: input.intakeRecord as any,
+        domainSpecialistDraft: input.domainSpecialistDraft as any,
+        createdAt: compactString(input.createdAt) || undefined,
+        packageId: compactString(input.packageId) || undefined,
+      }),
+  },
+  {
+    name: 'proposal.create_review_script',
+    description: 'Create an internal proposal review call script for Jordan. Internal-only and not approved for external send.',
+    inputSchema: objectSchema(
+      { proposal: proposalRecordJsonSchema, reviewCall: proposalReviewCallJsonSchema, opener: stringSchema('Optional approved opener.'), scriptId: stringSchema('Optional script ID.'), metadata: genericObjectJsonSchema },
+      ['proposal'],
+    ),
+    parameters: z.object({
+      proposal: ProposalRecordSchema,
+      reviewCall: z.object({}).passthrough().optional(),
+      opener: z.string().default(''),
+      scriptId: z.string().default(''),
+      metadata: z.record(z.string(), z.unknown()).default({}),
+    }),
+    scopes: ['runtime.proposal.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'proposal',
+      action: 'create_review_script',
+      resourceType: 'proposal_review_script',
+      resourceIdField: 'proposal.id',
+      sensitiveFields: ['proposal', 'reviewCall', 'opener'],
+      logEvents: ['tool.proposal.create_review_script.requested', 'tool.proposal.create_review_script.completed'],
+    },
+    executor: async (input) => createProposalReviewScript(input),
+  },
+  {
+    name: 'proposal.check_review_call_gate',
+    description: 'Check proposal review call guardrails and create the internal review-call record. Scheduling remains a separate approval-gated action.',
+    inputSchema: objectSchema(
+      {
+        proposal: proposalRecordJsonSchema,
+        createdAt: stringSchema('Optional gate check timestamp.'),
+        callId: stringSchema('Optional review call ID.'),
+        clientMessage: stringSchema('Candidate client-facing message.'),
+        mainClose: stringSchema('Candidate main close.'),
+        externalFullProposalEmail: { type: 'boolean', description: 'Whether the requested action is to email the full proposal externally.' },
+        scheduleRequest: { type: 'object', additionalProperties: true, description: 'Optional requested scheduling details; does not schedule by itself.' },
+        notes: stringSchema('Optional internal notes.'),
+      },
+      ['proposal'],
+    ),
+    parameters: z.object({
+      proposal: ProposalRecordSchema,
+      createdAt: z.string().default(''),
+      callId: z.string().default(''),
+      clientMessage: z.string().default(''),
+      mainClose: z.string().default(''),
+      externalFullProposalEmail: z.boolean().default(false),
+      scheduleRequest: z.object({}).passthrough().optional(),
+      notes: z.string().default(''),
+    }),
+    scopes: ['runtime.proposal.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'proposal',
+      action: 'check_review_call_gate',
+      resourceType: 'proposal_review_call_gate',
+      resourceIdField: 'proposal.id',
+      sensitiveFields: ['proposal', 'clientMessage', 'mainClose', 'scheduleRequest', 'notes'],
+      logEvents: ['tool.proposal.check_review_call_gate.requested', 'tool.proposal.check_review_call_gate.completed'],
+    },
+    executor: async (input) =>
+      createProposalReviewCallGate({
+        proposal: input.proposal,
+        createdAt: compactString(input.createdAt) || undefined,
+        callId: compactString(input.callId) || undefined,
+        clientMessage: input.clientMessage,
+        mainClose: input.mainClose,
+        externalFullProposalEmail: input.externalFullProposalEmail,
+        scheduleRequest: input.scheduleRequest as any,
+        notes: input.notes,
+      }),
+  },
+  {
+    name: 'proposal.schedule_review_call',
+    description: 'Schedule an approved proposal review call through the configured calendar provider adapter.',
+    inputSchema: objectSchema(
+      {
+        calendarId: stringSchema('Calendar identifier; defaults to primary when omitted.'),
+        summary: stringSchema('Event title.'),
+        description: stringSchema('Event notes or agenda.'),
+        start: stringSchema('ISO-8601 start time.'),
+        end: stringSchema('ISO-8601 end time.'),
+        attendees: stringArraySchema('Attendee email addresses.'),
+        proposalId: stringSchema('Proposal ID linked to this review call.'),
+        reviewCallId: stringSchema('Review call ID linked to this event.'),
+        confirmedByUser: approvalBooleanSchema,
+        approvalNote: approvalNoteSchema,
+      },
+      ['summary', 'start', 'end', 'confirmedByUser'],
+    ),
+    parameters: z.object({
+      calendarId: z.string().default('primary'),
+      summary: z.string().min(1),
+      description: z.string().default(''),
+      start: z.string().min(1),
+      end: z.string().min(1),
+      attendees: z.array(z.string().email()).default([]),
+      proposalId: z.string().default(''),
+      reviewCallId: z.string().default(''),
+      confirmedByUser: z.boolean().default(false),
+      approvalNote: z.string().default(''),
+    }),
+    scopes: ['runtime.proposal.write', 'https://www.googleapis.com/auth/calendar.events'],
+    riskLevel: 'write',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'proposal',
+      action: 'schedule_review_call',
+      resourceType: 'calendar_event',
+      resourceIdField: 'reviewCallId',
+      sensitiveFields: ['summary', 'description', 'attendees', 'proposalId', 'reviewCallId'],
+      logEvents: ['tool.proposal.schedule_review_call.approval_requested', 'tool.proposal.schedule_review_call.completed'],
+    },
+    executor: async (input) => createCalendarEvent(input),
+  },
+  {
     name: 'voice.transcribe_audio',
     description: 'Transcribe a previously uploaded audio artifact.',
     inputSchema: objectSchema({ audioId: stringSchema('Runtime audio artifact ID.'), language: stringSchema('BCP-47 language hint.') }, ['audioId']),
@@ -1690,7 +1928,7 @@ export function runtimeToolsForRiskLevels(riskLevels: ToolRiskLevel[]) {
   return toolRegistry.filter((definition) => desired.has(definition.riskLevel)).map(toRuntimeTool);
 }
 
-export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'outreach', 'intake', 'qualification', 'voice', 'memory', 'delegation'];
+export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'outreach', 'intake', 'qualification', 'proposal', 'voice', 'memory', 'delegation'];
 export const nexoraRuntimeToolCategories: ToolCategory[] = [...sharedRuntimeToolCategories, 'code', 'vscode'];
 
 export const runtimeTools = runtimeToolsForCategories(sharedRuntimeToolCategories);

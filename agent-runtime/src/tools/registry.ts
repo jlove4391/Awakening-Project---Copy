@@ -17,6 +17,9 @@ import { classifyReply } from '../workflows/outreach/classifyReply.js';
 import { recordOptOut } from '../workflows/outreach/optOut.js';
 import { scheduleFollowUp } from '../workflows/outreach/scheduleFollowUp.js';
 import { sendApprovedEmail } from '../workflows/outreach/sendApprovedEmail.js';
+import { createBetterQuestionsPrompt } from '../workflows/objections/betterQuestions.js';
+import { createCallInsightReport } from '../workflows/objections/createCallInsightReport.js';
+import { extractObjections } from '../workflows/objections/extractObjections.js';
 import { classifyIntake } from '../workflows/intake/classifyIntake.js';
 import { createIntakeRecord } from '../workflows/intake/createIntakeRecord.js';
 import { packageForReview } from '../workflows/intake/packageForReview.js';
@@ -61,6 +64,7 @@ export type ToolCategory =
   | 'clay'
   | 'leadgen'
   | 'outreach'
+  | 'objection'
   | 'intake'
   | 'qualification'
   | 'proposal'
@@ -194,6 +198,8 @@ const outreachDraftJsonSchema = { type: 'object', additionalProperties: true, de
 const approvedSendRequestJsonSchema = { type: 'object', additionalProperties: true, description: 'ApprovedSendRequest produced by outreach.approve_send.' };
 const replyClassificationJsonSchema = { type: 'object', additionalProperties: true, description: 'ReplyClassification produced by outreach.classify_reply.' };
 const optOutRecordArrayJsonSchema = { type: 'array', description: 'Known opt-out records to suppress sends.', items: genericObjectJsonSchema };
+const objectionRecordArrayJsonSchema = { type: 'array', description: 'Internal objection records or notes.', items: genericObjectJsonSchema };
+const callInsightReportJsonSchema = { type: 'object', additionalProperties: true, description: 'Internal call insight report produced by objection.create_call_insight_report.' };
 
 async function draftOutreachEmail(input: Record<string, unknown>) {
   const lead = (input.lead && typeof input.lead === 'object' ? input.lead : {}) as Record<string, unknown>;
@@ -226,6 +232,48 @@ async function draftOutreachEmail(input: Record<string, unknown>) {
       createdAt: now,
       updatedAt: now,
       metadata: { source: 'outreach.draft_email', ...(input.metadata as Record<string, unknown> | undefined) },
+    },
+  };
+}
+
+async function createOfferImprovementNotes(input: Record<string, unknown>) {
+  const report = input.callInsightReport && typeof input.callInsightReport === 'object'
+    ? (input.callInsightReport as Record<string, unknown>)
+    : input.callTranscript
+      ? (createCallInsightReport({
+          callTranscript: input.callTranscript as any,
+          prospectContext: input.prospectContext as any,
+          offerProposalContext: (input.offerProposalContext ?? input.offer) as any,
+          createdAt: input.createdAt as any,
+        }) as unknown as Record<string, unknown>)
+      : {};
+  const now = new Date().toISOString();
+  const proposalImprovementNotes = Array.isArray(report.proposalImprovementNotes) ? report.proposalImprovementNotes : [];
+  const offerClarityGaps = Array.isArray(report.offerClarityGaps) ? report.offerClarityGaps : [];
+  const reframeSuggestions = Array.isArray(report.reframeSuggestions) ? report.reframeSuggestions : [];
+
+  return {
+    ok: true,
+    status: 'draft',
+    workflow: 'objection',
+    internalOnly: true,
+    externalSend: false,
+    notes: {
+      id: compactString(input.notesId) || `offer_improvement_notes_${randomUUID()}`,
+      createdAt: now,
+      callInsightReportId: compactString(report.id),
+      leadId: compactString(report.leadId),
+      clientId: compactString(report.clientId),
+      proposalId: compactString(report.proposalId),
+      proposalImprovementNotes,
+      offerClarityGaps,
+      reframeSuggestions,
+      guardrails: [
+        'Internal draft only; do not send externally.',
+        'Jordan must review and approve any client-facing proposal, offer, or follow-up language.',
+        'Preserve buyer autonomy and avoid pressure, false urgency, or assumptive-close language.',
+      ],
+      metadata: { source: 'objection.create_offer_improvement_notes', internalOnly: true, ...(input.metadata as Record<string, unknown> | undefined) },
     },
   };
 }
@@ -744,6 +792,77 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       logEvents: ['tool.outreach.schedule_follow_up.requested', 'tool.outreach.schedule_follow_up.completed'],
     },
     executor: async (input) => scheduleFollowUp(input as any),
+  },
+  {
+    name: 'objection.extract',
+    description: 'Extract internal objection records from a call transcript for draft-only review. Internal only; never sends messages externally.',
+    inputSchema: objectSchema({ callTranscript: callTranscriptRecordJsonSchema, prospectContext: genericObjectJsonSchema, offerProposalContext: genericObjectJsonSchema, createdAt: stringSchema('Optional extraction timestamp.'), status: stringSchema('Optional objection status.') }, ['callTranscript']),
+    parameters: z.object({ callTranscript: z.object({}).passthrough(), prospectContext: z.object({}).passthrough().optional(), offerProposalContext: z.object({}).passthrough().optional(), createdAt: z.string().default(''), status: z.string().default('') }),
+    scopes: ['objection.analysis.draft'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'objection',
+      action: 'extract',
+      resourceType: 'objection_record',
+      resourceIdField: 'callTranscript.id',
+      sensitiveFields: ['callTranscript', 'prospectContext', 'offerProposalContext'],
+      logEvents: ['tool.objection.extract.requested', 'tool.objection.extract.completed'],
+    },
+    executor: async (input) => ({ ok: true, status: 'draft', workflow: 'objection', internalOnly: true, externalSend: false, objections: extractObjections({ ...input, createdAt: input.createdAt || undefined, status: input.status || undefined } as any) }),
+  },
+  {
+    name: 'objection.create_call_insight_report',
+    description: 'Create an internal draft-only post-call insight report with objections, missed signals, offer gaps, and proposal improvement notes. Never sends externally.',
+    inputSchema: objectSchema({ callTranscript: callTranscriptRecordJsonSchema, prospectContext: genericObjectJsonSchema, offerProposalContext: genericObjectJsonSchema, createdAt: stringSchema('Optional report timestamp.'), reportId: stringSchema('Optional report ID.') }, ['callTranscript']),
+    parameters: z.object({ callTranscript: z.object({}).passthrough(), prospectContext: z.object({}).passthrough().optional(), offerProposalContext: z.object({}).passthrough().optional(), createdAt: z.string().default(''), reportId: z.string().default('') }),
+    scopes: ['objection.analysis.draft'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'objection',
+      action: 'create_call_insight_report',
+      resourceType: 'call_insight_report',
+      resourceIdField: 'callTranscript.id',
+      sensitiveFields: ['callTranscript', 'prospectContext', 'offerProposalContext'],
+      logEvents: ['tool.objection.create_call_insight_report.requested', 'tool.objection.create_call_insight_report.completed'],
+    },
+    executor: async (input) => ({ ok: true, status: 'draft', workflow: 'objection', internalOnly: true, externalSend: false, report: createCallInsightReport({ ...input, createdAt: input.createdAt || undefined, reportId: input.reportId || undefined } as any) }),
+  },
+  {
+    name: 'objection.generate_better_questions',
+    description: 'Generate an internal draft-only ethical follow-up question prompt from prospect, transcript, offer, and objection context. Never sends externally.',
+    inputSchema: objectSchema({ prospectContext: genericObjectJsonSchema, transcript: { oneOf: [callTranscriptRecordJsonSchema, { type: 'string' }] }, offer: { oneOf: [genericObjectJsonSchema, { type: 'string' }] }, objections: objectionRecordArrayJsonSchema }, []),
+    parameters: z.object({ prospectContext: z.object({}).passthrough().optional(), transcript: z.union([z.object({}).passthrough(), z.string()]).optional(), offer: z.union([z.object({}).passthrough(), z.string()]).optional(), objections: z.array(z.union([z.object({}).passthrough(), z.string()])).default([]) }),
+    scopes: ['objection.analysis.draft'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'objection',
+      action: 'generate_better_questions',
+      resourceType: 'better_questions_prompt',
+      sensitiveFields: ['prospectContext', 'transcript', 'offer', 'objections'],
+      logEvents: ['tool.objection.generate_better_questions.requested', 'tool.objection.generate_better_questions.completed'],
+    },
+    executor: async (input) => ({ ok: true, status: 'draft', workflow: 'objection', internalOnly: true, externalSend: false, prompt: createBetterQuestionsPrompt(input as any) }),
+  },
+  {
+    name: 'objection.create_offer_improvement_notes',
+    description: 'Create internal draft-only offer improvement notes from a call insight report or source call context. Never sends messages externally.',
+    inputSchema: objectSchema({ callInsightReport: callInsightReportJsonSchema, callTranscript: callTranscriptRecordJsonSchema, prospectContext: genericObjectJsonSchema, offerProposalContext: genericObjectJsonSchema, offer: genericObjectJsonSchema, notesId: stringSchema('Optional notes ID.'), createdAt: stringSchema('Optional timestamp used when a report must be generated.'), metadata: genericObjectJsonSchema }, []),
+    parameters: z.object({ callInsightReport: z.object({}).passthrough().optional(), callTranscript: z.object({}).passthrough().optional(), prospectContext: z.object({}).passthrough().optional(), offerProposalContext: z.object({}).passthrough().optional(), offer: z.object({}).passthrough().optional(), notesId: z.string().default(''), createdAt: z.string().default(''), metadata: z.record(z.string(), z.unknown()).default({}) }),
+    scopes: ['objection.analysis.draft'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'objection',
+      action: 'create_offer_improvement_notes',
+      resourceType: 'offer_improvement_notes',
+      resourceIdField: 'callInsightReport.id',
+      sensitiveFields: ['callInsightReport', 'callTranscript', 'prospectContext', 'offerProposalContext', 'offer'],
+      logEvents: ['tool.objection.create_offer_improvement_notes.requested', 'tool.objection.create_offer_improvement_notes.completed'],
+    },
+    executor: createOfferImprovementNotes,
   },
   {
     name: 'outreach.record_opt_out',
@@ -1928,7 +2047,7 @@ export function runtimeToolsForRiskLevels(riskLevels: ToolRiskLevel[]) {
   return toolRegistry.filter((definition) => desired.has(definition.riskLevel)).map(toRuntimeTool);
 }
 
-export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'outreach', 'intake', 'qualification', 'proposal', 'voice', 'memory', 'delegation'];
+export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'outreach', 'objection', 'intake', 'qualification', 'proposal', 'voice', 'memory', 'delegation'];
 export const nexoraRuntimeToolCategories: ToolCategory[] = [...sharedRuntimeToolCategories, 'code', 'vscode'];
 
 export const runtimeTools = runtimeToolsForCategories(sharedRuntimeToolCategories);

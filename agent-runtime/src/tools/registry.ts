@@ -31,6 +31,11 @@ import { QualificationRecordSchema, type QualificationRecord } from '../workflow
 import { createProposalPackage } from '../workflows/proposals/createProposalPackage.js';
 import { createProposalReviewCallGate } from '../workflows/proposals/reviewCallGate.js';
 import { ProposalRecordSchema } from '../workflows/proposals/types.js';
+import { captureClose } from '../workflows/closing/captureClose.js';
+import { createDeliveryTasks } from '../workflows/closing/createDeliveryTasks.js';
+import { createFirstWinPlan } from '../workflows/closing/createFirstWinPlan.js';
+import { ClientRecordSchema, ProjectRecordSchema } from '../workflows/closing/types.js';
+import { createWelcomeSequence } from '../workflows/closing/welcomeSequence.js';
 import { createDriveTextFile, searchDriveFiles } from '../providers/google/drive.js';
 import { searchGmailMessages, sendGmailEmail } from '../providers/google/gmail.js';
 import { readSheetRange, updateSheetRange } from '../providers/google/sheets.js';
@@ -68,6 +73,7 @@ export type ToolCategory =
   | 'intake'
   | 'qualification'
   | 'proposal'
+  | 'closing'
   | 'voice'
   | 'memory'
   | 'delegation'
@@ -396,6 +402,47 @@ function createProposalReviewScript(input: Record<string, unknown>) {
       metadata: { source: 'proposal.create_review_script', internalOnly: true, ...(input.metadata as Record<string, unknown> | undefined) },
     },
   };
+}
+
+function createClientProject(input: Record<string, unknown>) {
+  const now = new Date().toISOString();
+  const clientId = compactString(input.clientId) || `client_${randomUUID()}`;
+  const projectId = compactString(input.projectId) || `project_${randomUUID()}`;
+  const sharedFields = {
+    createdAt: compactString(input.createdAt) || now,
+    updatedAt: compactString(input.updatedAt) || compactString(input.createdAt) || now,
+    status: compactString(input.status) || 'active',
+    sourceLeadId: compactString(input.leadId) || compactString(input.sourceLeadId),
+    sourceProposalId: compactString(input.proposalId) || compactString(input.sourceProposalId),
+    closeDate: compactString(input.closeDate) || undefined,
+    emotionalState: compactString(input.emotionalState),
+    confidence: typeof input.confidence === 'number' ? input.confidence : undefined,
+    concerns: Array.isArray(input.concerns) ? input.concerns : [],
+    kickoffStatus: compactString(input.kickoffStatus) || 'ready_for_kickoff',
+    assignedSpecialist: compactString(input.assignedSpecialist),
+    firstWinTarget: compactString(input.firstWinTarget),
+    notes: compactString(input.notes),
+    metadata: { internalOnly: true, externalSend: false, ...(input.metadata as Record<string, unknown> | undefined) },
+  };
+
+  const clientRecord = ClientRecordSchema.parse({
+    id: clientId,
+    ...sharedFields,
+    leadId: compactString(input.leadId),
+    sessionId: compactString(input.sessionId),
+    name: compactString(input.clientName),
+    email: compactString(input.clientEmail),
+    company: compactString(input.company),
+    tags: Array.isArray(input.tags) ? input.tags : ['client-project'],
+  });
+  const projectRecord = ProjectRecordSchema.parse({
+    id: projectId,
+    ...sharedFields,
+    clientId,
+    name: compactString(input.projectName) || compactString(input.company) || `Project ${projectId}`,
+  });
+
+  return { ok: true, status: 'created', workflow: 'closing', internalOnly: true, externalSend: false, clientRecord, projectRecord };
 }
 
 export const toolRegistry: RegisteredToolDefinition[] = [
@@ -1416,6 +1463,164 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       logEvents: ['tool.proposal.schedule_review_call.approval_requested', 'tool.proposal.schedule_review_call.completed'],
     },
     executor: async (input) => createCalendarEvent(input),
+  },
+  {
+    name: 'closing.capture_close',
+    description: 'Capture Jordan-approved closed-won context and create internal client/project/kickoff memory records. Does not send externally or schedule anything.',
+    inputSchema: objectSchema({
+      leadId: stringSchema('Closed lead ID.'),
+      proposalId: stringSchema('Approved proposal ID.'),
+      jordanCloseNote: stringSchema('Jordan close note.'),
+      movingForwardFeeling: stringSchema('Client answer about how they feel moving forward.'),
+      confidenceLevel: numberSchema('Close confidence from 0 to 100.', { minimum: 0, maximum: 100 }),
+      concerns: stringArraySchema('Captured concerns.'),
+      agreedNextStep: stringSchema('Agreed next step.'),
+      sessionId: stringSchema('Optional session ID.'),
+      clientName: stringSchema('Optional client name.'),
+      clientEmail: stringSchema('Optional client email.'),
+      company: stringSchema('Optional company.'),
+      projectName: stringSchema('Optional project name.'),
+      assignedSpecialist: stringSchema('Optional assigned specialist.'),
+      firstWinTarget: stringSchema('Optional first win target.'),
+      closedAt: stringSchema('Optional close timestamp.'),
+      memoryScope: stringSchema('Optional memory scope.'),
+      metadata: genericObjectJsonSchema,
+    }, ['leadId', 'proposalId', 'jordanCloseNote', 'movingForwardFeeling', 'confidenceLevel', 'agreedNextStep']),
+    parameters: z.object({
+      leadId: z.string().min(1),
+      proposalId: z.string().min(1),
+      jordanCloseNote: z.string().min(1),
+      movingForwardFeeling: z.string().min(1),
+      confidenceLevel: z.number().min(0).max(100),
+      concerns: z.array(z.string()).default([]),
+      agreedNextStep: z.string().min(1),
+      sessionId: z.string().default(''),
+      clientName: z.string().default(''),
+      clientEmail: z.string().default(''),
+      company: z.string().default(''),
+      projectName: z.string().default(''),
+      assignedSpecialist: z.string().default(''),
+      firstWinTarget: z.string().default(''),
+      closedAt: z.string().default(''),
+      memoryScope: z.string().default(''),
+      metadata: z.record(z.string(), z.unknown()).default({}),
+    }),
+    scopes: ['runtime.closing.write', 'runtime.memory.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'closing',
+      action: 'capture_close',
+      resourceType: 'closed_won_context',
+      resourceIdField: 'proposalId',
+      sensitiveFields: ['jordanCloseNote', 'movingForwardFeeling', 'concerns', 'clientName', 'clientEmail', 'company'],
+      logEvents: ['tool.closing.capture_close.requested', 'tool.closing.capture_close.completed'],
+    },
+    executor: async (input) => captureClose(input, { memoryScope: compactString(input.memoryScope) || undefined }),
+  },
+  {
+    name: 'closing.create_client_project',
+    description: 'Create internal client and project records from approved closing context. Does not send externally or schedule anything.',
+    inputSchema: objectSchema({
+      clientId: stringSchema('Optional client ID.'),
+      projectId: stringSchema('Optional project ID.'),
+      leadId: stringSchema('Optional source lead ID.'),
+      proposalId: stringSchema('Optional source proposal ID.'),
+      sessionId: stringSchema('Optional session ID.'),
+      clientName: stringSchema('Client name.'),
+      clientEmail: stringSchema('Client email.'),
+      company: stringSchema('Company.'),
+      projectName: stringSchema('Project name.'),
+      status: stringSchema('Internal status.'),
+      assignedSpecialist: stringSchema('Assigned specialist.'),
+      firstWinTarget: stringSchema('First win target.'),
+      concerns: stringArraySchema('Known concerns.'),
+      notes: stringSchema('Internal notes.'),
+      metadata: genericObjectJsonSchema,
+    }),
+    parameters: z.object({
+      clientId: z.string().default(''),
+      projectId: z.string().default(''),
+      leadId: z.string().default(''),
+      proposalId: z.string().default(''),
+      sessionId: z.string().default(''),
+      clientName: z.string().default(''),
+      clientEmail: z.string().default(''),
+      company: z.string().default(''),
+      projectName: z.string().default(''),
+      status: z.string().default('active'),
+      assignedSpecialist: z.string().default(''),
+      firstWinTarget: z.string().default(''),
+      concerns: z.array(z.string()).default([]),
+      notes: z.string().default(''),
+      metadata: z.record(z.string(), z.unknown()).default({}),
+    }),
+    scopes: ['runtime.closing.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'closing',
+      action: 'create_client_project',
+      resourceType: 'client_project',
+      resourceIdField: 'clientId',
+      sensitiveFields: ['clientName', 'clientEmail', 'company', 'projectName', 'concerns', 'notes'],
+      logEvents: ['tool.closing.create_client_project.requested', 'tool.closing.create_client_project.completed'],
+    },
+    executor: async (input) => createClientProject(input),
+  },
+  {
+    name: 'closing.create_first_win_plan',
+    description: 'Create an internal first-win plan from intake/proposal/classification context. Does not send externally or schedule anything.',
+    inputSchema: objectSchema({ intakeRecord: genericObjectJsonSchema, proposalRecord: genericObjectJsonSchema, classification: genericObjectJsonSchema, domainClassification: genericObjectJsonSchema, approvedAt: stringSchema('Optional approval timestamp.'), planId: stringSchema('Optional plan ID.') }),
+    parameters: z.object({ intakeRecord: z.object({}).passthrough().optional(), proposalRecord: z.object({}).passthrough().optional(), classification: z.object({}).passthrough().optional(), domainClassification: z.object({}).passthrough().optional(), approvedAt: z.string().default(''), planId: z.string().default('') }),
+    scopes: ['runtime.closing.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'closing',
+      action: 'create_first_win_plan',
+      resourceType: 'first_win_plan',
+      resourceIdField: 'planId',
+      sensitiveFields: ['intakeRecord', 'proposalRecord', 'classification', 'domainClassification'],
+      logEvents: ['tool.closing.create_first_win_plan.requested', 'tool.closing.create_first_win_plan.completed'],
+    },
+    executor: async (input) => createFirstWinPlan({ ...input, approvedAt: compactString(input.approvedAt) || undefined, planId: compactString(input.planId) || undefined } as any),
+  },
+  {
+    name: 'closing.draft_welcome_sequence',
+    description: 'Draft a welcome sequence for Jordan review. Draft only; external sends must use approval-gated outreach/Gmail tools.',
+    inputSchema: objectSchema({ clientRecord: genericObjectJsonSchema, projectRecord: genericObjectJsonSchema, clientName: stringSchema('Client name.'), company: stringSchema('Company.'), projectName: stringSchema('Project name.'), agreedNextStep: stringSchema('Agreed next step.'), firstWinTarget: stringSchema('First win target.'), assignedSpecialist: stringSchema('Assigned specialist.'), buyerConfidenceSignals: stringArraySchema('Buyer confidence signals.'), knownConcerns: stringArraySchema('Known concerns.'), kickoffExpectations: stringArraySchema('Kickoff expectations.'), firstUsefulArtifact: stringSchema('First useful artifact.'), firstUsefulArtifactDueAt: stringSchema('First useful artifact due timestamp.'), nextStepOwner: stringSchema('Next step owner.'), nextStepDueAt: stringSchema('Next step due timestamp.'), jordanApprovalNote: stringSchema('Jordan approval note.'), createdAt: stringSchema('Optional created timestamp.'), sequenceId: stringSchema('Optional sequence ID.'), metadata: genericObjectJsonSchema }),
+    parameters: z.object({ clientRecord: z.object({}).passthrough().optional(), projectRecord: z.object({}).passthrough().optional(), clientName: z.string().default(''), company: z.string().default(''), projectName: z.string().default(''), agreedNextStep: z.string().default(''), firstWinTarget: z.string().default(''), assignedSpecialist: z.string().default(''), buyerConfidenceSignals: z.array(z.string()).default([]), knownConcerns: z.array(z.string()).default([]), kickoffExpectations: z.array(z.string()).default([]), firstUsefulArtifact: z.string().default(''), firstUsefulArtifactDueAt: z.string().default(''), nextStepOwner: z.string().default(''), nextStepDueAt: z.string().default(''), jordanApprovalNote: z.string().default(''), createdAt: z.string().default(''), sequenceId: z.string().default(''), metadata: z.record(z.string(), z.unknown()).default({}) }),
+    scopes: ['runtime.closing.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'closing',
+      action: 'draft_welcome_sequence',
+      resourceType: 'welcome_sequence_draft',
+      resourceIdField: 'sequenceId',
+      sensitiveFields: ['clientRecord', 'projectRecord', 'clientName', 'company', 'buyerConfidenceSignals', 'knownConcerns'],
+      logEvents: ['tool.closing.draft_welcome_sequence.requested', 'tool.closing.draft_welcome_sequence.completed'],
+    },
+    executor: async (input) => createWelcomeSequence(input),
+  },
+  {
+    name: 'closing.create_delivery_tasks',
+    description: 'Create internal delivery tasks from an approved first-win plan. Client-visible release remains blocked until review approval; no external send or scheduling occurs.',
+    inputSchema: objectSchema({ projectRecord: genericObjectJsonSchema, firstWinPlan: genericObjectJsonSchema, assignedSpecialist: stringSchema('Assigned specialist.'), deadlineTargetHours: numberSchema('Deadline target hours between 24 and 48.', { minimum: 24, maximum: 48 }), createdAt: stringSchema('Optional created timestamp.') }, ['projectRecord', 'firstWinPlan', 'assignedSpecialist']),
+    parameters: z.object({ projectRecord: ProjectRecordSchema, firstWinPlan: z.object({}).passthrough(), assignedSpecialist: z.string().min(1), deadlineTargetHours: z.number().min(24).max(48).optional(), createdAt: z.string().default('') }),
+    scopes: ['runtime.closing.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'closing',
+      action: 'create_delivery_tasks',
+      resourceType: 'internal_delivery_task_batch',
+      resourceIdField: 'projectRecord.id',
+      sensitiveFields: ['projectRecord', 'firstWinPlan'],
+      logEvents: ['tool.closing.create_delivery_tasks.requested', 'tool.closing.create_delivery_tasks.completed'],
+    },
+    executor: async (input) => createDeliveryTasks({ ...input, createdAt: compactString(input.createdAt) || undefined } as any),
   },
   {
     name: 'voice.transcribe_audio',

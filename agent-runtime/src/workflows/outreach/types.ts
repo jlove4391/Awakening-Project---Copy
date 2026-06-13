@@ -68,7 +68,7 @@ export interface ReplyClassification {
   metadata?: Record<string, unknown>;
 }
 
-export interface FollowUpSchedule {
+export interface FollowUpRecord {
   id: string;
   leadId?: string;
   receiptId?: string;
@@ -80,8 +80,13 @@ export interface FollowUpSchedule {
   assignedTo?: string;
   createdAt: string;
   updatedAt: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  approvalNote?: string;
   metadata?: Record<string, unknown>;
 }
+
+export type FollowUpSchedule = FollowUpRecord;
 
 export interface OptOutRecord {
   id: string;

@@ -405,6 +405,21 @@ export interface CallTranscriptRecord {
   metadata?: Record<string, SharedRecordValue>;
 }
 
+
+export type ObjectionCategory =
+  | 'price'
+  | 'timing'
+  | 'trust'
+  | 'complexity'
+  | 'already have a tool'
+  | 'need to talk to partner/team'
+  | 'unclear ROI'
+  | 'fear of AI'
+  | 'privacy/compliance'
+  | 'implementation burden'
+  | 'bad past vendor experience'
+  | (string & {});
+
 export interface ObjectionRecord {
   id: string;
   createdAt: string;
@@ -415,7 +430,7 @@ export interface ObjectionRecord {
   proposalId?: string;
   sessionId?: string;
   callTranscriptId?: string;
-  category?: string;
+  category?: ObjectionCategory;
   summary?: string;
   resolution?: string;
   metadata?: Record<string, SharedRecordValue>;

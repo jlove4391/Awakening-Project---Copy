@@ -297,12 +297,41 @@ export interface ClientRecord {
   updatedAt: string;
   status: string;
   leadId?: string;
+  sourceLeadId?: string;
+  sourceProposalId?: string;
   intakeId?: string;
   sessionId?: string;
   name?: string;
   email?: string;
   company?: string;
+  closeDate?: string;
+  emotionalState?: string;
+  confidence?: number;
+  concerns?: string[];
+  kickoffStatus?: string;
+  assignedSpecialist?: string;
+  firstWinTarget?: string;
   tags?: string[];
+  notes?: string;
+  metadata?: Record<string, SharedRecordValue>;
+}
+
+export interface ProjectRecord {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: string;
+  clientId: string;
+  sourceLeadId?: string;
+  sourceProposalId?: string;
+  closeDate?: string;
+  emotionalState?: string;
+  confidence?: number;
+  concerns?: string[];
+  kickoffStatus?: string;
+  assignedSpecialist?: string;
+  firstWinTarget?: string;
+  name?: string;
   notes?: string;
   metadata?: Record<string, SharedRecordValue>;
 }

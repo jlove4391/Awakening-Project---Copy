@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { tool } from '@openai/agents';
 import { z } from 'zod';
 import { durableMemoryScopes, listMemories, remember, retrieveMemories, summarizeMemories } from '../memory/index.js';
@@ -12,6 +13,10 @@ import { createCalendarEvent, listCalendarEvents } from '../providers/google/cal
 import { lookupCrmContact, upsertCrmContact } from '../providers/crm/index.js';
 import { enrichPersonWithClay } from '../providers/clay/index.js';
 import { exportSequence, findLeadsWorkflow } from '../workflows/leadgen/index.js';
+import { classifyReply } from '../workflows/outreach/classifyReply.js';
+import { recordOptOut } from '../workflows/outreach/optOut.js';
+import { scheduleFollowUp } from '../workflows/outreach/scheduleFollowUp.js';
+import { sendApprovedEmail } from '../workflows/outreach/sendApprovedEmail.js';
 import { classifyIntake } from '../workflows/intake/classifyIntake.js';
 import { createIntakeRecord } from '../workflows/intake/createIntakeRecord.js';
 import { packageForReview } from '../workflows/intake/packageForReview.js';
@@ -52,6 +57,7 @@ export type ToolCategory =
   | 'crm'
   | 'clay'
   | 'leadgen'
+  | 'outreach'
   | 'intake'
   | 'qualification'
   | 'voice'
@@ -176,6 +182,74 @@ const qualificationFormSchemaProperties = {
   memoryScope: stringSchema('Optional memory scope for the internal qualification memory.'),
 };
 const qualificationRecordStore = new Map<string, QualificationRecord>();
+const genericObjectJsonSchema = { type: 'object', additionalProperties: true };
+const leadRecordJsonSchema = { type: 'object', additionalProperties: true, description: 'LeadRecord to update during outreach workflows.' };
+const outreachDraftJsonSchema = { type: 'object', additionalProperties: true, description: 'Outreach draft produced by outreach.draft_email.' };
+const approvedSendRequestJsonSchema = { type: 'object', additionalProperties: true, description: 'ApprovedSendRequest produced by outreach.approve_send.' };
+const replyClassificationJsonSchema = { type: 'object', additionalProperties: true, description: 'ReplyClassification produced by outreach.classify_reply.' };
+const optOutRecordArrayJsonSchema = { type: 'array', description: 'Known opt-out records to suppress sends.', items: genericObjectJsonSchema };
+
+async function draftOutreachEmail(input: Record<string, unknown>) {
+  const lead = (input.lead && typeof input.lead === 'object' ? input.lead : {}) as Record<string, unknown>;
+  const now = new Date().toISOString();
+  const contactName = compactString(input.contactName) || compactString(lead.fullName);
+  const company = compactString(input.company) || compactString(lead.company);
+  const contactEmail = compactString(input.contactEmail) || compactString(lead.email);
+  const subject = compactString(input.subject) || (company ? `Quick question for ${company}` : 'Quick question');
+  const body = compactString(input.body) || [
+    contactName ? `Hi ${contactName},` : 'Hi,',
+    '',
+    compactString(input.valueProposition) || 'I noticed a few opportunities to tighten lead follow-up and reduce missed conversations.',
+    compactString(input.callToAction) || 'Would it be worth a brief conversation to compare notes?',
+  ].join('\n');
+
+  return {
+    ok: true,
+    status: 'draft',
+    workflow: 'outreach',
+    draft: {
+      id: randomUUID(),
+      leadId: compactString(input.leadId) || compactString(lead.id) || undefined,
+      contactEmail,
+      contactName,
+      company,
+      subject,
+      body,
+      callToAction: compactString(input.callToAction),
+      status: 'ready_for_approval',
+      createdAt: now,
+      updatedAt: now,
+      metadata: { source: 'outreach.draft_email', ...(input.metadata as Record<string, unknown> | undefined) },
+    },
+  };
+}
+
+async function approveOutreachSend(input: Record<string, unknown>) {
+  const draft = (input.draft && typeof input.draft === 'object' ? input.draft : {}) as Record<string, unknown>;
+  const now = new Date().toISOString();
+  const contactEmail = compactString(draft.contactEmail);
+  const to = Array.isArray(input.to) && input.to.length ? input.to : contactEmail ? [contactEmail] : [];
+
+  return {
+    ok: true,
+    status: 'approved',
+    workflow: 'outreach',
+    sendRequest: {
+      id: randomUUID(),
+      draftId: compactString(draft.id) || compactString(input.draftId) || randomUUID(),
+      approvedBy: compactString(input.approvedBy) || 'human',
+      approvedAt: now,
+      to,
+      cc: Array.isArray(input.cc) ? input.cc : [],
+      bcc: Array.isArray(input.bcc) ? input.bcc : [],
+      subject: compactString(input.subject) || compactString(draft.subject),
+      body: compactString(input.body) || compactString(draft.body),
+      scheduledFor: compactString(input.scheduledFor) || undefined,
+      approvalNote: compactString(input.approvalNote) || undefined,
+      metadata: { source: 'outreach.approve_send', ...(input.metadata as Record<string, unknown> | undefined) },
+    },
+  };
+}
 
 function compactString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
@@ -511,6 +585,116 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       logEvents: ['tool.leadgen.export_sequence.approval_requested', 'tool.leadgen.export_sequence.completed'],
     },
     executor: exportSequence,
+  },
+  {
+    name: 'outreach.draft_email',
+    description: 'Draft a single-recipient outreach email for human review. This creates draft content only and never sends externally.',
+    inputSchema: objectSchema({ lead: leadRecordJsonSchema, leadId: stringSchema('Lead ID.'), contactName: stringSchema('Recipient name.'), contactEmail: stringSchema('Recipient email.'), company: stringSchema('Recipient company.'), subject: stringSchema('Draft subject.'), body: stringSchema('Draft body.'), valueProposition: stringSchema('Optional value proposition to include when generating a body.'), callToAction: stringSchema('Optional call to action.'), metadata: genericObjectJsonSchema }, []),
+    parameters: z.object({ lead: z.object({}).passthrough().optional(), leadId: z.string().default(''), contactName: z.string().default(''), contactEmail: z.string().default(''), company: z.string().default(''), subject: z.string().default(''), body: z.string().default(''), valueProposition: z.string().default(''), callToAction: z.string().default(''), metadata: z.record(z.string(), z.unknown()).default({}) }),
+    scopes: ['outreach.email.draft'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'outreach',
+      action: 'draft_email',
+      resourceType: 'outreach_draft',
+      resourceIdField: 'leadId',
+      sensitiveFields: ['lead', 'contactName', 'contactEmail', 'company', 'subject', 'body', 'valueProposition'],
+      logEvents: ['tool.outreach.draft_email.requested', 'tool.outreach.draft_email.completed'],
+    },
+    executor: draftOutreachEmail,
+  },
+  {
+    name: 'outreach.approve_send',
+    description: 'Create an approved send request from a reviewed outreach draft. This does not send externally.',
+    inputSchema: objectSchema({ draft: outreachDraftJsonSchema, draftId: stringSchema('Draft ID.'), to: stringArraySchema('Approved recipient email addresses.'), cc: stringArraySchema('CC recipient email addresses.'), bcc: stringArraySchema('BCC recipient email addresses.'), subject: stringSchema('Approved subject.'), body: stringSchema('Approved body.'), scheduledFor: stringSchema('Optional scheduled send time.'), approvedBy: stringSchema('Approver name or ID.'), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema, metadata: genericObjectJsonSchema }, ['draft']),
+    parameters: z.object({ draft: z.object({}).passthrough(), draftId: z.string().default(''), to: z.array(z.string().email()).default([]), cc: z.array(z.string().email()).default([]), bcc: z.array(z.string().email()).default([]), subject: z.string().default(''), body: z.string().default(''), scheduledFor: z.string().default(''), approvedBy: z.string().default('human'), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default(''), metadata: z.record(z.string(), z.unknown()).default({}) }),
+    scopes: ['outreach.email.approve'],
+    riskLevel: 'write',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'outreach',
+      action: 'approve_send',
+      resourceType: 'approved_send_request',
+      resourceIdField: 'draftId',
+      actorField: 'approvedBy',
+      sensitiveFields: ['draft', 'to', 'cc', 'bcc', 'subject', 'body'],
+      logEvents: ['tool.outreach.approve_send.approval_requested', 'tool.outreach.approve_send.completed'],
+    },
+    executor: approveOutreachSend,
+  },
+  {
+    name: 'outreach.send_email',
+    description: 'Send one approved outreach email after approval checks and opt-out suppression.',
+    inputSchema: objectSchema({ lead: leadRecordJsonSchema, sendRequest: approvedSendRequestJsonSchema, optOutRecords: optOutRecordArrayJsonSchema, followUpDueAt: stringSchema('Optional follow-up due date.'), followUpDays: numberSchema('Optional days until follow-up.', { minimum: 1, maximum: 60 }), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema }, ['lead', 'sendRequest']),
+    parameters: z.object({ lead: z.object({}).passthrough(), sendRequest: z.object({}).passthrough(), optOutRecords: z.array(z.object({}).passthrough()).default([]), followUpDueAt: z.string().default(''), followUpDays: z.number().int().min(1).max(60).optional(), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
+    scopes: ['outreach.email.send', 'https://www.googleapis.com/auth/gmail.send'],
+    riskLevel: 'external_send',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'outreach',
+      action: 'send_email',
+      resourceType: 'outreach_email',
+      resourceIdField: 'sendRequest.id',
+      actorField: 'sendRequest.to',
+      sensitiveFields: ['lead', 'sendRequest', 'optOutRecords'],
+      logEvents: ['tool.outreach.send_email.approval_requested', 'tool.outreach.send_email.sent'],
+    },
+    executor: sendApprovedEmail,
+  },
+  {
+    name: 'outreach.classify_reply',
+    description: 'Classify an inbound outreach reply and recommend the next safe action.',
+    inputSchema: objectSchema({ replyText: stringSchema('Inbound reply text.'), subject: stringSchema('Reply subject.'), receiptId: stringSchema('Related sent-email receipt ID.'), threadId: stringSchema('Provider thread ID.'), messageId: stringSchema('Provider message ID.'), receivedAt: stringSchema('Received timestamp.'), classifiedBy: stringSchema('Classifier label.'), modelSuggestion: genericObjectJsonSchema, metadata: genericObjectJsonSchema }, ['replyText']),
+    parameters: z.object({ replyText: z.string().min(1), subject: z.string().default(''), receiptId: z.string().default(''), threadId: z.string().default(''), messageId: z.string().default(''), receivedAt: z.string().default(''), classifiedBy: z.string().default(''), modelSuggestion: z.object({}).passthrough().optional(), metadata: z.record(z.string(), z.unknown()).default({}) }),
+    scopes: ['outreach.reply.classify'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'outreach',
+      action: 'classify_reply',
+      resourceType: 'outreach_reply',
+      resourceIdField: 'messageId',
+      sensitiveFields: ['replyText', 'subject'],
+      logEvents: ['tool.outreach.classify_reply.requested', 'tool.outreach.classify_reply.completed'],
+    },
+    executor: async (input) => classifyReply(input),
+  },
+  {
+    name: 'outreach.schedule_follow_up',
+    description: 'Schedule an internal follow-up reminder from a classified reply. This does not send externally.',
+    inputSchema: objectSchema({ lead: leadRecordJsonSchema, replyClassification: replyClassificationJsonSchema, approvedFollowUpAt: stringSchema('Approved follow-up date/time.'), approvedBy: stringSchema('Approver name or ID.'), approvalNote: approvalNoteSchema, assignedTo: stringSchema('Owner for follow-up.'), reason: stringSchema('Follow-up reason.'), metadata: genericObjectJsonSchema }, ['lead', 'replyClassification', 'approvedFollowUpAt']),
+    parameters: z.object({ lead: z.object({}).passthrough(), replyClassification: z.object({}).passthrough(), approvedFollowUpAt: z.string().min(1), approvedBy: z.string().default('human'), approvalNote: z.string().default(''), assignedTo: z.string().default(''), reason: z.string().default(''), metadata: z.record(z.string(), z.unknown()).default({}) }),
+    scopes: ['outreach.follow_up.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'outreach',
+      action: 'schedule_follow_up',
+      resourceType: 'follow_up',
+      resourceIdField: 'lead.id',
+      sensitiveFields: ['lead', 'replyClassification', 'reason'],
+      logEvents: ['tool.outreach.schedule_follow_up.requested', 'tool.outreach.schedule_follow_up.completed'],
+    },
+    executor: async (input) => scheduleFollowUp(input as any),
+  },
+  {
+    name: 'outreach.record_opt_out',
+    description: 'Record an opt-out/do-not-contact request and suppress future outreach while preserving the lead record.',
+    inputSchema: objectSchema({ lead: leadRecordJsonSchema, messageText: stringSchema('Opt-out message text.'), subject: stringSchema('Message subject.'), source: stringSchema('Opt-out source.'), requestedAt: stringSchema('Request timestamp.'), recordedAt: stringSchema('Recorded timestamp.'), receiptId: stringSchema('Related sent-email receipt ID.'), replyClassification: replyClassificationJsonSchema, reason: stringSchema('Opt-out reason.'), metadata: genericObjectJsonSchema }, ['lead']),
+    parameters: z.object({ lead: z.object({}).passthrough(), messageText: z.string().default(''), subject: z.string().default(''), source: z.string().default('manual'), requestedAt: z.string().default(''), recordedAt: z.string().default(''), receiptId: z.string().default(''), replyClassification: z.object({}).passthrough().optional(), reason: z.string().default(''), metadata: z.record(z.string(), z.unknown()).default({}) }),
+    scopes: ['outreach.opt_out.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'outreach',
+      action: 'record_opt_out',
+      resourceType: 'opt_out',
+      resourceIdField: 'lead.id',
+      sensitiveFields: ['lead', 'messageText', 'subject', 'reason'],
+      logEvents: ['tool.outreach.record_opt_out.requested', 'tool.outreach.record_opt_out.completed'],
+    },
+    executor: recordOptOut,
   },
   {
     name: 'intake.create_record',
@@ -1506,7 +1690,7 @@ export function runtimeToolsForRiskLevels(riskLevels: ToolRiskLevel[]) {
   return toolRegistry.filter((definition) => desired.has(definition.riskLevel)).map(toRuntimeTool);
 }
 
-export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'intake', 'qualification', 'voice', 'memory', 'delegation'];
+export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'outreach', 'intake', 'qualification', 'voice', 'memory', 'delegation'];
 export const nexoraRuntimeToolCategories: ToolCategory[] = [...sharedRuntimeToolCategories, 'code', 'vscode'];
 
 export const runtimeTools = runtimeToolsForCategories(sharedRuntimeToolCategories);

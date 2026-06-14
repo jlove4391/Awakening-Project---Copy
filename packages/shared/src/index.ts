@@ -27,7 +27,7 @@ export interface RuntimeEvent<TPayload = unknown> {
   payload: TPayload;
 }
 
-export type DelegatedTaskBlockedReason = 'step_approval_required' | 'worker_unavailable' | 'policy_block' | 'unknown';
+export type DelegatedTaskBlockedReason = 'step_approval_required' | 'provider_configuration_required' | 'worker_unavailable' | 'policy_block' | 'unknown';
 
 export type DelegatedTaskStatus =
   | 'queued'

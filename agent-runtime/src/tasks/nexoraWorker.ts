@@ -148,8 +148,48 @@ async function ensureDriveCreatePlan(task: DelegatedTask) {
   });
 }
 
-function isProviderConfigurationError(message: string) {
-  return /google account is not connected|google oauth is not configured|google_client_id|google_client_secret|google_redirect_uri|token store key|master_key/i.test(message);
+interface ProviderConfigurationBlock {
+  blockedReason: 'provider_configuration_required';
+  provider: string;
+  providerName: string;
+  missingConfigHint: string;
+  nextManualAction: string;
+}
+
+function providerConfigurationBlockFor(toolName: string, message: string): ProviderConfigurationBlock | undefined {
+  if (normalizeRequiredTool(toolName) !== 'drive.create_text_file') return undefined;
+
+  if (/google oauth is not configured|google_client_id|google_client_secret|google_redirect_uri/i.test(message)) {
+    return {
+      blockedReason: 'provider_configuration_required',
+      provider: 'google-drive',
+      providerName: 'Google Drive',
+      missingConfigHint: 'Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI for Google OAuth.',
+      nextManualAction: 'Configure Google OAuth credentials, restart the runtime, then open /api/auth/google/start to connect Google Drive.',
+    };
+  }
+
+  if (/token store key|master_key/i.test(message)) {
+    return {
+      blockedReason: 'provider_configuration_required',
+      provider: 'google-drive',
+      providerName: 'Google Drive',
+      missingConfigHint: 'Set GOOGLE_TOKEN_STORE_KEY or MASTER_KEY to at least 32 characters so stored Google OAuth tokens can be read.',
+      nextManualAction: 'Provide the token-store encryption key used for Google OAuth tokens, restart the runtime, and retry the delegated task.',
+    };
+  }
+
+  if (/google account is not connected|authorize the runtime|access token|refresh token|invalid_grant|insufficient authentication scopes|insufficient.*scope/i.test(message)) {
+    return {
+      blockedReason: 'provider_configuration_required',
+      provider: 'google-drive',
+      providerName: 'Google Drive',
+      missingConfigHint: 'Google Drive OAuth tokens are absent, expired without refresh, or missing the required Drive scope.',
+      nextManualAction: 'Open /api/auth/google/start, complete Google OAuth with the Drive file scope, then resume this delegated task.',
+    };
+  }
+
+  return undefined;
 }
 
 function isApprovedNexoraTool(toolName: string) {
@@ -264,19 +304,38 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
         await updateExecutionPlanStep(task.id, step.id, { status: 'completed', resultSummary: `Executed ${step.targetTool}.` });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (normalizeRequiredTool(step.targetTool) === 'drive.create_text_file' && isProviderConfigurationError(message)) {
-          await updateExecutionPlanStep(task.id, step.id, { status: 'blocked', resultSummary: `Provider configuration required: ${message}` });
+        const providerConfigurationBlock = providerConfigurationBlockFor(step.targetTool, message);
+        if (providerConfigurationBlock) {
+          const { blockedReason, provider, providerName, missingConfigHint, nextManualAction } = providerConfigurationBlock;
+          await updateExecutionPlanStep(task.id, step.id, {
+            status: 'blocked',
+            resultSummary: `${providerName} provider configuration required: ${missingConfigHint}`,
+          });
           await updateDelegatedTask(task.id, {
             status: 'blocked',
-            blockedReason: 'unknown',
+            blockedReason,
             result: {
               ok: false,
-              summary: `Google Drive provider configuration required: ${message}`,
-              data: { handledBy: 'nexora.execution-plan-worker', status: 'provider_configuration_required', provider: 'google-drive', tool: step.targetTool, executedSteps },
+              summary: `${providerName} provider configuration required before Nexora can continue.`,
+              data: {
+                handledBy: 'nexora.execution-plan-worker',
+                status: blockedReason,
+                provider,
+                providerName,
+                missingConfigHint,
+                nextManualAction,
+                tool: step.targetTool,
+                executedSteps,
+              },
               error: { message },
             },
-            log: `Nexora blocked because Google Drive provider configuration is incomplete: ${message}`,
-            event: { type: 'task.blocked', actor: 'nexora', summary: 'Task is blocked until Google Drive provider configuration is completed.', details: { status: 'provider_configuration_required', message } },
+            log: `Nexora blocked because ${providerName} provider configuration is incomplete. Missing/config hint: ${missingConfigHint} Next manual action: ${nextManualAction}`,
+            event: {
+              type: 'task.blocked',
+              actor: 'nexora',
+              summary: `Task is blocked until ${providerName} provider configuration is completed.`,
+              details: { blockedReason, provider, providerName, missingConfigHint, nextManualAction, message },
+            },
           });
           return true;
         }

@@ -7,6 +7,7 @@ export type DelegatedTaskBlockedReason = 'step_approval_required' | 'worker_unav
 export type DelegatedTaskEventType =
   | 'task.created'
   | 'task.queued'
+  | 'task.resumed'
   | 'task.approval_requested'
   | 'task.approved'
   | 'task.rejected'

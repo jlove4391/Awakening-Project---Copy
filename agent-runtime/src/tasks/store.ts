@@ -110,6 +110,10 @@ function needsApproval(requirements: ApprovalRequirement[]) {
   return requirements.some((requirement) => requirement.required && requirement.status === 'pending');
 }
 
+function hasPendingExecutionPlanApproval(task: DelegatedTask) {
+  return Boolean(task.executionPlan?.some((step) => step.approval?.required && step.approvalStatus === 'pending'));
+}
+
 function createAuditEntry(
   taskId: string,
   eventType: DelegatedTaskEventType,
@@ -437,6 +441,50 @@ export async function approveDelegatedTask(taskId: string, approver = 'user', no
     task.updatedAt = now();
     await persistTasks();
     await Promise.all(task.auditTrail.slice(-2).map(appendAuditJsonl));
+    taskEvents.emitTaskUpdated(task, event);
+    return task;
+  });
+}
+
+
+export async function resumeDelegatedTask(taskId: string, actor: TaskAuditEntry['actor'] = 'system', note = '') {
+  return serializedWrite(async () => {
+    const task = await getDelegatedTask(taskId);
+    if (!task) return undefined;
+    const pendingApproval = needsApproval(task.approvalRequirements) || hasPendingExecutionPlanApproval(task);
+    if (terminalStatuses.has(task.status) || pendingApproval) {
+      const reason = pendingApproval ? 'pending_approval' : task.status;
+      const event = createAuditEntry(task.id, 'task.log', actor, `Task ${task.id} cannot be resumed because it is ${reason}.`, { status: task.status, reason, note });
+      task.events.push(event);
+      task.auditTrail.push(event);
+      task.updatedAt = now();
+      await persistTasks();
+      await appendAuditJsonl(event);
+      taskEvents.emitTaskUpdated(task, event);
+      return task;
+    }
+
+    const previousStatus = task.status;
+    applyStatusTimestamps(task, 'queued');
+    task.blockedReason = undefined;
+    task.pendingToolAction = undefined;
+
+    const event = createAuditEntry(task.id, 'task.resumed', actor, 'Task resumed and re-entered the durable Nexora queue.', {
+      previousStatus,
+      note,
+      executionPlanState: task.executionPlan?.map((step) => ({
+        id: step.id,
+        order: step.order,
+        targetTool: step.targetTool,
+        status: step.status,
+        approvalStatus: step.approvalStatus,
+      })),
+    });
+    task.events.push(event);
+    task.auditTrail.push(event);
+    task.updatedAt = now();
+    await persistTasks();
+    await appendAuditJsonl(event);
     taskEvents.emitTaskUpdated(task, event);
     return task;
   });

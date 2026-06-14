@@ -1,5 +1,5 @@
 import { taskEvents } from './events.js';
-import { getDelegatedTask, listDelegatedTasks, updateDelegatedTask } from './store.js';
+import { getDelegatedTask, listDelegatedTasks, resumeDelegatedTask, updateDelegatedTask } from './store.js';
 import { nexoraToolExecutionWorker } from './nexoraWorker.js';
 import type { DelegatedTask } from './types.js';
 
@@ -63,6 +63,19 @@ class DurableTaskQueue {
 
   enqueue(task: DelegatedTask | string) {
     const taskId = typeof task === 'string' ? task : task.id;
+    this.addPendingId(taskId);
+  }
+
+  async enqueueById(taskId: string, note = 'Queued by task ID after missing approval/configuration was satisfied.') {
+    const task = await getDelegatedTask(taskId);
+    if (!task) return undefined;
+
+    const queueableTask = task.status === 'blocked' ? await resumeDelegatedTask(taskId, 'system', note) : task;
+    if (queueableTask?.status === 'queued') this.addPendingId(taskId);
+    return queueableTask;
+  }
+
+  private addPendingId(taskId: string) {
     if (!this.pendingIds.includes(taskId)) this.pendingIds.push(taskId);
     this.run().catch(() => undefined);
   }

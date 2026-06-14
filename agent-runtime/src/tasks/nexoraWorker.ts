@@ -1,6 +1,6 @@
 import { executeRegisteredTool, getRegisteredTool, toolRegistry, type RegisteredToolDefinition } from '../tools/registry.js';
 import type { RuntimeContext } from '../types.js';
-import { updateDelegatedTask, updateExecutionPlanStep } from './store.js';
+import { appendExecutionPlanStep, updateDelegatedTask, updateExecutionPlanStep } from './store.js';
 import type { DelegatedTask } from './types.js';
 import type { DelegatedTaskHandler } from './queue.js';
 
@@ -88,6 +88,70 @@ function normalizeRequiredTool(tool: string) {
   return tool.trim().toLowerCase();
 }
 
+function textValue(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function fieldFromStructuredText(text: string, names: string[]) {
+  for (const name of names) {
+    const pattern = new RegExp(`(?:^|[\\n;,.])\\s*(?:${name})\\s*[:=]\\s*([\\s\\S]*?)(?=\\n\\s*(?:filename|file name|name|content|parent folder|parent folder id|parentid|folder)\\s*[:=]|$)`, 'i');
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1].trim().replace(/^['"]|['"]$/g, '');
+  }
+  return '';
+}
+
+function parseJsonObject(text: string) {
+  const trimmed = text.trim();
+  const candidates = [trimmed, trimmed.match(/\{[\s\S]*\}/)?.[0]].filter(Boolean) as string[];
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+    } catch (_error) {
+      // Fall through to label-based parsing.
+    }
+  }
+  return undefined;
+}
+
+function driveCreateObjectiveMatches(task: DelegatedTask) {
+  const objective = task.objective.toLowerCase();
+  const requiredTools = task.requiredTools.map(normalizeRequiredTool);
+  return (
+    requiredTools.includes('drive.create_text_file') ||
+    ((objective.includes('create') || objective.includes('write')) && objective.includes('text file') && (objective.includes('google drive') || objective.includes('drive')))
+  );
+}
+
+function buildDriveCreateInput(task: DelegatedTask): Record<string, unknown> | undefined {
+  const sourceText = [task.objective, ...task.constraints].filter(Boolean).join('\n');
+  const parsed = parseJsonObject(sourceText);
+  const filename = textValue(parsed?.filename ?? parsed?.name ?? parsed?.fileName) || fieldFromStructuredText(sourceText, ['filename', 'file name', 'name']);
+  const content = textValue(parsed?.content ?? parsed?.text) || fieldFromStructuredText(sourceText, ['content', 'text']);
+  const parentId = textValue(parsed?.parentId ?? parsed?.parentFolderId ?? parsed?.parentFolder ?? parsed?.folderId) || fieldFromStructuredText(sourceText, ['parent folder id', 'parent folder', 'parentid', 'folder']);
+  if (!filename || !content) return undefined;
+  return { name: filename, content, ...(parentId ? { parentId } : {}) };
+}
+
+async function ensureDriveCreatePlan(task: DelegatedTask) {
+  if (!driveCreateObjectiveMatches(task)) return task;
+  if (task.executionPlan?.some((step) => normalizeRequiredTool(step.targetTool) === 'drive.create_text_file')) return task;
+
+  const input = buildDriveCreateInput(task);
+  if (!input) return undefined;
+  return appendExecutionPlanStep(task.id, {
+    targetTool: 'drive.create_text_file',
+    arguments: input,
+    approvalStatus: 'pending',
+    approval: { required: true, status: 'pending', reason: 'drive_write_approval_required' },
+  });
+}
+
+function isProviderConfigurationError(message: string) {
+  return /google account is not connected|google oauth is not configured|google_client_id|google_client_secret|google_redirect_uri|token store key|master_key/i.test(message);
+}
+
 function isApprovedNexoraTool(toolName: string) {
   const definition = getRegisteredTool(toolName);
   return Boolean(definition && allowlistByName.has(definition.name) && definition.riskLevel === 'read' && !definition.humanApprovalRequired);
@@ -172,6 +236,10 @@ function createTaskRuntimeContext(task: DelegatedTask): RuntimeContext {
 export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
   if (task.assignedAgent !== 'nexora') return false;
 
+  const taskWithGeneratedPlan = await ensureDriveCreatePlan(task);
+  if (taskWithGeneratedPlan === undefined) return false;
+  task = taskWithGeneratedPlan;
+
   if (task.executionPlan?.length) {
     const context = createTaskRuntimeContext(task);
     const executedSteps: Array<{ stepId: string; tool: string; input: Record<string, unknown>; result: unknown }> = [];
@@ -190,9 +258,30 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
         context.approvedExecutionId = step.id;
       }
       await updateExecutionPlanStep(task.id, step.id, { status: 'running' });
-      const result = await executeRegisteredTool(step.targetTool, input, context);
-      executedSteps.push({ stepId: step.id, tool: step.targetTool, input, result });
-      await updateExecutionPlanStep(task.id, step.id, { status: 'completed', resultSummary: `Executed ${step.targetTool}.` });
+      try {
+        const result = await executeRegisteredTool(step.targetTool, input, context);
+        executedSteps.push({ stepId: step.id, tool: step.targetTool, input, result });
+        await updateExecutionPlanStep(task.id, step.id, { status: 'completed', resultSummary: `Executed ${step.targetTool}.` });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (normalizeRequiredTool(step.targetTool) === 'drive.create_text_file' && isProviderConfigurationError(message)) {
+          await updateExecutionPlanStep(task.id, step.id, { status: 'blocked', resultSummary: `Provider configuration required: ${message}` });
+          await updateDelegatedTask(task.id, {
+            status: 'blocked',
+            blockedReason: 'unknown',
+            result: {
+              ok: false,
+              summary: `Google Drive provider configuration required: ${message}`,
+              data: { handledBy: 'nexora.execution-plan-worker', status: 'provider_configuration_required', provider: 'google-drive', tool: step.targetTool, executedSteps },
+              error: { message },
+            },
+            log: `Nexora blocked because Google Drive provider configuration is incomplete: ${message}`,
+            event: { type: 'task.blocked', actor: 'nexora', summary: 'Task is blocked until Google Drive provider configuration is completed.', details: { status: 'provider_configuration_required', message } },
+          });
+          return true;
+        }
+        throw error;
+      }
     }
 
     await updateDelegatedTask(task.id, {

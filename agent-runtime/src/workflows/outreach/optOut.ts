@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { completeExecutionRecord, createExecutionRecord, summarizeProviderResponse, writeExecutionRecord } from '../../executions.js';
+import { createWorkflowExecutionRecord, writeCompletedWorkflowExecutionReceipt } from '../receipts.js';
 import { remember } from '../../memory/index.js';
 import type { LeadRecord } from '../leadgen/types.js';
 import type { RuntimeContext } from '../../types.js';
@@ -136,10 +136,9 @@ export function markLeadOptedOut(lead: LeadRecord, optOutRecord: OptOutRecord, r
 }
 
 async function writeOptOutExecution(input: OptOutInput, context: RuntimeContext, updatedLead: LeadRecord, optOutRecord: OptOutRecord, receipt: OptOutUpdateReceipt) {
-  const record = createExecutionRecord({
-    kind: 'runtime_action',
-    whoRequested: 'outreach.workflow',
-    chosenByAgent: context.agent || 'elora',
+  const record = createWorkflowExecutionRecord({
+    workflow: 'outreach',
+    context,
     action: 'outreach.opt_out',
     inputPayload: {
       leadId: input.lead.id,
@@ -151,23 +150,19 @@ async function writeOptOutExecution(input: OptOutInput, context: RuntimeContext,
     riskLevel: 'write',
     approvalStatus: 'not_required',
     executionResult: { lead: updatedLead, optOutRecord, receipt },
-    providerResponseSummary: summarizeProviderResponse({ status: 'opted_out', id: optOutRecord.id }),
-    linkedIds: { sessionId: context.sessionId, voiceSessionId: context.voiceSessionId },
+    providerResponseSummary: `status=opted_out; id=${optOutRecord.id}`,
     status: 'running',
     startedAt: optOutRecord.recordedAt,
     receiptSummary: `Opt-out update requested for lead ${input.lead.id}`,
   });
 
-  const completed = completeExecutionRecord(record, {
+  return writeCompletedWorkflowExecutionReceipt(record, {
     status: 'completed',
     executionResult: { lead: updatedLead, optOutRecord, receipt },
     approvalStatus: 'not_required',
     completedAt: optOutRecord.recordedAt,
     receiptSummary: `Recorded opt-out/do-not-contact update for lead ${input.lead.id}; lead preserved with audit history.`,
   });
-
-  await writeExecutionRecord(completed);
-  return { id: completed.id, summary: completed.receipt.summary, status: completed.status };
 }
 
 export async function recordOptOut(input: OptOutInput, context: RuntimeContext): Promise<OptOutResult> {

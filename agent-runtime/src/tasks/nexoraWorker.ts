@@ -1,6 +1,6 @@
 import { executeRegisteredTool, getRegisteredTool, toolRegistry, type RegisteredToolDefinition } from '../tools/registry.js';
 import type { RuntimeContext } from '../types.js';
-import { updateDelegatedTask } from './store.js';
+import { updateDelegatedTask, updateExecutionPlanStep } from './store.js';
 import type { DelegatedTask } from './types.js';
 import type { DelegatedTaskHandler } from './queue.js';
 
@@ -111,6 +111,48 @@ function chooseExecutionStrategy(task: DelegatedTask) {
   return [...selected.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
+function isStepHighRisk(toolName: string) {
+  const definition = getRegisteredTool(toolName);
+  return !definition || definition.riskLevel !== 'read' || definition.humanApprovalRequired;
+}
+
+function stepInput(step: NonNullable<DelegatedTask['executionPlan']>[number]): Record<string, unknown> {
+  const value = step.arguments ?? step.argumentTemplate ?? {};
+  return value && typeof value === 'object' && !Array.isArray(value) ? { ...(value as Record<string, unknown>) } : { value };
+}
+
+async function blockForStepApproval(task: DelegatedTask, step: NonNullable<DelegatedTask['executionPlan']>[number]) {
+  const definition = getRegisteredTool(step.targetTool);
+  const reason = 'step_approval_required';
+  const pendingToolAction = {
+    stepId: step.id,
+    toolName: step.targetTool,
+    riskLevel: definition?.riskLevel,
+    action: definition?.audit.action,
+    arguments: step.arguments,
+    argumentTemplate: step.argumentTemplate,
+    approvalStatus: 'pending' as const,
+    reason,
+  };
+  await updateExecutionPlanStep(task.id, step.id, {
+    status: 'blocked',
+    approvalStatus: 'pending',
+    approval: { required: true, status: 'pending', reason },
+  });
+  await updateDelegatedTask(task.id, {
+    status: 'blocked',
+    blockedReason: reason,
+    pendingToolAction,
+    log: `Nexora blocked before ${step.targetTool}; explicit approval is required for this step.`,
+    event: {
+      type: 'task.blocked',
+      actor: 'nexora',
+      summary: 'Task is blocked until the pending tool action is approved.',
+      details: { blockedReason: reason, pendingToolAction },
+    },
+  });
+}
+
 function createTaskRuntimeContext(task: DelegatedTask): RuntimeContext {
   return {
     sessionId: task.sessionId,
@@ -129,6 +171,46 @@ function createTaskRuntimeContext(task: DelegatedTask): RuntimeContext {
 
 export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
   if (task.assignedAgent !== 'nexora') return false;
+
+  if (task.executionPlan?.length) {
+    const context = createTaskRuntimeContext(task);
+    const executedSteps: Array<{ stepId: string; tool: string; input: Record<string, unknown>; result: unknown }> = [];
+
+    for (const step of [...task.executionPlan].sort((left, right) => left.order - right.order)) {
+      if (['completed', 'skipped', 'cancelled'].includes(step.status)) continue;
+      const highRisk = isStepHighRisk(step.targetTool);
+      if (highRisk && step.approvalStatus !== 'approved') {
+        await blockForStepApproval(task, step);
+        return true;
+      }
+
+      const input = stepInput(step);
+      if (highRisk) {
+        input.confirmedByUser = true;
+        context.approvedExecutionId = step.id;
+      }
+      await updateExecutionPlanStep(task.id, step.id, { status: 'running' });
+      const result = await executeRegisteredTool(step.targetTool, input, context);
+      executedSteps.push({ stepId: step.id, tool: step.targetTool, input, result });
+      await updateExecutionPlanStep(task.id, step.id, { status: 'completed', resultSummary: `Executed ${step.targetTool}.` });
+    }
+
+    await updateDelegatedTask(task.id, {
+      status: 'completed',
+      result: {
+        ok: true,
+        summary: `Nexora executed ${executedSteps.length} execution-plan step${executedSteps.length === 1 ? '' : 's'}.`,
+        data: { handledBy: 'nexora.execution-plan-worker', objective: task.objective, executedSteps },
+      },
+      event: {
+        type: 'task.completed',
+        actor: 'nexora',
+        summary: 'Nexora execution-plan worker recorded terminal completion.',
+        details: { worker: 'nexora.execution-plan-worker', stepCount: executedSteps.length },
+      },
+    });
+    return true;
+  }
 
   const strategy = chooseExecutionStrategy(task);
   if (!strategy.length) return false;

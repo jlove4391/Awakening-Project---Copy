@@ -2,6 +2,8 @@ export type RuntimeAgentName = 'elora' | 'nexora' | 'kaz' | 'jynx' | 'kalyra';
 
 export type DelegatedTaskStatus = 'queued' | 'pending_approval' | 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled';
 
+export type DelegatedTaskBlockedReason = 'step_approval_required' | 'worker_unavailable' | 'policy_block' | 'unknown';
+
 export type DelegatedTaskEventType =
   | 'task.created'
   | 'task.queued'
@@ -68,6 +70,27 @@ export type ExecutionPlanStepApprovalStatus = 'not_required' | 'pending' | 'appr
 
 export type ExecutionPlanStepStatus = 'queued' | 'running' | 'blocked' | 'completed' | 'failed' | 'skipped' | 'cancelled';
 
+export interface ExecutionPlanStepApproval {
+  required: boolean;
+  status: ExecutionPlanStepApprovalStatus;
+  approver?: string;
+  approvedAt?: string;
+  rejectedAt?: string;
+  note?: string;
+  reason?: string;
+}
+
+export interface PendingToolAction {
+  stepId: string;
+  toolName: string;
+  riskLevel?: string;
+  action?: string;
+  arguments?: unknown;
+  argumentTemplate?: unknown;
+  approvalStatus: ExecutionPlanStepApprovalStatus;
+  reason: string;
+}
+
 export interface ExecutionPlanStep {
   id: string;
   order: number;
@@ -75,6 +98,7 @@ export interface ExecutionPlanStep {
   arguments?: unknown;
   argumentTemplate?: unknown;
   approvalStatus: ExecutionPlanStepApprovalStatus;
+  approval?: ExecutionPlanStepApproval;
   status: ExecutionPlanStepStatus;
   resultSummary?: string;
   createdAt: string;
@@ -92,6 +116,8 @@ export interface DelegatedTask {
   approvalRequirements: ApprovalRequirement[];
   executionPlan?: ExecutionPlanStep[];
   status: DelegatedTaskStatus;
+  blockedReason?: DelegatedTaskBlockedReason;
+  pendingToolAction?: PendingToolAction;
   logs: string[];
   events: DelegatedTaskEvent[];
   result?: DelegatedTaskResult;
@@ -121,6 +147,7 @@ export interface AppendExecutionPlanStepInput {
   arguments?: unknown;
   argumentTemplate?: unknown;
   approvalStatus?: ExecutionPlanStepApprovalStatus;
+  approval?: Partial<ExecutionPlanStepApproval>;
   status?: ExecutionPlanStepStatus;
   resultSummary?: string;
 }
@@ -131,6 +158,7 @@ export interface UpdateExecutionPlanStepInput {
   arguments?: unknown;
   argumentTemplate?: unknown;
   approvalStatus?: ExecutionPlanStepApprovalStatus;
+  approval?: Partial<ExecutionPlanStepApproval>;
   status?: ExecutionPlanStepStatus;
   resultSummary?: string;
 }
@@ -139,6 +167,8 @@ export interface UpdateDelegatedTaskInput {
   status?: DelegatedTaskStatus;
   log?: string;
   result?: DelegatedTaskResult;
+  blockedReason?: DelegatedTaskBlockedReason;
+  pendingToolAction?: PendingToolAction;
   event?: {
     type?: DelegatedTaskEventType;
     actor?: RuntimeAgentName | 'system' | 'user';

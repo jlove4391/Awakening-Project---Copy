@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { durableTaskQueue } from '../tasks/queue.js';
-import { createDelegatedTask, getDelegatedTask, listDelegatedTasks, updateDelegatedTask } from '../tasks/store.js';
+import { approveExecutionPlanStep, createDelegatedTask, getDelegatedTask, listDelegatedTasks, updateDelegatedTask } from '../tasks/store.js';
 import type { ApprovalRequirement, DelegatedTaskStatus } from '../tasks/types.js';
 
 export const tasksRouter = Router();
@@ -71,6 +71,7 @@ tasksRouter.post('/', async (req, res, next) => {
       approvalRequirements,
       initialLog,
       notes,
+      executionPlan,
     } = req.body || {};
     const taskObjective = String(objective || title || '').trim();
     if (!taskObjective) {
@@ -85,9 +86,29 @@ tasksRouter.post('/', async (req, res, next) => {
       requiredTools: stringArray(requiredTools),
       approvalRequirements: approvalRequirementArray(approvalRequirements),
       initialLog: String(initialLog || notes || '').trim() || undefined,
+      executionPlan: Array.isArray(executionPlan) ? executionPlan : undefined,
     });
 
     res.status(201).json({ task, queuedTaskIds: durableTaskQueue.snapshot() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+
+tasksRouter.post('/:taskId/steps/:stepId/approve', async (req, res, next) => {
+  try {
+    if (req.body?.confirmedByUser !== true) {
+      res.status(400).json({ error: 'confirmedByUser=true is required to approve a pending step action' });
+      return;
+    }
+    const task = await approveExecutionPlanStep(req.params.taskId, req.params.stepId, String(req.body?.approver || 'user'), String(req.body?.note || ''));
+    if (!task) {
+      res.status(404).json({ error: 'task or step not found' });
+      return;
+    }
+    if (task.status === 'queued') durableTaskQueue.enqueue(task);
+    res.json({ task, queuedTaskIds: durableTaskQueue.snapshot() });
   } catch (error) {
     next(error);
   }

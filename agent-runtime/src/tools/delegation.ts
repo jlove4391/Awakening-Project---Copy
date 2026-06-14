@@ -1,6 +1,7 @@
 import { durableTaskQueue } from '../tasks/queue.js';
 import {
   approveDelegatedTask,
+  approveExecutionPlanStep,
   completeDelegatedTask,
   createDelegatedTask,
   getDelegatedTask,
@@ -16,6 +17,7 @@ export async function createDelegationTask(
     requiredTools?: string[];
     approvalRequirements?: string[];
     initialLog?: string;
+    executionPlan?: any[];
   },
   context: RuntimeContext,
 ) {
@@ -26,6 +28,7 @@ export async function createDelegationTask(
     requiredTools: input.requiredTools || [],
     approvalRequirements: input.approvalRequirements || [],
     initialLog: input.initialLog,
+    executionPlan: input.executionPlan,
   });
   if (task.status === 'queued') durableTaskQueue.enqueue(task);
   return task;
@@ -59,4 +62,10 @@ export async function recordDelegationTaskResult(input: { taskId: string; ok: bo
 export async function updateDelegationTask(input: { taskId: string; status?: any; log?: string }) {
   const task = await updateDelegatedTask(input.taskId, { status: input.status, log: input.log });
   return task || { ok: false, status: 'not_found', taskId: input.taskId };
+}
+
+export async function approveDelegationStep(input: { taskId: string; stepId: string; approver?: string; note?: string }) {
+  const task = await approveExecutionPlanStep(input.taskId, input.stepId, input.approver || 'user', input.note || '');
+  if (task?.status === 'queued') durableTaskQueue.enqueue(task);
+  return task || { ok: false, status: 'not_found', taskId: input.taskId, stepId: input.stepId };
 }

@@ -71,6 +71,7 @@ import {
 } from './codeTools.js';
 import {
   approveDelegationTask,
+  approveDelegationStep,
   createDelegationTask,
   getDelegationTask,
   listDelegationTasks,
@@ -2406,6 +2407,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
         requiredTools: stringArraySchema('Tool names or capabilities Nexora is expected to need.'),
         approvalRequirements: stringArraySchema('Human approvals required before the task can be dispatched.'),
         initialLog: stringSchema('Optional initial task log entry.'),
+        executionPlan: { type: 'array', description: 'Optional ordered execution-plan steps with targetTool, arguments, and per-step approval state.', items: { type: 'object', additionalProperties: true } },
       },
       ['objective'],
     ),
@@ -2415,6 +2417,15 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       requiredTools: z.array(z.string()).default([]),
       approvalRequirements: z.array(z.string()).default([]),
       initialLog: z.string().default(''),
+      executionPlan: z.array(z.object({
+        id: z.string().optional(),
+        order: z.number().optional(),
+        targetTool: z.string().min(1),
+        arguments: z.unknown().optional(),
+        argumentTemplate: z.unknown().optional(),
+        approvalStatus: z.enum(['not_required', 'pending', 'approved', 'rejected']).optional(),
+        status: z.enum(['queued', 'running', 'blocked', 'completed', 'failed', 'skipped', 'cancelled']).optional(),
+      })).optional(),
     }),
     scopes: ['runtime.delegation.write'],
     riskLevel: 'write',
@@ -2481,6 +2492,28 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       logEvents: ['tool.delegation.approve_task.approval_requested', 'tool.delegation.approve_task.completed'],
     },
     executor: approveDelegationTask,
+  },
+
+  {
+    name: 'delegation.approve_step',
+    description: 'Record human approval for one blocked execution-plan step/tool action and resume the same durable task from that step.',
+    inputSchema: objectSchema(
+      { taskId: stringSchema('Delegated task ID.'), stepId: stringSchema('Execution plan step ID.'), approver: stringSchema('Person approving the step.'), note: approvalNoteSchema, confirmedByUser: approvalBooleanSchema },
+      ['taskId', 'stepId', 'confirmedByUser'],
+    ),
+    parameters: z.object({ taskId: z.string().min(1), stepId: z.string().min(1), approver: z.string().default('user'), note: z.string().default(''), confirmedByUser: z.boolean().default(false) }),
+    scopes: ['runtime.delegation.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'delegation',
+      action: 'approve_step',
+      resourceType: 'delegated_task_step',
+      resourceIdField: 'stepId',
+      sensitiveFields: ['note'],
+      logEvents: ['tool.delegation.approve_step.approval_requested', 'tool.delegation.approve_step.completed'],
+    },
+    executor: approveDelegationStep,
   },
   {
     name: 'delegation.update_task',

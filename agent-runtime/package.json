@@ -14,7 +14,15 @@
     "smoke:voice": "tsx scripts/smoke-voice.ts",
     "smoke:google-calendar": "tsx scripts/smoke-google-calendar.ts",
     "smoke:specialists": "tsx scripts/smoke-specialist-routing.ts",
-    "smoke:intake-routing": "tsx scripts/smoke-intake-routing.ts"
+    "smoke:intake-routing": "tsx scripts/smoke-intake-routing.ts",
+    "smoke:phase1-stabilization": "tsx scripts/smoke-phase1-stabilization.ts",
+    "smoke:specialist-routing": "tsx scripts/smoke-specialist-routing.ts",
+    "smoke:lead-import": "tsx scripts/smoke-lead-import.ts",
+    "smoke:qualification": "tsx scripts/smoke-qualification.ts",
+    "smoke:outreach-draft": "tsx scripts/smoke-outreach-draft.ts",
+    "smoke:proposal-package": "tsx scripts/smoke-proposal-package.ts",
+    "smoke:objection-report": "tsx scripts/smoke-objection-report.ts",
+    "smoke:closing-kickoff": "tsx scripts/smoke-closing-kickoff.ts"
   },
   "dependencies": {
     "@openai/agents": "latest",

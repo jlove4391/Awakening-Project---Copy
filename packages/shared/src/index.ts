@@ -98,6 +98,23 @@ export interface DelegatedTaskResult {
   error?: { message: string; stack?: string };
 }
 
+export type ExecutionPlanStepApprovalStatus = 'not_required' | 'pending' | 'approved' | 'rejected';
+
+export type ExecutionPlanStepStatus = 'queued' | 'running' | 'blocked' | 'completed' | 'failed' | 'skipped' | 'cancelled';
+
+export interface ExecutionPlanStep {
+  id: string;
+  order: number;
+  targetTool: string;
+  arguments?: unknown;
+  argumentTemplate?: unknown;
+  approvalStatus: ExecutionPlanStepApprovalStatus;
+  status: ExecutionPlanStepStatus;
+  resultSummary?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DelegatedTask {
   id: string;
   sessionId: string;
@@ -107,6 +124,7 @@ export interface DelegatedTask {
   constraints: string[];
   requiredTools: string[];
   approvalRequirements: ApprovalRequirement[];
+  executionPlan?: ExecutionPlanStep[];
   status: DelegatedTaskStatus;
   logs: string[];
   events: DelegatedTaskEvent[];
@@ -125,7 +143,30 @@ export interface CreateDelegatedTaskInput {
   constraints?: string[];
   requiredTools?: string[];
   approvalRequirements?: Array<Partial<ApprovalRequirement> | string>;
+  executionPlan?: AppendExecutionPlanStepInput[];
   initialLog?: string;
+}
+
+
+export interface AppendExecutionPlanStepInput {
+  id?: string;
+  order?: number;
+  targetTool: string;
+  arguments?: unknown;
+  argumentTemplate?: unknown;
+  approvalStatus?: ExecutionPlanStepApprovalStatus;
+  status?: ExecutionPlanStepStatus;
+  resultSummary?: string;
+}
+
+export interface UpdateExecutionPlanStepInput {
+  order?: number;
+  targetTool?: string;
+  arguments?: unknown;
+  argumentTemplate?: unknown;
+  approvalStatus?: ExecutionPlanStepApprovalStatus;
+  status?: ExecutionPlanStepStatus;
+  resultSummary?: string;
 }
 
 export interface UpdateDelegatedTaskInput {

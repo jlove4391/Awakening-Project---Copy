@@ -16,6 +16,7 @@ import { exportSequence, findLeadsWorkflow } from '../workflows/leadgen/index.js
 import { classifyReply } from '../workflows/outreach/classifyReply.js';
 import { recordOptOut } from '../workflows/outreach/optOut.js';
 import { scheduleFollowUp } from '../workflows/outreach/scheduleFollowUp.js';
+import type { SocialPlatform, SocialProspect, SocialReplyClassification } from '../workflows/socialSelling/types.js';
 import { sendApprovedEmail } from '../workflows/outreach/sendApprovedEmail.js';
 import { createBetterQuestionsPrompt } from '../workflows/objections/betterQuestions.js';
 import { createCallInsightReport } from '../workflows/objections/createCallInsightReport.js';
@@ -69,6 +70,7 @@ export type ToolCategory =
   | 'clay'
   | 'leadgen'
   | 'outreach'
+  | 'social'
   | 'objection'
   | 'intake'
   | 'qualification'
@@ -203,6 +205,8 @@ const leadRecordJsonSchema = { type: 'object', additionalProperties: true, descr
 const outreachDraftJsonSchema = { type: 'object', additionalProperties: true, description: 'Outreach draft produced by outreach.draft_email.' };
 const approvedSendRequestJsonSchema = { type: 'object', additionalProperties: true, description: 'ApprovedSendRequest produced by outreach.approve_send.' };
 const replyClassificationJsonSchema = { type: 'object', additionalProperties: true, description: 'ReplyClassification produced by outreach.classify_reply.' };
+const socialProspectJsonSchema = { type: 'object', additionalProperties: true, description: 'SocialProspect for draft-only social selling workflows.' };
+const socialReplyClassificationJsonSchema = { type: 'object', additionalProperties: true, description: 'SocialReplyClassification produced by social.classify_reply.' };
 const optOutRecordArrayJsonSchema = { type: 'array', description: 'Known opt-out records to suppress sends.', items: genericObjectJsonSchema };
 const objectionRecordArrayJsonSchema = { type: 'array', description: 'Internal objection records or notes.', items: genericObjectJsonSchema };
 const callInsightReportJsonSchema = { type: 'object', additionalProperties: true, description: 'Internal call insight report produced by objection.create_call_insight_report.' };
@@ -239,6 +243,160 @@ async function draftOutreachEmail(input: Record<string, unknown>) {
       updatedAt: now,
       metadata: { source: 'outreach.draft_email', ...(input.metadata as Record<string, unknown> | undefined) },
     },
+  };
+}
+
+
+function socialPlatform(value: unknown): SocialPlatform {
+  return (compactString(value) || 'linkedin') as SocialPlatform;
+}
+
+async function draftSocialContentIdea(input: Record<string, unknown>) {
+  const now = new Date().toISOString();
+  const platform = socialPlatform(input.platform);
+  const topic = compactString(input.topic) || compactString(input.title) || 'Social selling insight';
+  const targetAudience = compactString(input.targetAudience) || 'qualified prospects';
+  const angle = compactString(input.angle) || `Share a practical, buyer-centered perspective for ${targetAudience}.`;
+  const callToAction = compactString(input.callToAction) || 'Invite readers to compare notes without pressure.';
+
+  return {
+    ok: true,
+    status: 'draft',
+    workflow: 'social',
+    internalOnly: true,
+    externalSend: false,
+    contentIdea: {
+      id: compactString(input.ideaId) || `social_content_idea_${randomUUID()}`,
+      platform,
+      title: compactString(input.title) || topic,
+      angle,
+      targetAudience,
+      bodyOutline: compactString(input.bodyOutline) || [
+        `Hook: name the ${topic} problem in plain language.`,
+        'Context: explain the operational cost or missed opportunity.',
+        'Value: share one useful diagnostic or next-step idea.',
+        `CTA: ${callToAction}`,
+      ].join('\n'),
+      callToAction,
+      status: 'draft',
+      createdAt: now,
+      updatedAt: now,
+      metadata: { source: 'social.draft_content_idea', internalOnly: true, externalSend: false, ...(input.metadata as Record<string, unknown> | undefined) },
+    },
+    guardrails: SOCIAL_DRAFT_GUARDRAILS,
+  };
+}
+
+const SOCIAL_DRAFT_GUARDRAILS = [
+  'Draft only; do not post, send, or automate platform actions.',
+  'Human review is required before any social content or DM is used externally.',
+  'Respect opt-outs and platform terms; do not scrape or impersonate a human.',
+];
+
+async function draftSocialDm(input: Record<string, unknown>) {
+  const now = new Date().toISOString();
+  const prospect = (input.prospect && typeof input.prospect === 'object' ? input.prospect : {}) as Partial<SocialProspect> & Record<string, unknown>;
+  const platform = socialPlatform(input.platform ?? prospect.platform);
+  const displayName = compactString(input.displayName) || compactString(prospect.displayName);
+  const relationshipContext = compactString(input.relationshipContext) || compactString(prospect.relationshipContext);
+  const message = compactString(input.message) || [
+    displayName ? `Hi ${displayName},` : 'Hi,',
+    relationshipContext ? `I noticed ${relationshipContext}.` : 'I noticed your work and wanted to connect around improving lead follow-up without adding manual busywork.',
+    compactString(input.callToAction) || 'Open to comparing notes? No pressure either way.',
+  ].join(' ');
+
+  return {
+    ok: true,
+    status: 'draft',
+    workflow: 'social',
+    internalOnly: true,
+    externalSend: false,
+    dmDraft: {
+      id: compactString(input.draftId) || `social_dm_${randomUUID()}`,
+      prospectId: compactString(input.prospectId) || compactString(prospect.id) || `prospect_${randomUUID()}`,
+      platform,
+      profileUrl: compactString(input.profileUrl) || compactString(prospect.profileUrl),
+      message,
+      status: 'draft',
+      createdAt: now,
+      updatedAt: now,
+      metadata: { source: 'social.draft_dm', internalOnly: true, externalSend: false, ...(input.metadata as Record<string, unknown> | undefined) },
+    },
+    guardrails: SOCIAL_DRAFT_GUARDRAILS,
+  };
+}
+
+function socialReplyClass(replyText: string) {
+  const lower = replyText.toLowerCase();
+  if (/\b(stop|unsubscribe|do not contact|don't contact|remove me)\b/i.test(lower)) return 'opt_out_do_not_contact';
+  if (/\b(price|pricing|cost|rate|budget)\b/i.test(lower)) return 'asks_for_pricing';
+  if (/\b(details|info|information|tell me more|learn more)\b/i.test(lower)) return 'asks_for_details';
+  if (/\b(not interested|no thanks|not a fit)\b/i.test(lower)) return 'not_interested';
+  if (/\b(later|next week|next month|follow up|check back)\b/i.test(lower)) return 'needs_follow_up_later';
+  if (/\b(wrong person|not my role)\b/i.test(lower)) return 'wrong_person';
+  if (/\b(interested|sounds good|let's talk|book|call)\b/i.test(lower)) return 'interested';
+  return 'objection';
+}
+
+async function classifySocialReply(input: Record<string, unknown>) {
+  const replyText = compactString(input.replyText);
+  const replyClass = socialReplyClass(replyText);
+  const platform = socialPlatform(input.platform);
+  const classification: SocialReplyClassification = {
+    id: compactString(input.classificationId) || `social_reply_${randomUUID()}`,
+    prospectId: compactString(input.prospectId),
+    receiptId: compactString(input.receiptId),
+    platform,
+    replyClass,
+    confidence: 0.72,
+    summary: compactString(input.summary) || `Inbound ${platform} reply classified as ${replyClass}.`,
+    nextAction: nextSocialAction(replyClass),
+    classifiedAt: compactString(input.receivedAt) || new Date().toISOString(),
+    classifiedBy: compactString(input.classifiedBy) || 'social.classify_reply',
+    metadata: { source: 'social.classify_reply', internalOnly: true, externalSend: false, ...(input.metadata as Record<string, unknown> | undefined) },
+  };
+  return { ok: true, status: 'classified', workflow: 'social', internalOnly: true, externalSend: false, classification };
+}
+
+function nextSocialAction(replyClass: string) {
+  const actions: Record<string, string> = {
+    interested: 'Prepare a human-reviewed response or booking next step; do not send automatically.',
+    asks_for_details: 'Draft a concise detail response for human review.',
+    asks_for_pricing: 'Route to Jordan for pricing context before drafting any reply.',
+    not_interested: 'Mark not interested and avoid further sales follow-up unless reopened by a human.',
+    opt_out_do_not_contact: 'Record do-not-contact status and suppress future follow-up.',
+    needs_follow_up_later: 'Recommend an internal reminder for the requested timeframe; future sends require approval.',
+    wrong_person: 'Ask a human to verify whether a better contact was offered before any reply.',
+    spam_or_abuse: 'Do not respond; escalate for review if needed.',
+    objection: 'Draft an empathetic, non-pressuring response for human review.',
+  };
+  return actions[replyClass] || actions.objection;
+}
+
+async function recommendSocialFollowUp(input: Record<string, unknown>) {
+  const classification = (input.replyClassification && typeof input.replyClassification === 'object' ? input.replyClassification : {}) as Partial<SocialReplyClassification> & Record<string, unknown>;
+  const replyClass = compactString(input.replyClass) || compactString(classification.replyClass) || 'objection';
+  const now = new Date().toISOString();
+  return {
+    ok: true,
+    status: 'draft',
+    workflow: 'social',
+    internalOnly: true,
+    externalSend: false,
+    recommendation: {
+      id: compactString(input.recommendationId) || `social_follow_up_${randomUUID()}`,
+      prospectId: compactString(input.prospectId) || compactString(classification.prospectId),
+      platform: socialPlatform(input.platform ?? classification.platform),
+      replyClassificationId: compactString(input.replyClassificationId) || compactString(classification.id),
+      recommendedAction: compactString(input.recommendedAction) || nextSocialAction(replyClass),
+      suggestedTiming: compactString(input.suggestedTiming) || (replyClass === 'needs_follow_up_later' ? 'Use the timeframe requested by the prospect.' : 'Human review before any response.'),
+      draftReply: compactString(input.draftReply),
+      status: 'draft',
+      createdAt: now,
+      updatedAt: now,
+      metadata: { source: 'social.recommend_follow_up', internalOnly: true, externalSend: false, ...(input.metadata as Record<string, unknown> | undefined) },
+    },
+    guardrails: SOCIAL_DRAFT_GUARDRAILS,
   };
 }
 
@@ -789,6 +947,78 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       logEvents: ['tool.leadgen.export_sequence.approval_requested', 'tool.leadgen.export_sequence.completed'],
     },
     executor: exportSequence,
+  },
+  {
+    name: 'social.draft_content_idea',
+    description: 'Create a draft-only social selling content idea for human review. This never posts or sends externally.',
+    inputSchema: objectSchema({ ideaId: stringSchema('Optional content idea ID.'), platform: stringSchema('Social platform.'), topic: stringSchema('Content topic.'), title: stringSchema('Draft title.'), angle: stringSchema('Draft content angle.'), targetAudience: stringSchema('Intended audience.'), bodyOutline: stringSchema('Draft outline.'), callToAction: stringSchema('Draft call to action.'), metadata: genericObjectJsonSchema }, []),
+    parameters: z.object({ ideaId: z.string().default(''), platform: z.string().default('linkedin'), topic: z.string().default(''), title: z.string().default(''), angle: z.string().default(''), targetAudience: z.string().default(''), bodyOutline: z.string().default(''), callToAction: z.string().default(''), metadata: z.record(z.string(), z.unknown()).default({}) }),
+    scopes: ['social.content.draft'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'social',
+      action: 'draft_content_idea',
+      resourceType: 'social_content_idea',
+      resourceIdField: 'ideaId',
+      sensitiveFields: ['topic', 'title', 'angle', 'targetAudience', 'bodyOutline', 'callToAction'],
+      logEvents: ['tool.social.draft_content_idea.requested', 'tool.social.draft_content_idea.completed'],
+    },
+    executor: draftSocialContentIdea,
+  },
+  {
+    name: 'social.draft_dm',
+    description: 'Create a draft-only social DM for human review. This never sends externally.',
+    inputSchema: objectSchema({ prospect: socialProspectJsonSchema, draftId: stringSchema('Optional DM draft ID.'), prospectId: stringSchema('Social prospect ID.'), platform: stringSchema('Social platform.'), profileUrl: stringSchema('Prospect profile URL.'), displayName: stringSchema('Prospect display name.'), relationshipContext: stringSchema('Relevant relationship or profile context.'), message: stringSchema('Draft DM message.'), callToAction: stringSchema('Draft call to action.'), metadata: genericObjectJsonSchema }, []),
+    parameters: z.object({ prospect: z.object({}).passthrough().optional(), draftId: z.string().default(''), prospectId: z.string().default(''), platform: z.string().default('linkedin'), profileUrl: z.string().default(''), displayName: z.string().default(''), relationshipContext: z.string().default(''), message: z.string().default(''), callToAction: z.string().default(''), metadata: z.record(z.string(), z.unknown()).default({}) }),
+    scopes: ['social.dm.draft'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'social',
+      action: 'draft_dm',
+      resourceType: 'social_dm_draft',
+      resourceIdField: 'prospectId',
+      sensitiveFields: ['prospect', 'profileUrl', 'displayName', 'relationshipContext', 'message'],
+      logEvents: ['tool.social.draft_dm.requested', 'tool.social.draft_dm.completed'],
+    },
+    executor: draftSocialDm,
+  },
+  {
+    name: 'social.classify_reply',
+    description: 'Classify an inbound social reply and recommend a safe internal next action. This never sends externally.',
+    inputSchema: objectSchema({ replyText: stringSchema('Inbound social reply text.'), platform: stringSchema('Social platform.'), prospectId: stringSchema('Social prospect ID.'), receiptId: stringSchema('Related sent-message receipt ID.'), receivedAt: stringSchema('Received timestamp.'), classifiedBy: stringSchema('Classifier label.'), summary: stringSchema('Optional human/model-provided summary.'), metadata: genericObjectJsonSchema }, ['replyText']),
+    parameters: z.object({ replyText: z.string().min(1), platform: z.string().default('linkedin'), prospectId: z.string().default(''), receiptId: z.string().default(''), receivedAt: z.string().default(''), classifiedBy: z.string().default(''), summary: z.string().default(''), metadata: z.record(z.string(), z.unknown()).default({}) }),
+    scopes: ['social.reply.classify'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'social',
+      action: 'classify_reply',
+      resourceType: 'social_reply',
+      resourceIdField: 'receiptId',
+      sensitiveFields: ['replyText', 'summary'],
+      logEvents: ['tool.social.classify_reply.requested', 'tool.social.classify_reply.completed'],
+    },
+    executor: classifySocialReply,
+  },
+  {
+    name: 'social.recommend_follow_up',
+    description: 'Create a draft-only follow-up recommendation from a social reply classification. This never sends externally.',
+    inputSchema: objectSchema({ replyClassification: socialReplyClassificationJsonSchema, recommendationId: stringSchema('Optional recommendation ID.'), prospectId: stringSchema('Social prospect ID.'), platform: stringSchema('Social platform.'), replyClassificationId: stringSchema('Reply classification ID.'), replyClass: stringSchema('Reply class.'), recommendedAction: stringSchema('Draft recommended action.'), suggestedTiming: stringSchema('Draft follow-up timing.'), draftReply: stringSchema('Optional draft reply for human review.'), metadata: genericObjectJsonSchema }, []),
+    parameters: z.object({ replyClassification: z.object({}).passthrough().optional(), recommendationId: z.string().default(''), prospectId: z.string().default(''), platform: z.string().default('linkedin'), replyClassificationId: z.string().default(''), replyClass: z.string().default(''), recommendedAction: z.string().default(''), suggestedTiming: z.string().default(''), draftReply: z.string().default(''), metadata: z.record(z.string(), z.unknown()).default({}) }),
+    scopes: ['social.follow_up.draft'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'social',
+      action: 'recommend_follow_up',
+      resourceType: 'social_follow_up_recommendation',
+      resourceIdField: 'prospectId',
+      sensitiveFields: ['replyClassification', 'recommendedAction', 'suggestedTiming', 'draftReply'],
+      logEvents: ['tool.social.recommend_follow_up.requested', 'tool.social.recommend_follow_up.completed'],
+    },
+    executor: recommendSocialFollowUp,
   },
   {
     name: 'outreach.draft_email',

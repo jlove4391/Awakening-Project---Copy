@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -11,6 +11,10 @@ const trashDirectoryName = '.runtime-data/trash';
 const maxDeleteFileBytes = 10 * 1024 * 1024;
 const maxDeletePathBytes = 50 * 1024 * 1024;
 const maxDeletePathEntries = 100;
+const defaultCommandTimeoutMs = 120_000;
+const maxCommandTimeoutMs = 600_000;
+const defaultCommandOutputBytes = 1_000_000;
+const maxCommandOutputBytes = 2_000_000;
 const protectedDeleteBasenames = new Set([
   '.git',
   '.env',
@@ -28,6 +32,15 @@ const protectedDeleteBasenames = new Set([
   'composer.lock',
   'go.sum',
 ]);
+
+interface RunCommandInput extends ApprovalGateInput {
+  command: string;
+  cwd: string;
+  timeoutMs?: number;
+  maxOutputBytes?: number;
+  allowHighRiskCommand?: boolean;
+  highRiskApprovalNote?: string;
+}
 
 interface DeleteInput extends ApprovalGateInput {
   path: string;
@@ -406,6 +419,102 @@ function isApprovalConfirmed(input: ApprovalGateInput) {
   return input.confirmedByUser === true;
 }
 
+function detectDangerousCommand(command: string): string[] {
+  const normalized = command.replace(/\\\s*\n/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  const dangerousPatterns: Array<[RegExp, string]> = [
+    [/\brm\s+[^;&|]*(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\b/, 'recursive_force_delete'],
+    [/\brm\s+[^;&|]*(\/|~|\*)\b/, 'broad_delete_target'],
+    [/\bsudo\b|\bsu\s+-?\b/, 'privilege_escalation'],
+    [/\bchmod\s+(?:-[^\s]+\s+)*777\b|\bchmod\s+(?:-[^\s]+\s+)*-r\b/i, 'unsafe_permission_change'],
+    [/\bchown\s+(?:-[^\s]+\s+)*-r\b/i, 'recursive_owner_change'],
+    [/\bdd\s+.*\bof=\/dev\//, 'raw_device_write'],
+    [/\bmkfs(?:\.[a-z0-9]+)?\b|\bformat\b.*\b\/dev\//, 'filesystem_format'],
+    [/\bshutdown\b|\breboot\b|\bhalt\b|\bpoweroff\b/, 'system_power_control'],
+    [/\b(?:curl|wget)\b[^|;&]*(?:\||>)[^;&]*(?:\bsh\b|\bbash\b|\bzsh\b)/, 'remote_script_execution'],
+    [/\b(?:sh|bash|zsh)\b\s*<\s*\([^)]*\b(?:curl|wget)\b/, 'remote_script_execution'],
+    [/\bgit\s+push\b|\bgit\s+reset\b[^;&|]*--hard\b|\bgit\s+clean\b[^;&|]*-[^\s]*f/, 'destructive_git_operation'],
+    [/\bdocker\s+system\s+prune\b|\bdocker\s+volume\s+rm\b|\bdocker\s+rm\b[^;&|]*-[^\s]*f/, 'destructive_docker_operation'],
+    [/\bnpm\s+publish\b|\bpnpm\s+publish\b|\byarn\s+npm\s+publish\b/, 'package_publish'],
+    [/:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*}\s*;\s*:/, 'fork_bomb'],
+  ];
+  return dangerousPatterns.filter(([pattern]) => pattern.test(normalized)).map(([, reason]) => reason);
+}
+
+function assertRunCommandAllowed(input: RunCommandInput) {
+  const dangerousReasons = detectDangerousCommand(input.command);
+  if (dangerousReasons.length && (!input.allowHighRiskCommand || !hasMeaningfulNote(input.highRiskApprovalNote))) {
+    throw new Error(`Refusing to run known dangerous command patterns (${dangerousReasons.join(', ')}) without allowHighRiskCommand and highRiskApprovalNote.`);
+  }
+  return dangerousReasons;
+}
+
+function outputSlice(buffer: Uint8Array, maxBytes: number) {
+  return Buffer.from(buffer.subarray(0, maxBytes)).toString('utf8');
+}
+
+async function runWorkspaceShellCommand(input: RunCommandInput, toolName: string, options: { blockDangerous: boolean }) {
+  const approval = ensureConfirmed(input, toolName);
+  if (approval) return approval;
+  if (!input.command?.trim()) throw new Error('command is required');
+  if (!input.cwd?.trim()) throw new Error('cwd is required and must be workspace-relative');
+  const dangerousReasons = options.blockDangerous ? assertRunCommandAllowed(input) : detectDangerousCommand(input.command);
+  const { root, target, relativePath } = await resolveExistingWorkspacePath(input.cwd);
+  const timeoutMs = Math.min(Math.max(input.timeoutMs || runtimeConfig.codeCommandTimeoutMs || defaultCommandTimeoutMs, 1_000), maxCommandTimeoutMs);
+  const maxOutputBytes = Math.min(Math.max(input.maxOutputBytes || defaultCommandOutputBytes, 1_024), maxCommandOutputBytes);
+  const startedAt = new Date();
+  const startedNs = process.hrtime.bigint();
+  let timedOut = false;
+  let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+  let stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+  let truncated = false;
+  const append = (current: Buffer<ArrayBufferLike>, chunk: Buffer<ArrayBufferLike>) => {
+    const used = stdout.length + stderr.length;
+    const remaining = maxOutputBytes - used;
+    if (remaining <= 0) { truncated = true; return current; }
+    if (chunk.length > remaining) { truncated = true; return Buffer.concat([current, chunk.subarray(0, remaining)]); }
+    return Buffer.concat([current, chunk]);
+  };
+  const result = await new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+    const child = spawn('/bin/sh', ['-lc', input.command], { cwd: target, stdio: ['ignore', 'pipe', 'pipe'] });
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, timeoutMs);
+    child.stdout.on('data', (chunk) => { stdout = append(stdout, Buffer.from(chunk)); });
+    child.stderr.on('data', (chunk) => { stderr = append(stderr, Buffer.from(chunk)); });
+    child.on('error', (error) => { clearTimeout(timer); reject(error); });
+    child.on('close', (exitCode, signal) => { clearTimeout(timer); resolve({ exitCode, signal }); });
+  });
+  const completedAt = new Date();
+  const durationMs = Number((process.hrtime.bigint() - startedNs) / 1_000_000n);
+  return {
+    ok: result.exitCode === 0 && !timedOut,
+    status: timedOut ? 'timed_out' : (result.exitCode === 0 ? 'completed' : 'failed'),
+    workspaceRoot: root,
+    cwd: relativePath,
+    command: input.command,
+    stdout: outputSlice(stdout, stdout.length),
+    stderr: outputSlice(stderr, stderr.length),
+    exitCode: result.exitCode,
+    signal: timedOut ? 'SIGTERM' : result.signal,
+    timedOut,
+    truncated,
+    metadata: {
+      toolName,
+      commandSha256: sha256(input.command),
+      cwd: relativePath,
+      timeoutMs,
+      maxOutputBytes,
+      stdoutBytes: stdout.length,
+      stderrBytes: stderr.length,
+      startedAt: startedAt.toISOString(),
+      completedAt: completedAt.toISOString(),
+      durationMs,
+      dangerousCommandReasons: dangerousReasons,
+      highRiskApproved: dangerousReasons.length > 0 && input.allowHighRiskCommand === true,
+      approvalNotePresent: hasMeaningfulNote(input.approvalNote),
+      highRiskApprovalNotePresent: hasMeaningfulNote(input.highRiskApprovalNote),
+    },
+  };
+}
+
 export async function codeRead(input: { path: string; maxBytes?: number }) {
   const { root, target, relativePath } = await resolveExistingWorkspacePath(input.path);
   const stats = await fs.stat(target);
@@ -616,13 +725,12 @@ export async function codeDiff(input: { path?: string }) {
   return { ok: true, workspaceRoot: root, diff: stdout, truncated: stdout.length >= 1_000_000 };
 }
 
-export async function codeTest(input: { command: string; cwd?: string; timeoutMs?: number } & ApprovalGateInput) {
-  if (!isApprovalConfirmed(input)) return approvalRequired('code.test');
-  if (!input.command?.trim()) throw new Error('command is required');
-  const { root, target, relativePath } = await resolveExistingWorkspacePath(input.cwd || '.');
-  const timeout = Math.min(Math.max(input.timeoutMs || runtimeConfig.codeCommandTimeoutMs, 1_000), 600_000);
-  const { stdout, stderr } = await execFileAsync('/bin/sh', ['-lc', input.command], { cwd: target, timeout, maxBuffer: 1_000_000 });
-  return { ok: true, workspaceRoot: root, cwd: relativePath, command: input.command, stdout, stderr };
+export async function codeRunCommand(input: RunCommandInput) {
+  return runWorkspaceShellCommand(input, 'code.run_command', { blockDangerous: true });
+}
+
+export async function codeTest(input: { command: string; cwd?: string; timeoutMs?: number; maxOutputBytes?: number } & ApprovalGateInput) {
+  return runWorkspaceShellCommand({ ...input, cwd: input.cwd || '.' }, 'code.test', { blockDangerous: false });
 }
 
 export async function codeCommit(input: { message: string; paths?: string[] } & ApprovalGateInput) {

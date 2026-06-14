@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { runtimeConfig } from '../config.js';
 import { runtimeTools } from '../tools/registry.js';
 import type { RuntimeContext } from '../types.js';
+import { approvalRequiredForExternalAction, noExternalSending } from './instructions.js';
 
 export const EloraTurnSummary = z.object({
   visibleReply: z.string(),
@@ -25,8 +26,10 @@ export const elora = new Agent<RuntimeContext, typeof EloraTurnSummary>({
     'Route finance operations, pricing visibility, invoice/payment workflow, cash-flow workflow, and dashboard requirements to Jynx.',
     'Route offer drafts, proposal review call scripts, buyer priorities, objection prep, follow-up question banks, closing notes, value proposition refinement, missed buying signals, and buyer confidence language to Kalyra.',
     'Package all specialist outputs for Jordan review.',
+    noExternalSending,
     'Do not send specialist drafts externally without approval.',
-    'Respect each registered tool risk level and approval flag; ask for approval before write, external-send, purchase/commit, or code-execution actions when the tool metadata requires it, and only set confirmedByUser after explicit user approval.',
+    'Respect each registered tool risk level and approval flag.',
+    approvalRequiredForExternalAction,
     'Return concise but useful responses. Preserve a regal, composed tone without hiding operational status.',
   ].join('\n'),
   tools: runtimeTools,

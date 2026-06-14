@@ -1,7 +1,14 @@
 import { Router } from 'express';
 import { durableTaskQueue } from '../tasks/queue.js';
-import { approveExecutionPlanStep, createDelegatedTask, getDelegatedTask, listDelegatedTasks, updateDelegatedTask } from '../tasks/store.js';
-import type { ApprovalRequirement, DelegatedTaskStatus } from '../tasks/types.js';
+import {
+  approveExecutionPlanStep,
+  createDelegatedTask,
+  getDelegatedTask,
+  getDelegatedTaskUiState,
+  listDelegatedTasks,
+  updateDelegatedTask,
+} from '../tasks/store.js';
+import type { ApprovalRequirement, DelegatedTask, DelegatedTaskStatus } from '../tasks/types.js';
 
 export const tasksRouter = Router();
 
@@ -9,6 +16,19 @@ function stringArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean);
   if (typeof value === 'string') return value.split(',').map((item) => item.trim()).filter(Boolean);
   return [];
+}
+
+
+function taskResponse(task: DelegatedTask, queuedTaskIds = durableTaskQueue.snapshot()) {
+  const taskState = getDelegatedTaskUiState(task, queuedTaskIds);
+  return {
+    task: {
+      ...task,
+      uiState: taskState,
+    },
+    taskState,
+    queuedTaskIds,
+  };
 }
 
 function approvalRequirementArray(value: unknown): Array<Partial<ApprovalRequirement> | string> {
@@ -38,9 +58,12 @@ tasksRouter.get('/', async (req, res, next) => {
   try {
     const sessionId = String(req.query.sessionId || 'default');
     const includeAllSessions = req.query.includeAllSessions === 'true';
+    const queuedTaskIds = durableTaskQueue.snapshot();
+    const tasks = await listDelegatedTasks(includeAllSessions ? undefined : sessionId);
     res.json({
-      tasks: await listDelegatedTasks(includeAllSessions ? undefined : sessionId),
-      queuedTaskIds: durableTaskQueue.snapshot(),
+      tasks: tasks.map((task) => ({ ...task, uiState: getDelegatedTaskUiState(task, queuedTaskIds) })),
+      taskStates: tasks.map((task) => getDelegatedTaskUiState(task, queuedTaskIds)),
+      queuedTaskIds,
     });
   } catch (error) {
     next(error);
@@ -54,7 +77,7 @@ tasksRouter.get('/:taskId', async (req, res, next) => {
       res.status(404).json({ error: 'task not found' });
       return;
     }
-    res.json({ task });
+    res.json(taskResponse(task));
   } catch (error) {
     next(error);
   }
@@ -89,7 +112,7 @@ tasksRouter.post('/', async (req, res, next) => {
       executionPlan: Array.isArray(executionPlan) ? executionPlan : undefined,
     });
 
-    res.status(201).json({ task, queuedTaskIds: durableTaskQueue.snapshot() });
+    res.status(201).json(taskResponse(task));
   } catch (error) {
     next(error);
   }
@@ -108,7 +131,7 @@ tasksRouter.post('/:taskId/steps/:stepId/approve', async (req, res, next) => {
       return;
     }
     if (task.status === 'queued') durableTaskQueue.enqueue(task);
-    res.json({ task, queuedTaskIds: durableTaskQueue.snapshot() });
+    res.json(taskResponse(task));
   } catch (error) {
     next(error);
   }
@@ -126,7 +149,7 @@ tasksRouter.patch('/:taskId', async (req, res, next) => {
       return;
     }
 
-    res.json({ task, queuedTaskIds: durableTaskQueue.snapshot() });
+    res.json(taskResponse(task));
   } catch (error) {
     next(error);
   }

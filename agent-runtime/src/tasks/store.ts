@@ -12,6 +12,7 @@ import type {
   DelegatedTaskEventType,
   DelegatedTaskResult,
   DelegatedTaskStatus,
+  DelegatedTaskUiState,
   TaskAuditEntry,
   TaskReceipt,
   UpdateExecutionPlanStepInput,
@@ -114,6 +115,69 @@ function hasPendingExecutionPlanApproval(task: DelegatedTask) {
   return Boolean(task.executionPlan?.some((step) => step.approval?.required && step.approvalStatus === 'pending'));
 }
 
+
+function taskApprovalStatus(task: DelegatedTask) {
+  const requirementStatuses = task.approvalRequirements.filter((requirement) => requirement.required).map((requirement) => requirement.status);
+  const stepStatuses = (task.executionPlan || [])
+    .filter((step) => step.approval?.required || step.approvalStatus !== 'not_required')
+    .map((step) => step.approvalStatus);
+  const statuses = [...requirementStatuses, ...stepStatuses];
+  if (!statuses.length) return 'not_required' as const;
+  if (statuses.includes('rejected')) return 'rejected' as const;
+  if (statuses.includes('pending')) return 'pending' as const;
+  return 'approved' as const;
+}
+
+function currentWorkerStep(task: DelegatedTask) {
+  if (!task.executionPlan?.length) return undefined;
+  const pendingActionStep = task.pendingToolAction?.stepId
+    ? task.executionPlan.find((step) => step.id === task.pendingToolAction?.stepId)
+    : undefined;
+  return (
+    task.executionPlan.find((step) => step.status === 'running') ||
+    pendingActionStep ||
+    task.executionPlan.find((step) => step.status === 'blocked') ||
+    task.executionPlan.find((step) => step.status === 'queued')
+  );
+}
+
+function missingApproval(task: DelegatedTask) {
+  if (task.pendingToolAction?.approvalStatus === 'pending') return task.pendingToolAction;
+  return (
+    task.approvalRequirements.find((requirement) => requirement.required && requirement.status === 'pending') ||
+    task.executionPlan?.find((step) => step.approval?.required && step.approvalStatus === 'pending')?.approval
+  );
+}
+
+function missingConfiguration(task: DelegatedTask) {
+  if (task.blockedReason !== 'provider_configuration_required') return undefined;
+  const details = [...task.events].reverse().find((event) => event.details?.blockedReason === 'provider_configuration_required')?.details || {};
+  return {
+    blockedReason: 'provider_configuration_required' as const,
+    ...(typeof details.provider === 'string' ? { provider: details.provider } : {}),
+    ...(typeof details.providerName === 'string' ? { providerName: details.providerName } : {}),
+    ...(typeof details.missingConfigHint === 'string' ? { missingConfigHint: details.missingConfigHint } : {}),
+    ...(typeof details.nextManualAction === 'string' ? { nextManualAction: details.nextManualAction } : {}),
+    ...(typeof details.message === 'string' ? { message: details.message } : {}),
+  };
+}
+
+export function getDelegatedTaskUiState(task: DelegatedTask, queuedTaskIds: string[] = []): DelegatedTaskUiState {
+  const queueStatus = task.status === 'running' ? 'active' : queuedTaskIds.includes(task.id) || task.status === 'queued' ? 'queued' : 'not_queued';
+  return {
+    taskId: task.id,
+    status: task.status,
+    approvalStatus: taskApprovalStatus(task),
+    queueStatus,
+    ...(currentWorkerStep(task) ? { currentWorkerStep: currentWorkerStep(task) } : {}),
+    ...(task.blockedReason ? { blockedReason: task.blockedReason } : {}),
+    ...(missingApproval(task) ? { missingApproval: missingApproval(task) } : {}),
+    ...(missingConfiguration(task) ? { missingConfiguration: missingConfiguration(task) } : {}),
+    ...(task.result ? { executionResult: task.result } : {}),
+    ...(task.receipt?.id ? { receiptId: task.receipt.id } : {}),
+  };
+}
+
 function createAuditEntry(
   taskId: string,
   eventType: DelegatedTaskEventType,
@@ -209,7 +273,7 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
     tasks.unshift(task);
     await persistTasks();
     await Promise.all(task.auditTrail.map(appendAuditJsonl));
-    taskEvents.emitTaskCreated(task);
+    taskEvents.emitTaskCreated(task, getDelegatedTaskUiState(task));
     return task;
   });
 }
@@ -240,7 +304,7 @@ export async function appendDelegatedTaskEvent(
     task.updatedAt = now();
     await persistTasks();
     await appendAuditJsonl(event);
-    taskEvents.emitTaskUpdated(task, event);
+    taskEvents.emitTaskUpdated(task, event, getDelegatedTaskUiState(task));
     return task;
   });
 }
@@ -269,7 +333,7 @@ export async function appendExecutionPlanStep(taskId: string, input: AppendExecu
     task.updatedAt = now();
     await persistTasks();
     await appendAuditJsonl(event);
-    taskEvents.emitTaskUpdated(task, event);
+    taskEvents.emitTaskUpdated(task, event, getDelegatedTaskUiState(task));
     return task;
   });
 }
@@ -314,7 +378,7 @@ export async function updateExecutionPlanStep(taskId: string, stepId: string, in
     task.updatedAt = now();
     await persistTasks();
     await appendAuditJsonl(event);
-    taskEvents.emitTaskUpdated(task, event);
+    taskEvents.emitTaskUpdated(task, event, getDelegatedTaskUiState(task));
     return task;
   });
 }
@@ -392,8 +456,8 @@ export async function updateDelegatedTask(taskId: string, input: UpdateDelegated
     task.updatedAt = now();
     await persistTasks();
     await Promise.all(newEvents.map(appendAuditJsonl));
-    taskEvents.emitTaskUpdated(task, event);
-    if (terminalStatuses.has(task.status)) taskEvents.emitTaskFinished(task);
+    taskEvents.emitTaskUpdated(task, event, getDelegatedTaskUiState(task));
+    if (terminalStatuses.has(task.status)) taskEvents.emitTaskFinished(task, getDelegatedTaskUiState(task));
     return task;
   });
 }
@@ -441,7 +505,7 @@ export async function approveDelegatedTask(taskId: string, approver = 'user', no
     task.updatedAt = now();
     await persistTasks();
     await Promise.all(task.auditTrail.slice(-2).map(appendAuditJsonl));
-    taskEvents.emitTaskUpdated(task, event);
+    taskEvents.emitTaskUpdated(task, event, getDelegatedTaskUiState(task));
     return task;
   });
 }
@@ -460,7 +524,7 @@ export async function resumeDelegatedTask(taskId: string, actor: TaskAuditEntry[
       task.updatedAt = now();
       await persistTasks();
       await appendAuditJsonl(event);
-      taskEvents.emitTaskUpdated(task, event);
+      taskEvents.emitTaskUpdated(task, event, getDelegatedTaskUiState(task));
       return task;
     }
 
@@ -485,7 +549,7 @@ export async function resumeDelegatedTask(taskId: string, actor: TaskAuditEntry[
     task.updatedAt = now();
     await persistTasks();
     await appendAuditJsonl(event);
-    taskEvents.emitTaskUpdated(task, event);
+    taskEvents.emitTaskUpdated(task, event, getDelegatedTaskUiState(task));
     return task;
   });
 }
@@ -514,7 +578,7 @@ export async function approveExecutionPlanStep(taskId: string, stepId: string, a
     task.updatedAt = now();
     await persistTasks();
     await Promise.all([event, queued].map(appendAuditJsonl));
-    taskEvents.emitTaskUpdated(task, queued);
+    taskEvents.emitTaskUpdated(task, queued, getDelegatedTaskUiState(task));
     return task;
   });
 }

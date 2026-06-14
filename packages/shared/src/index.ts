@@ -41,6 +41,7 @@ export type DelegatedTaskStatus =
 export type DelegatedTaskEventType =
   | 'task.created'
   | 'task.queued'
+  | 'task.resumed'
   | 'task.approval_requested'
   | 'task.approved'
   | 'task.rejected'
@@ -139,6 +140,28 @@ export interface ExecutionPlanStep {
   updatedAt: string;
 }
 
+export type DelegatedTaskQueueStatus = 'queued' | 'active' | 'not_queued';
+
+export interface DelegatedTaskUiState {
+  taskId: string;
+  status: DelegatedTaskStatus;
+  approvalStatus: ApprovalRequirementStatus;
+  queueStatus: DelegatedTaskQueueStatus;
+  currentWorkerStep?: ExecutionPlanStep;
+  blockedReason?: DelegatedTaskBlockedReason;
+  missingApproval?: PendingToolAction | ApprovalRequirement | ExecutionPlanStepApproval;
+  missingConfiguration?: {
+    blockedReason: 'provider_configuration_required';
+    provider?: string;
+    providerName?: string;
+    missingConfigHint?: string;
+    nextManualAction?: string;
+    message?: string;
+  };
+  executionResult?: DelegatedTaskResult;
+  receiptId?: string;
+}
+
 export interface DelegatedTask {
   id: string;
   sessionId: string;
@@ -157,6 +180,7 @@ export interface DelegatedTask {
   result?: DelegatedTaskResult;
   receipt?: TaskReceipt;
   auditTrail: TaskAuditEntry[];
+  uiState?: DelegatedTaskUiState;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;

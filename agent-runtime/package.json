@@ -22,7 +22,8 @@
     "smoke:outreach-draft": "tsx scripts/smoke-outreach-draft.ts",
     "smoke:proposal-package": "tsx scripts/smoke-proposal-package.ts",
     "smoke:objection-report": "tsx scripts/smoke-objection-report.ts",
-    "smoke:closing-kickoff": "tsx scripts/smoke-closing-kickoff.ts"
+    "smoke:closing-kickoff": "tsx scripts/smoke-closing-kickoff.ts",
+    "smoke:delegated-drive-create": "tsx scripts/smoke-delegated-drive-create.ts"
   },
   "dependencies": {
     "@openai/agents": "latest",

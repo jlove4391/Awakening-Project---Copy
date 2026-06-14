@@ -38,6 +38,7 @@ import { createDeliveryTasks } from '../workflows/closing/createDeliveryTasks.js
 import { createFirstWinPlan } from '../workflows/closing/createFirstWinPlan.js';
 import { ClientRecordSchema, ProjectRecordSchema } from '../workflows/closing/types.js';
 import { createWelcomeSequence } from '../workflows/closing/welcomeSequence.js';
+import { scaffoldApp } from '../workflows/nexora/scaffoldApp.js';
 import { createDriveTextFile, searchDriveFiles } from '../providers/google/drive.js';
 import { searchGmailMessages, sendGmailEmail } from '../providers/google/gmail.js';
 import { readSheetRange, updateSheetRange } from '../providers/google/sheets.js';
@@ -99,6 +100,7 @@ export type ToolCategory =
   | 'voice'
   | 'memory'
   | 'delegation'
+  | 'nexora'
   | 'code'
   | 'vscode';
 
@@ -233,6 +235,8 @@ const socialReplyClassificationJsonSchema = { type: 'object', additionalProperti
 const optOutRecordArrayJsonSchema = { type: 'array', description: 'Known opt-out records to suppress sends.', items: genericObjectJsonSchema };
 const objectionRecordArrayJsonSchema = { type: 'array', description: 'Internal objection records or notes.', items: genericObjectJsonSchema };
 const callInsightReportJsonSchema = { type: 'object', additionalProperties: true, description: 'Internal call insight report produced by objection.create_call_insight_report.' };
+const scaffoldFileArrayJsonSchema = { type: 'array', description: 'Files to create under appDir; each item can include content or json.', items: genericObjectJsonSchema };
+const scaffoldCommandArrayJsonSchema = { type: 'array', description: 'Optional approved install/build/test commands to run after scaffolding.', items: genericObjectJsonSchema };
 
 async function draftOutreachEmail(input: Record<string, unknown>) {
   const lead = (input.lead && typeof input.lead === 'object' ? input.lead : {}) as Record<string, unknown>;
@@ -2399,6 +2403,33 @@ export const toolRegistry: RegisteredToolDefinition[] = [
     executor: vscodeStatus,
   },
   {
+    name: 'nexora.scaffold_app',
+    description: 'Nexora-only approved app scaffolding workflow. Creates an app directory, package/config/source files, README/usage notes, and always returns a created/changed-file manifest. Optional install/build/test commands require separate explicit approval; global installs and unapproved network package installs are blocked.',
+    inputSchema: objectSchema({ appName: stringSchema('Human-readable app name.'), appDir: relativePathSchema, directories: stringArraySchema('Workspace-relative subdirectories to create under appDir.'), files: scaffoldFileArrayJsonSchema, readme: stringSchema('Optional README.md content to create under appDir.'), usageNotes: stringSchema('Optional USAGE.md content to create under appDir.'), commands: scaffoldCommandArrayJsonSchema, allowNetworkPackageInstall: { type: 'boolean', description: 'Permit approved npm/pnpm/yarn/bun install/add commands. Global installs remain blocked.' }, confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema, commandConfirmedByUser: approvalBooleanSchema, commandApprovalNote: approvalNoteSchema }, ['appName', 'appDir']),
+    parameters: z.object({
+      appName: z.string().min(1),
+      appDir: z.string().min(1),
+      directories: z.array(z.string()).default([]),
+      files: z.array(z.union([
+        z.object({ path: z.string().min(1), content: z.string(), kind: z.enum(['source', 'config', 'readme', 'package', 'usage']).optional() }),
+        z.object({ path: z.string().min(1), json: z.unknown(), kind: z.enum(['config', 'package']).optional(), space: z.number().int().min(0).max(10).optional() }),
+      ])).default([]),
+      readme: z.string().default(''),
+      usageNotes: z.string().default(''),
+      commands: z.array(z.object({ command: z.string().min(1), cwd: z.string().optional(), kind: z.enum(['install', 'build', 'test', 'other']).optional(), timeoutMs: z.number().int().min(1000).max(600000).optional(), maxOutputBytes: z.number().int().min(1024).max(2000000).optional() })).default([]),
+      allowNetworkPackageInstall: z.boolean().default(false),
+      confirmedByUser: z.boolean().default(false),
+      approvalNote: z.string().default(''),
+      commandConfirmedByUser: z.boolean().default(false),
+      commandApprovalNote: z.string().default(''),
+    }),
+    scopes: ['runtime.nexora.scaffold'],
+    riskLevel: 'code_execution',
+    humanApprovalRequired: true,
+    audit: { category: 'nexora', action: 'scaffold_app', resourceType: 'workspace_app', resourceIdField: 'appDir', sensitiveFields: ['appDir', 'files', 'readme', 'usageNotes', 'commands', 'approvalNote', 'commandApprovalNote'], logEvents: ['tool.nexora.scaffold_app.approval_requested', 'tool.nexora.scaffold_app.completed'] },
+    executor: (input) => scaffoldApp({ ...input, approval: { confirmedByUser: input.confirmedByUser, approvalNote: input.approvalNote }, commandApproval: { confirmedByUser: input.commandConfirmedByUser, approvalNote: input.commandApprovalNote } }),
+  },
+  {
     name: 'delegation.create_task',
     description: 'Create a durable delegated task from Elora to Nexora with objective, constraints, tool needs, approvals, events, and audit trail.',
     inputSchema: objectSchema(
@@ -2825,7 +2856,7 @@ export function runtimeToolsForRiskLevels(riskLevels: ToolRiskLevel[]) {
 }
 
 export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'outreach', 'objection', 'intake', 'qualification', 'proposal', 'voice', 'memory', 'delegation'];
-export const nexoraRuntimeToolCategories: ToolCategory[] = [...sharedRuntimeToolCategories, 'code', 'vscode'];
+export const nexoraRuntimeToolCategories: ToolCategory[] = [...sharedRuntimeToolCategories, 'nexora', 'code', 'vscode'];
 
 export const runtimeTools = runtimeToolsForCategories(sharedRuntimeToolCategories);
 export const safeRuntimeTools = runtimeToolsForRiskLevels(['read']);

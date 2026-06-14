@@ -4,6 +4,7 @@ import path from 'node:path';
 import { runtimeConfig } from '../config.js';
 import { taskEvents } from './events.js';
 import type {
+  AppendExecutionPlanStepInput,
   ApprovalRequirement,
   CreateDelegatedTaskInput,
   DelegatedTask,
@@ -13,6 +14,7 @@ import type {
   DelegatedTaskStatus,
   TaskAuditEntry,
   TaskReceipt,
+  UpdateExecutionPlanStepInput,
   UpdateDelegatedTaskInput,
 } from './types.js';
 
@@ -70,6 +72,26 @@ function normalizeApprovalRequirements(input?: Array<Partial<ApprovalRequirement
       reason: base.reason,
     } satisfies ApprovalRequirement;
   });
+}
+
+function normalizeExecutionPlanStep(input: AppendExecutionPlanStepInput, order: number) {
+  const timestamp = now();
+  return {
+    id: input.id || randomUUID(),
+    order: input.order ?? order,
+    targetTool: input.targetTool,
+    ...(input.arguments !== undefined ? { arguments: input.arguments } : {}),
+    ...(input.argumentTemplate !== undefined ? { argumentTemplate: input.argumentTemplate } : {}),
+    approvalStatus: input.approvalStatus || 'not_required',
+    status: input.status || 'queued',
+    ...(input.resultSummary !== undefined ? { resultSummary: input.resultSummary } : {}),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function sortExecutionPlan(task: DelegatedTask) {
+  task.executionPlan?.sort((a, b) => a.order - b.order || a.createdAt.localeCompare(b.createdAt));
 }
 
 function needsApproval(requirements: ApprovalRequirement[]) {
@@ -137,6 +159,9 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       constraints: input.constraints || [],
       requiredTools: input.requiredTools || [],
       approvalRequirements,
+      ...(input.executionPlan?.length
+        ? { executionPlan: input.executionPlan.map((step, index) => normalizeExecutionPlanStep(step, index + 1)) }
+        : {}),
       status,
       logs: input.initialLog ? [input.initialLog] : [],
       events: [],
@@ -196,6 +221,64 @@ export async function appendDelegatedTaskEvent(
     task.events.push(event);
     task.auditTrail.push(event);
     if (options.log) task.logs.push(summary);
+    task.updatedAt = now();
+    await persistTasks();
+    await appendAuditJsonl(event);
+    taskEvents.emitTaskUpdated(task, event);
+    return task;
+  });
+}
+
+export async function appendExecutionPlanStep(taskId: string, input: AppendExecutionPlanStepInput) {
+  return serializedWrite(async () => {
+    const task = await getDelegatedTask(taskId);
+    if (!task) return undefined;
+    task.executionPlan ||= [];
+    const nextOrder = task.executionPlan.length ? Math.max(...task.executionPlan.map((step) => step.order)) + 1 : 1;
+    const step = normalizeExecutionPlanStep(input, nextOrder);
+    task.executionPlan.push(step);
+    sortExecutionPlan(task);
+
+    const event = createAuditEntry(
+      task.id,
+      'task.log',
+      'system',
+      `Execution plan step ${step.id} appended for ${step.targetTool}.`,
+      {
+        executionPlanStep: step,
+      },
+    );
+    task.events.push(event);
+    task.auditTrail.push(event);
+    task.updatedAt = now();
+    await persistTasks();
+    await appendAuditJsonl(event);
+    taskEvents.emitTaskUpdated(task, event);
+    return task;
+  });
+}
+
+export async function updateExecutionPlanStep(taskId: string, stepId: string, input: UpdateExecutionPlanStepInput) {
+  return serializedWrite(async () => {
+    const task = await getDelegatedTask(taskId);
+    const step = task?.executionPlan?.find((candidate) => candidate.id === stepId);
+    if (!task || !step) return undefined;
+
+    if (input.order !== undefined) step.order = input.order;
+    if (input.targetTool !== undefined) step.targetTool = input.targetTool;
+    if (input.arguments !== undefined) step.arguments = input.arguments;
+    if (input.argumentTemplate !== undefined) step.argumentTemplate = input.argumentTemplate;
+    if (input.approvalStatus !== undefined) step.approvalStatus = input.approvalStatus;
+    if (input.status !== undefined) step.status = input.status;
+    if (input.resultSummary !== undefined) step.resultSummary = input.resultSummary;
+    step.updatedAt = now();
+    sortExecutionPlan(task);
+
+    const event = createAuditEntry(task.id, 'task.log', 'system', `Execution plan step ${step.id} updated.`, {
+      executionPlanStep: step,
+    });
+    task.events.push(event);
+    task.auditTrail.push(event);
     task.updatedAt = now();
     await persistTasks();
     await appendAuditJsonl(event);

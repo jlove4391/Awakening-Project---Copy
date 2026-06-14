@@ -2,7 +2,7 @@ export type RuntimeAgentName = 'elora' | 'nexora' | 'kaz' | 'jynx' | 'kalyra';
 
 export type DelegatedTaskStatus = 'queued' | 'pending_approval' | 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled';
 
-export type DelegatedTaskBlockedReason = 'step_approval_required' | 'worker_unavailable' | 'policy_block' | 'unknown';
+export type DelegatedTaskBlockedReason = 'step_approval_required' | 'provider_configuration_required' | 'worker_unavailable' | 'policy_block' | 'unknown';
 
 export type DelegatedTaskEventType =
   | 'task.created'

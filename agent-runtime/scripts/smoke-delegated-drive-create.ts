@@ -47,7 +47,12 @@ if (finalTask.status === 'completed') {
   assert.ok(JSON.stringify(finalTask.receipt).includes('drive.create_text_file'), 'receipt should include Drive response proof');
   console.log('✓ Worker completed and recorded Drive response in result and receipt.');
 } else if (finalTask.status === 'blocked') {
-  assert.equal((finalTask.result?.data as { status?: string } | undefined)?.status, 'provider_configuration_required');
+  const blockData = finalTask.result?.data as { status?: string; providerName?: string; missingConfigHint?: string; nextManualAction?: string } | undefined;
+  assert.equal(finalTask.blockedReason, 'provider_configuration_required');
+  assert.equal(blockData?.status, 'provider_configuration_required');
+  assert.equal(blockData?.providerName, 'Google Drive');
+  assert.ok(blockData?.missingConfigHint, 'blocked provider result should include a missing env/config hint');
+  assert.ok(blockData?.nextManualAction, 'blocked provider result should include the next manual action');
   assert.match(finalTask.result?.summary || '', /Google Drive provider configuration required/i);
   console.log(`✓ Worker returned clear provider configuration block: ${finalTask.result?.summary}`);
 } else {

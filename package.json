@@ -29,6 +29,14 @@
     "smoke:chat": "npm --workspace @awakening/agent-runtime run smoke:chat --",
     "smoke:voice": "npm --workspace @awakening/agent-runtime run smoke:voice",
     "smoke:specialists": "npm --workspace @awakening/agent-runtime run smoke:specialists --",
-    "smoke:intake-routing": "npm --workspace @awakening/agent-runtime run smoke:intake-routing --"
+    "smoke:intake-routing": "npm --workspace @awakening/agent-runtime run smoke:intake-routing --",
+    "smoke:phase1-stabilization": "npm --workspace @awakening/agent-runtime run smoke:phase1-stabilization",
+    "smoke:specialist-routing": "npm --workspace @awakening/agent-runtime run smoke:specialist-routing --",
+    "smoke:lead-import": "npm --workspace @awakening/agent-runtime run smoke:lead-import",
+    "smoke:qualification": "npm --workspace @awakening/agent-runtime run smoke:qualification",
+    "smoke:outreach-draft": "npm --workspace @awakening/agent-runtime run smoke:outreach-draft",
+    "smoke:proposal-package": "npm --workspace @awakening/agent-runtime run smoke:proposal-package",
+    "smoke:objection-report": "npm --workspace @awakening/agent-runtime run smoke:objection-report",
+    "smoke:closing-kickoff": "npm --workspace @awakening/agent-runtime run smoke:closing-kickoff"
   }
 }

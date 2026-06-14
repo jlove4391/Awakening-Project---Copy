@@ -76,6 +76,7 @@ import {
   getDelegationTask,
   listDelegationTasks,
   recordDelegationTaskResult,
+  resumeDelegationTask,
   updateDelegationTask,
 } from './delegation.js';
 
@@ -2514,6 +2515,25 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       logEvents: ['tool.delegation.approve_step.approval_requested', 'tool.delegation.approve_step.completed'],
     },
     executor: approveDelegationStep,
+  },
+
+  {
+    name: 'delegation.resume_task',
+    description: 'Resume an existing blocked durable delegated task by ID, preserving its execution-plan progress and re-enqueueing it after approval/configuration is satisfied.',
+    inputSchema: objectSchema({ taskId: stringSchema('Delegated task ID.'), note: stringSchema('Optional resume note.') }, ['taskId']),
+    parameters: z.object({ taskId: z.string().min(1), note: z.string().default('') }),
+    scopes: ['runtime.delegation.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'delegation',
+      action: 'resume_task',
+      resourceType: 'delegated_task',
+      resourceIdField: 'taskId',
+      sensitiveFields: ['note'],
+      logEvents: ['tool.delegation.resume_task.requested', 'tool.delegation.resume_task.completed'],
+    },
+    executor: resumeDelegationTask,
   },
   {
     name: 'delegation.update_task',

@@ -7,6 +7,36 @@ import { runtimeConfig } from '../config.js';
 
 const execFileAsync = promisify(execFile);
 const ignoredDirectoryNames = new Set(['.git', 'node_modules', 'dist', 'build', '.runtime-data', 'coverage']);
+const trashDirectoryName = '.runtime-data/trash';
+const maxDeleteFileBytes = 10 * 1024 * 1024;
+const maxDeletePathBytes = 50 * 1024 * 1024;
+const maxDeletePathEntries = 100;
+const protectedDeleteBasenames = new Set([
+  '.git',
+  '.env',
+  'package.json',
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'bun.lock',
+  'bun.lockb',
+  'Gemfile.lock',
+  'Cargo.lock',
+  'Pipfile.lock',
+  'poetry.lock',
+  'composer.lock',
+  'go.sum',
+]);
+
+interface DeleteInput extends ApprovalGateInput {
+  path: string;
+  expectedSha256?: string;
+  permanent?: boolean;
+  permanentApprovalNote?: string;
+  allowHighRiskDelete?: boolean;
+  highRiskApprovalNote?: string;
+}
 
 export interface ApprovalGateInput {
   confirmedByUser?: boolean;
@@ -119,6 +149,77 @@ async function resolveWritableWorkspacePathWithExistingAncestor(relativePath: st
 
 function ensureConfirmed(input: ApprovalGateInput, toolName: string) {
   return isApprovalConfirmed(input) ? null : approvalRequired(toolName);
+}
+
+
+function hasMeaningfulNote(note?: string) {
+  return Boolean(note?.trim());
+}
+
+function isProtectedDeletePath(relativePath: string) {
+  const parts = relativePath.split(path.sep).filter(Boolean);
+  return parts.some((part) => part === '.git')
+    || parts.some((part) => part === '.env' || /^\.env\..+/.test(part))
+    || protectedDeleteBasenames.has(path.basename(relativePath));
+}
+
+function assertDeleteAllowed(input: DeleteInput, relativePath: string) {
+  if (relativePath === '.' || relativePath === '') throw new Error('Deleting the workspace root is not allowed.');
+  if (relativePath === '.runtime-data' || relativePath.startsWith(`${trashDirectoryName}${path.sep}`) || relativePath === trashDirectoryName) {
+    throw new Error('Deleting runtime-managed data or trash paths is not allowed.');
+  }
+  if (isProtectedDeletePath(relativePath) && (!input.allowHighRiskDelete || !hasMeaningfulNote(input.highRiskApprovalNote))) {
+    throw new Error('Refusing to delete .git, .env files, lockfiles, or package manifests without allowHighRiskDelete and a highRiskApprovalNote.');
+  }
+  if (input.permanent === true && !hasMeaningfulNote(input.permanentApprovalNote)) {
+    throw new Error('Permanent deletion requires permanentApprovalNote separate from the normal approvalNote.');
+  }
+}
+
+async function pathContainsProtectedDeleteTarget(root: string, current: string): Promise<boolean> {
+  const relativePath = path.relative(root, current) || '.';
+  if (isProtectedDeletePath(relativePath)) return true;
+  const stats = await fs.lstat(current);
+  if (!stats.isDirectory() || stats.isSymbolicLink()) return false;
+  const children = await fs.readdir(current);
+  for (const child of children) {
+    if (await pathContainsProtectedDeleteTarget(root, path.join(current, child))) return true;
+  }
+  return false;
+}
+
+async function deletePathMetrics(target: string, maxEntries: number): Promise<{ bytes: number; entries: number }> {
+  const stats = await fs.lstat(target);
+  if (stats.isSymbolicLink()) throw new Error('Symlink paths are not allowed for delete operations.');
+  if (stats.isFile()) return { bytes: stats.size, entries: 1 };
+  if (!stats.isDirectory()) return { bytes: 0, entries: 1 };
+  let bytes = 0;
+  let entries = 1;
+  const walk = async (current: string) => {
+    const children = await fs.readdir(current, { withFileTypes: true });
+    for (const child of children) {
+      entries += 1;
+      if (entries > maxEntries) throw new Error(`Delete scope exceeds maximum entry count of ${maxEntries}.`);
+      const next = path.join(current, child.name);
+      const childStats = await fs.lstat(next);
+      if (childStats.isSymbolicLink()) throw new Error('Symlink paths are not allowed for delete operations.');
+      if (childStats.isDirectory()) await walk(next);
+      else if (childStats.isFile()) bytes += childStats.size;
+    }
+  };
+  await walk(target);
+  return { bytes, entries };
+}
+
+async function moveToTrash(root: string, target: string, relativePath: string) {
+  const trashRoot = path.join(root, trashDirectoryName);
+  await fs.mkdir(trashRoot, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const safeName = relativePath.split(path.sep).filter(Boolean).join('__') || 'deleted-path';
+  const destination = path.join(trashRoot, `${timestamp}-${safeName}`);
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  await fs.rename(target, destination);
+  return path.relative(root, destination);
 }
 
 async function walkFiles(root: string, current: string, files: string[], limit: number) {
@@ -236,19 +337,52 @@ export async function codePatchFile(input: { path: string; search: string; repla
   return { ok: true, status: 'patched', workspaceRoot: root, path: relativePath, previousSha256, sha256: sha256(nextContent), bytesChanged: Buffer.byteLength(nextContent) - Buffer.byteLength(previousContent), occurrences: input.replaceAll ? occurrences : 1 };
 }
 
-export async function codeDeleteFile(input: { path: string; expectedSha256?: string } & ApprovalGateInput) {
+export async function codeDeleteFile(input: DeleteInput) {
   const approval = ensureConfirmed(input, 'code.delete_file');
   if (approval) return approval;
   const { root, target, relativePath } = await resolveExistingWorkspacePath(input.path);
-  const stats = await fs.stat(target);
-  if (!stats.isFile()) throw new Error('code.delete_file can only delete files.');
+  assertDeleteAllowed(input, relativePath);
+  const stats = await fs.lstat(target);
+  if (stats.isSymbolicLink()) throw new Error('code.delete_file cannot delete symlinks.');
+  if (!stats.isFile()) throw new Error('code.delete_file can only delete files. Use code.delete_path for explicit directory deletes.');
+  if (stats.size > maxDeleteFileBytes) throw new Error(`Delete scope exceeds maximum file size of ${maxDeleteFileBytes} bytes.`);
   const previousSha256 = await fileSha256(target);
   if (input.expectedSha256 && previousSha256 !== input.expectedSha256) {
     return { ok: false, status: 'sha256_mismatch', path: relativePath, expectedSha256: input.expectedSha256, actualSha256: previousSha256 };
   }
-  const bytesChanged = stats.size;
-  await fs.unlink(target);
-  return { ok: true, status: 'deleted', workspaceRoot: root, path: relativePath, previousSha256, bytesChanged };
+  if (input.permanent === true) {
+    await fs.unlink(target);
+    return { ok: true, status: 'permanently_deleted', workspaceRoot: root, path: relativePath, previousSha256, bytesChanged: stats.size, permanent: true };
+  }
+  const trashedPath = await moveToTrash(root, target, relativePath);
+  return { ok: true, status: 'trashed', workspaceRoot: root, path: relativePath, trashPath: trashedPath, previousSha256, bytesChanged: stats.size, permanent: false };
+}
+
+export async function codeDeletePath(input: DeleteInput) {
+  const approval = ensureConfirmed(input, 'code.delete_path');
+  if (approval) return approval;
+  const { root, target, relativePath } = await resolveExistingWorkspacePath(input.path);
+  assertDeleteAllowed(input, relativePath);
+  const stats = await fs.lstat(target);
+  if (stats.isSymbolicLink()) throw new Error('code.delete_path cannot delete symlinks.');
+  if (!input.allowHighRiskDelete && stats.isDirectory() && await pathContainsProtectedDeleteTarget(root, target)) {
+    throw new Error('Refusing to delete a directory containing .git, .env files, lockfiles, or package manifests without allowHighRiskDelete and a highRiskApprovalNote.');
+  }
+  if (input.allowHighRiskDelete && !hasMeaningfulNote(input.highRiskApprovalNote) && stats.isDirectory() && await pathContainsProtectedDeleteTarget(root, target)) {
+    throw new Error('Refusing to delete a directory containing .git, .env files, lockfiles, or package manifests without a highRiskApprovalNote.');
+  }
+  const metrics = await deletePathMetrics(target, maxDeletePathEntries);
+  if (metrics.bytes > maxDeletePathBytes) throw new Error(`Delete scope exceeds maximum size of ${maxDeletePathBytes} bytes.`);
+  if (stats.isFile()) {
+    return codeDeleteFile(input);
+  }
+  if (!stats.isDirectory()) throw new Error('code.delete_path can only delete files or directories.');
+  if (input.permanent === true) {
+    await fs.rm(target, { recursive: true, force: false });
+    return { ok: true, status: 'permanently_deleted', workspaceRoot: root, path: relativePath, bytesChanged: metrics.bytes, entriesChanged: metrics.entries, permanent: true };
+  }
+  const trashedPath = await moveToTrash(root, target, relativePath);
+  return { ok: true, status: 'trashed', workspaceRoot: root, path: relativePath, trashPath: trashedPath, bytesChanged: metrics.bytes, entriesChanged: metrics.entries, permanent: false };
 }
 
 export async function codeMovePath(input: { fromPath: string; toPath: string; overwrite?: boolean } & ApprovalGateInput) {

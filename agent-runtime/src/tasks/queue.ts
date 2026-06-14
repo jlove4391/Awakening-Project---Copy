@@ -1,5 +1,6 @@
 import { taskEvents } from './events.js';
 import { getDelegatedTask, listDelegatedTasks, updateDelegatedTask } from './store.js';
+import { nexoraToolExecutionWorker } from './nexoraWorker.js';
 import type { DelegatedTask } from './types.js';
 
 export type DelegatedTaskHandlerResult = boolean | void;
@@ -134,6 +135,7 @@ export const nexoraSafeDemoWorker: DelegatedTaskHandler = async (task) => {
 };
 
 durableTaskQueue.addHandler(nexoraSafeDemoWorker);
+durableTaskQueue.addHandler(nexoraToolExecutionWorker);
 
 export async function enqueuePersistedQueuedTasks() {
   const queuedTasks = (await listDelegatedTasks()).filter((task) => task.status === 'queued');

@@ -248,6 +248,76 @@ export interface LeadRecord {
   metadata?: Record<string, SharedRecordValue>;
 }
 
+
+export type CampaignStatus = 'draft' | 'active' | 'paused' | 'completed' | 'cancelled' | (string & {});
+
+export interface CampaignRecord {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: CampaignStatus;
+  name?: string;
+  description?: string;
+  owner?: string;
+  allowMassSend?: boolean;
+  manuallyApprovedRegulatedOutreach?: boolean;
+  regulatedIndustryApproval?: CampaignApprovalState;
+  pausedAt?: string;
+  pausedReason?: string;
+  tags?: string[];
+  metadata?: Record<string, SharedRecordValue>;
+}
+
+export type CampaignApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | (string & {});
+
+export interface CampaignApprovalState {
+  id?: string;
+  campaignId?: string;
+  leadId?: string;
+  action?: string;
+  status: CampaignApprovalStatus;
+  requestedBy?: string;
+  requestedAt?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  note?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CampaignLeadItem {
+  id: string;
+  campaignId: string;
+  leadId: string;
+  status: LeadStatus;
+  priority?: 'low' | 'medium' | 'high' | 'urgent' | (string & {});
+  approvalState?: CampaignApprovalState;
+  sendRequestId?: string;
+  receiptIds?: string[];
+  addedAt: string;
+  updatedAt: string;
+  metadata?: Record<string, SharedRecordValue>;
+}
+
+export interface CampaignSendReceipt {
+  id: string;
+  campaignId: string;
+  leadId?: string;
+  sendRequestId: string;
+  provider: 'gmail' | 'smtp' | (string & {});
+  providerMessageId?: string;
+  threadId?: string;
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  sentAt: string;
+  status: 'sent' | 'failed' | 'bounced' | (string & {});
+  errorMessage?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export type QualificationSource = 'form' | 'transcript' | 'manual';
 
 export type QualificationStatus =

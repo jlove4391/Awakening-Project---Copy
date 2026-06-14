@@ -237,6 +237,171 @@ async function walkFiles(root: string, current: string, files: string[], limit: 
   }
 }
 
+
+const maxAnalysisFiles = 2_000;
+const maxAnalysisOutputItems = 500;
+const maxJsonReadBytes = 500_000;
+const entrypointFileNames = new Set(['index.js','index.ts','index.tsx','main.js','main.ts','main.tsx','server.js','server.ts','app.js','app.ts','cli.js','cli.ts']);
+const configFilePatterns = [
+  /(^|[/\\])package\.json$/,
+  /(^|[/\\])tsconfig[^/\\]*\.json$/,
+  /(^|[/\\])vite\.config\.[cm]?[jt]s$/,
+  /(^|[/\\])next\.config\.[cm]?[jt]s$/,
+  /(^|[/\\])webpack\.config\.[cm]?[jt]s$/,
+  /(^|[/\\])rollup\.config\.[cm]?[jt]s$/,
+  /(^|[/\\])eslint\.config\.[cm]?[jt]s$/,
+  /(^|[/\\])\.eslintrc(\.[cm]?[jt]s|\.json|\.ya?ml)?$/,
+  /(^|[/\\])prettier\.config\.[cm]?[jt]s$/,
+  /(^|[/\\])\.prettierrc(\.json|\.ya?ml)?$/,
+  /(^|[/\\])jest\.config\.[cm]?[jt]s$/,
+  /(^|[/\\])vitest\.config\.[cm]?[jt]s$/,
+  /(^|[/\\])tailwind\.config\.[cm]?[jt]s$/,
+  /(^|[/\\])postcss\.config\.[cm]?[jt]s$/,
+  /(^|[/\\])docker-compose\.ya?ml$/,
+  /(^|[/\\])Dockerfile$/,
+  /(^|[/\\])\.env\.example$/,
+];
+
+type AnalysisInput = { path?: string; maxFiles?: number; maxItems?: number; maxDepth?: number };
+type WorkspaceFile = { path: string; size: number; extension: string; depth: number };
+
+function boundedInt(value: number | undefined, fallback: number, min: number, max: number) {
+  return Math.min(Math.max(value ?? fallback, min), max);
+}
+
+function isIgnoredDirectoryName(name: string) {
+  return ignoredDirectoryNames.has(name);
+}
+
+async function collectWorkspaceFiles(input: AnalysisInput = {}) {
+  const { root, target, relativePath } = await resolveExistingWorkspacePath(input.path || '.');
+  const maxFiles = boundedInt(input.maxFiles, maxAnalysisFiles, 1, maxAnalysisFiles);
+  const files: WorkspaceFile[] = [];
+  let directoriesVisited = 0;
+  let truncated = false;
+  const stats = await fs.stat(target);
+
+  const addFile = async (absolute: string) => {
+    if (files.length >= maxFiles) {
+      truncated = true;
+      return;
+    }
+    const stat = await fs.stat(absolute);
+    const rel = path.relative(root, absolute);
+    files.push({ path: rel, size: stat.size, extension: path.extname(rel).toLowerCase(), depth: rel.split(path.sep).length - 1 });
+  };
+
+  const walk = async (current: string) => {
+    if (files.length >= maxFiles) {
+      truncated = true;
+      return;
+    }
+    directoriesVisited += 1;
+    const entries = await fs.readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      if (files.length >= maxFiles) {
+        truncated = true;
+        return;
+      }
+      if (entry.name.startsWith('.') && entry.name !== '.env.example' && entry.name !== '.github') continue;
+      const next = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!isIgnoredDirectoryName(entry.name)) await walk(next);
+      } else if (entry.isFile()) {
+        await addFile(next);
+      }
+    }
+  };
+
+  if (stats.isFile()) await addFile(target);
+  else await walk(target);
+  return { root, searchedPath: relativePath, files, directoriesVisited, truncated, maxFiles };
+}
+
+async function readJsonFile(root: string, relativePath: string) {
+  const target = path.join(root, relativePath);
+  const stat = await fs.stat(target);
+  if (stat.size > maxJsonReadBytes) return null;
+  return JSON.parse(await fs.readFile(target, 'utf8')) as any;
+}
+
+export async function codeTree(input: AnalysisInput = {}) {
+  const maxDepth = boundedInt(input.maxDepth, 4, 1, 12);
+  const maxItems = boundedInt(input.maxItems, 200, 1, maxAnalysisOutputItems);
+  const collected = await collectWorkspaceFiles(input);
+  const directories = new Set<string>();
+  for (const file of collected.files) {
+    const parts = file.path.split(path.sep);
+    for (let i = 1; i < parts.length; i += 1) directories.add(parts.slice(0, i).join('/'));
+  }
+  const items = [
+    ...Array.from(directories).map((directory) => ({ type: 'directory', path: directory, depth: directory.split('/').length - 1 })),
+    ...collected.files.map((file) => ({ type: 'file', path: file.path.split(path.sep).join('/'), size: file.size, depth: file.depth })),
+  ].filter((item) => item.depth <= maxDepth).sort((a, b) => a.path.localeCompare(b.path)).slice(0, maxItems);
+  return { ok: true, workspaceRoot: collected.root, path: collected.searchedPath, ignoredDirectories: Array.from(ignoredDirectoryNames), maxDepth, items, counts: { filesSeen: collected.files.length, directoriesVisited: collected.directoriesVisited, returned: items.length }, truncated: collected.truncated || items.length >= maxItems };
+}
+
+export async function codeProjectSummary(input: AnalysisInput = {}) {
+  const collected = await collectWorkspaceFiles(input);
+  const maxItems = boundedInt(input.maxItems, 100, 1, maxAnalysisOutputItems);
+  const byExtension = new Map<string, { files: number; bytes: number }>();
+  const topLevel = new Map<string, number>();
+  for (const file of collected.files) {
+    const ext = file.extension || '[none]';
+    const current = byExtension.get(ext) || { files: 0, bytes: 0 };
+    current.files += 1; current.bytes += file.size; byExtension.set(ext, current);
+    topLevel.set(file.path.split(path.sep)[0] || '.', (topLevel.get(file.path.split(path.sep)[0] || '.') || 0) + 1);
+  }
+  const packages = collected.files.filter((file) => path.basename(file.path) === 'package.json').slice(0, maxItems).map((file) => file.path);
+  return { ok: true, workspaceRoot: collected.root, path: collected.searchedPath, ignoredDirectories: Array.from(ignoredDirectoryNames), totals: { filesSeen: collected.files.length, bytes: collected.files.reduce((sum, file) => sum + file.size, 0), directoriesVisited: collected.directoriesVisited }, packages, topLevel: Object.fromEntries([...topLevel].sort()), byExtension: Object.fromEntries([...byExtension].sort()), truncated: collected.truncated };
+}
+
+export async function codePackageScripts(input: AnalysisInput = {}) {
+  const collected = await collectWorkspaceFiles(input);
+  const maxItems = boundedInt(input.maxItems, 50, 1, maxAnalysisOutputItems);
+  const packageFiles = collected.files.filter((file) => path.basename(file.path) === 'package.json').slice(0, maxItems);
+  const packages = [] as Array<{ path: string; name?: string; scripts: Record<string, string> }>;
+  for (const file of packageFiles) {
+    const pkg = await readJsonFile(collected.root, file.path).catch(() => null);
+    packages.push({ path: file.path, name: pkg?.name, scripts: pkg?.scripts || {} });
+  }
+  return { ok: true, workspaceRoot: collected.root, packages, truncated: collected.truncated || packageFiles.length >= maxItems };
+}
+
+export async function codeDependencySummary(input: AnalysisInput = {}) {
+  const collected = await collectWorkspaceFiles(input);
+  const maxItems = boundedInt(input.maxItems, 50, 1, maxAnalysisOutputItems);
+  const packageFiles = collected.files.filter((file) => path.basename(file.path) === 'package.json').slice(0, maxItems);
+  const packages = [] as Array<{ path: string; name?: string; dependencies: Record<string, string>; devDependencies: Record<string, string>; peerDependencies: Record<string, string> }>;
+  for (const file of packageFiles) {
+    const pkg = await readJsonFile(collected.root, file.path).catch(() => null);
+    packages.push({ path: file.path, name: pkg?.name, dependencies: pkg?.dependencies || {}, devDependencies: pkg?.devDependencies || {}, peerDependencies: pkg?.peerDependencies || {} });
+  }
+  return { ok: true, workspaceRoot: collected.root, packages, truncated: collected.truncated || packageFiles.length >= maxItems };
+}
+
+export async function codeFindEntrypoints(input: AnalysisInput = {}) {
+  const collected = await collectWorkspaceFiles(input);
+  const maxItems = boundedInt(input.maxItems, 100, 1, maxAnalysisOutputItems);
+  const packageEntrypoints = [] as Array<{ packagePath: string; name?: string; fields: Record<string, unknown> }>;
+  for (const file of collected.files.filter((file) => path.basename(file.path) === 'package.json')) {
+    const pkg = await readJsonFile(collected.root, file.path).catch(() => null);
+    if (!pkg) continue;
+    const fields: Record<string, unknown> = {};
+    for (const key of ['main', 'module', 'types', 'exports', 'bin']) if (pkg[key]) fields[key] = pkg[key];
+    if (Object.keys(fields).length) packageEntrypoints.push({ packagePath: file.path, name: pkg.name, fields });
+  }
+  const conventionalFiles = collected.files.filter((file) => entrypointFileNames.has(path.basename(file.path))).map((file) => file.path).slice(0, maxItems);
+  return { ok: true, workspaceRoot: collected.root, packageEntrypoints: packageEntrypoints.slice(0, maxItems), conventionalFiles, truncated: collected.truncated || packageEntrypoints.length > maxItems || conventionalFiles.length >= maxItems };
+}
+
+export async function codeFindConfigs(input: AnalysisInput = {}) {
+  const collected = await collectWorkspaceFiles(input);
+  const maxItems = boundedInt(input.maxItems, 200, 1, maxAnalysisOutputItems);
+  const configs = collected.files.filter((file) => configFilePatterns.some((pattern) => pattern.test(file.path.split(path.sep).join('/')))).map((file) => ({ path: file.path, size: file.size })).slice(0, maxItems);
+  return { ok: true, workspaceRoot: collected.root, configs, truncated: collected.truncated || configs.length >= maxItems };
+}
+
 function isApprovalConfirmed(input: ApprovalGateInput) {
   return input.confirmedByUser === true;
 }

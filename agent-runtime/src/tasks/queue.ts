@@ -116,6 +116,7 @@ class DurableTaskQueue {
 
     await updateDelegatedTask(task.id, {
       status: 'blocked',
+      blockedReason: 'worker_unavailable',
       log: 'No Nexora worker handler is configured for this task yet; task is durably recorded and awaiting worker pickup.',
       event: {
         type: 'task.blocked',

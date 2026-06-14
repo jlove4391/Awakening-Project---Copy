@@ -76,13 +76,25 @@ function normalizeApprovalRequirements(input?: Array<Partial<ApprovalRequirement
 
 function normalizeExecutionPlanStep(input: AppendExecutionPlanStepInput, order: number) {
   const timestamp = now();
+  const requestedApprovalStatus = input.approval?.status || input.approvalStatus || 'not_required';
+  const approvalRequired = input.approval?.required ?? requestedApprovalStatus === 'pending';
+  const approvalStatus = approvalRequired && requestedApprovalStatus === 'not_required' ? 'pending' : requestedApprovalStatus;
   return {
     id: input.id || randomUUID(),
     order: input.order ?? order,
     targetTool: input.targetTool,
     ...(input.arguments !== undefined ? { arguments: input.arguments } : {}),
     ...(input.argumentTemplate !== undefined ? { argumentTemplate: input.argumentTemplate } : {}),
-    approvalStatus: input.approvalStatus || 'not_required',
+    approvalStatus,
+    approval: {
+      required: approvalRequired,
+      status: approvalStatus,
+      approver: input.approval?.approver,
+      approvedAt: input.approval?.approvedAt,
+      rejectedAt: input.approval?.rejectedAt,
+      note: input.approval?.note,
+      reason: input.approval?.reason,
+    },
     status: input.status || 'queued',
     ...(input.resultSummary !== undefined ? { resultSummary: input.resultSummary } : {}),
     createdAt: timestamp,
@@ -268,7 +280,23 @@ export async function updateExecutionPlanStep(taskId: string, stepId: string, in
     if (input.targetTool !== undefined) step.targetTool = input.targetTool;
     if (input.arguments !== undefined) step.arguments = input.arguments;
     if (input.argumentTemplate !== undefined) step.argumentTemplate = input.argumentTemplate;
-    if (input.approvalStatus !== undefined) step.approvalStatus = input.approvalStatus;
+    if (input.approvalStatus !== undefined) {
+      step.approvalStatus = input.approvalStatus;
+      if (step.approval) step.approval.status = input.approvalStatus;
+    }
+    if (input.approval !== undefined) {
+      const status = input.approval.status || step.approvalStatus;
+      step.approval = {
+        required: input.approval.required ?? step.approval?.required ?? status === 'pending',
+        status,
+        approver: input.approval.approver ?? step.approval?.approver,
+        approvedAt: input.approval.approvedAt ?? step.approval?.approvedAt,
+        rejectedAt: input.approval.rejectedAt ?? step.approval?.rejectedAt,
+        note: input.approval.note ?? step.approval?.note,
+        reason: input.approval.reason ?? step.approval?.reason,
+      };
+      step.approvalStatus = status;
+    }
     if (input.status !== undefined) step.status = input.status;
     if (input.resultSummary !== undefined) step.resultSummary = input.resultSummary;
     step.updatedAt = now();
@@ -296,6 +324,10 @@ export async function updateDelegatedTask(taskId: string, input: UpdateDelegated
 
     if (input.status) {
       applyStatusTimestamps(task, input.status);
+      if (input.status !== 'blocked') {
+        task.blockedReason = undefined;
+        task.pendingToolAction = undefined;
+      }
       const eventType = statusToEventType(input.status);
       event = createAuditEntry(task.id, eventType, input.event?.actor || 'system', `Task status changed to ${input.status}.`);
       task.events.push(event);
@@ -311,6 +343,9 @@ export async function updateDelegatedTask(taskId: string, input: UpdateDelegated
       newEvents.push(logEvent);
       event = logEvent;
     }
+
+    if (input.blockedReason !== undefined) task.blockedReason = input.blockedReason;
+    if (input.pendingToolAction !== undefined) task.pendingToolAction = input.pendingToolAction;
 
     if (input.result) {
       task.result = input.result;
@@ -409,4 +444,29 @@ export async function approveDelegatedTask(taskId: string, approver = 'user', no
 
 export async function completeDelegatedTask(taskId: string, result: DelegatedTaskResult) {
   return updateDelegatedTask(taskId, { status: result.ok ? 'completed' : 'failed', result });
+}
+
+export async function approveExecutionPlanStep(taskId: string, stepId: string, approver = 'user', note = '') {
+  return serializedWrite(async () => {
+    const task = await getDelegatedTask(taskId);
+    const step = task?.executionPlan?.find((candidate) => candidate.id === stepId);
+    if (!task || !step) return undefined;
+    const approvedAt = now();
+    step.approvalStatus = 'approved';
+    step.approval = { ...(step.approval || { required: true, status: 'approved' as const }), status: 'approved', approver, approvedAt, note: note || step.approval?.note };
+    step.status = 'queued';
+    step.updatedAt = approvedAt;
+    task.blockedReason = undefined;
+    task.pendingToolAction = undefined;
+    applyStatusTimestamps(task, 'queued');
+    const event = createAuditEntry(task.id, 'task.approved', 'user', `Step ${step.id} approval recorded by ${approver}.`, { stepId, pendingToolAction: { toolName: step.targetTool, arguments: step.arguments, argumentTemplate: step.argumentTemplate }, note });
+    const queued = createAuditEntry(task.id, 'task.queued', 'system', 'Approved blocked step; task re-entered the durable Nexora queue.', { stepId });
+    task.events.push(event, queued);
+    task.auditTrail.push(event, queued);
+    task.updatedAt = now();
+    await persistTasks();
+    await Promise.all([event, queued].map(appendAuditJsonl));
+    taskEvents.emitTaskUpdated(task, queued);
+    return task;
+  });
 }

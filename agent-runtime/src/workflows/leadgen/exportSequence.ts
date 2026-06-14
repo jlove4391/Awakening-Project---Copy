@@ -1,5 +1,5 @@
 import { remember, retrieveMemories } from '../../memory/index.js';
-import { completeExecutionRecord, createExecutionRecord, summarizeProviderResponse, writeExecutionRecord } from '../../executions.js';
+import { createWorkflowExecutionRecord, summarizeProviderResponse, writeCompletedWorkflowExecutionReceipt } from '../receipts.js';
 import { upsertCrmContact } from '../../providers/crm/index.js';
 import { attachOutreachDrafts } from './draftOutreach.js';
 import { approveCampaign, campaignApprovalRequired } from './approveCampaign.js';
@@ -35,30 +35,26 @@ async function writeOutreachExportReceipt(input: ExportSequenceInput, leads: Lea
     leadCount: leads.length,
     sentExternally: Boolean(input.sendExternally),
   };
-  const record = createExecutionRecord({
-    kind: 'runtime_action',
-    whoRequested: 'leadgen.workflow',
-    chosenByAgent: context.agent || 'elora',
+  const record = createWorkflowExecutionRecord({
+    workflow: 'leadgen',
+    context,
     action: 'leadgen.outreach_export',
     inputPayload: { destination: input.destination, leadIds: input.leadIds, sendExternally: Boolean(input.sendExternally) },
     riskLevel: input.sendExternally ? 'external_send' : 'write',
     approvalStatus: 'approved',
     executionResult: result,
     providerResponseSummary: summarizeProviderResponse(result),
-    linkedIds: { sessionId: context.sessionId, voiceSessionId: context.voiceSessionId },
     status: 'running',
     startedAt: new Date().toISOString(),
     receiptSummary: 'leadgen.outreach_export requested',
   });
-  const completed = completeExecutionRecord(record, {
+  return writeCompletedWorkflowExecutionReceipt(record, {
     status: 'completed',
     executionResult: result,
     providerResponseSummary: summarizeProviderResponse(result),
     approvalStatus: 'approved',
     receiptSummary: `Exported ${leads.length} lead(s) to ${input.destination}`,
   });
-  await writeExecutionRecord(completed);
-  return { id: completed.id, summary: completed.receipt.summary, status: completed.status };
 }
 
 export async function exportSequence(input: ExportSequenceInput, context: LeadgenStepContext): Promise<LeadgenWorkflowResult | ReturnType<typeof campaignApprovalRequired>> {

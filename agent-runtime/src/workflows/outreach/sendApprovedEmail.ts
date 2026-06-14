@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { completeExecutionRecord, createExecutionRecord, summarizeProviderResponse, writeExecutionRecord } from '../../executions.js';
+import { createWorkflowExecutionRecord, writeCompletedWorkflowExecutionReceipt } from '../receipts.js';
 import { remember } from '../../memory/index.js';
 import { sendGmailEmail } from '../../providers/google/gmail.js';
 import type { ApprovalGateInput, LeadRecord } from '../leadgen/types.js';
@@ -139,10 +139,9 @@ async function writeSendExecution(
   status: 'completed' | 'failed',
   errors: string[] = [],
 ) {
-  const record = createExecutionRecord({
-    kind: 'runtime_action',
-    whoRequested: 'outreach.workflow',
-    chosenByAgent: context.agent || 'elora',
+  const record = createWorkflowExecutionRecord({
+    workflow: 'outreach',
+    context,
     action: 'outreach.send_approved_email',
     inputPayload: {
       leadId: input.lead.id,
@@ -154,14 +153,12 @@ async function writeSendExecution(
     riskLevel: 'external_send',
     approvalStatus: 'approved',
     executionResult: providerResult,
-    providerResponseSummary: summarizeProviderResponse(providerResult),
-    linkedIds: { sessionId: context.sessionId, voiceSessionId: context.voiceSessionId },
     status: 'running',
     startedAt: receipt.sentAt,
     receiptSummary: `Approved outreach email requested for lead ${input.lead.id}`,
   });
 
-  const completed = completeExecutionRecord(record, {
+  return writeCompletedWorkflowExecutionReceipt(record, {
     status,
     executionResult: { providerResult, receipt },
     errors,
@@ -171,8 +168,6 @@ async function writeSendExecution(
         ? `Sent approved outreach email to ${receipt.to[0]} for lead ${input.lead.id}`
         : `Failed to send approved outreach email to ${receipt.to[0]} for lead ${input.lead.id}`,
   });
-  await writeExecutionRecord(completed);
-  return { id: completed.id, summary: completed.receipt.summary, status: completed.status };
 }
 
 export async function sendApprovedEmail(input: SendApprovedEmailInput, context: RuntimeContext): Promise<SendApprovedEmailResult> {

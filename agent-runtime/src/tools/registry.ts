@@ -13,6 +13,7 @@ import { createCalendarEvent, listCalendarEvents } from '../providers/google/cal
 import { appendActivity, lookupCrmContact, updateLeadStatus, upsertCrmContact } from '../providers/crm/index.js';
 import { enrichPersonWithClay } from '../providers/clay/index.js';
 import { exportSequence, findLeadsWorkflow } from '../workflows/leadgen/index.js';
+import { evaluateCampaignGuardrails } from '../workflows/campaigns/guardrails.js';
 import { classifyReply } from '../workflows/outreach/classifyReply.js';
 import { recordOptOut } from '../workflows/outreach/optOut.js';
 import { scheduleFollowUp } from '../workflows/outreach/scheduleFollowUp.js';
@@ -69,6 +70,7 @@ export type ToolCategory =
   | 'crm'
   | 'clay'
   | 'leadgen'
+  | 'campaign'
   | 'outreach'
   | 'social'
   | 'objection'
@@ -202,6 +204,9 @@ const qualificationFormSchemaProperties = {
 const qualificationRecordStore = new Map<string, QualificationRecord>();
 const genericObjectJsonSchema = { type: 'object', additionalProperties: true };
 const leadRecordJsonSchema = { type: 'object', additionalProperties: true, description: 'LeadRecord to update during outreach workflows.' };
+const campaignRecordJsonSchema = { type: 'object', additionalProperties: true, description: 'CampaignRecord for campaign guardrail checks.' };
+const campaignCandidateArrayJsonSchema = { type: 'array', description: 'Campaign send candidates to evaluate.', items: genericObjectJsonSchema };
+const campaignComplaintSignalArrayJsonSchema = { type: 'array', description: 'Complaint, unsubscribe, or error-adjacent signals that may pause a campaign.', items: genericObjectJsonSchema };
 const outreachDraftJsonSchema = { type: 'object', additionalProperties: true, description: 'Outreach draft produced by outreach.draft_email.' };
 const approvedSendRequestJsonSchema = { type: 'object', additionalProperties: true, description: 'ApprovedSendRequest produced by outreach.approve_send.' };
 const replyClassificationJsonSchema = { type: 'object', additionalProperties: true, description: 'ReplyClassification produced by outreach.classify_reply.' };
@@ -947,6 +952,48 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       logEvents: ['tool.leadgen.export_sequence.approval_requested', 'tool.leadgen.export_sequence.completed'],
     },
     executor: exportSequence,
+  },
+  {
+    name: 'campaign.evaluate_guardrails',
+    description: 'Evaluate campaign-level outreach guardrails before any campaign send. This returns an internal allow/block/pause decision and never sends externally or persists changes by itself.',
+    inputSchema: objectSchema(
+      {
+        campaign: campaignRecordJsonSchema,
+        candidates: campaignCandidateArrayJsonSchema,
+        optOutRecords: optOutRecordArrayJsonSchema,
+        complaintSignals: campaignComplaintSignalArrayJsonSchema,
+        errorMessage: stringSchema('Optional prior send/provider error signal that should pause the campaign.'),
+        now: stringSchema('Optional ISO timestamp for the guardrail receipt.'),
+      },
+      ['campaign', 'candidates'],
+    ),
+    parameters: z.object({
+      campaign: z.object({}).passthrough(),
+      candidates: z.array(z.object({}).passthrough()).default([]),
+      optOutRecords: z.array(z.object({}).passthrough()).default([]),
+      complaintSignals: z.array(z.object({}).passthrough()).default([]),
+      errorMessage: z.string().default(''),
+      now: z.string().default(''),
+    }),
+    scopes: ['campaign.guardrails.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'campaign',
+      action: 'evaluate_guardrails',
+      resourceType: 'campaign_guardrail_receipt',
+      resourceIdField: 'campaign.id',
+      sensitiveFields: ['campaign', 'candidates', 'optOutRecords', 'complaintSignals', 'errorMessage'],
+      logEvents: ['tool.campaign.evaluate_guardrails.requested', 'tool.campaign.evaluate_guardrails.completed'],
+    },
+    executor: async (input) => evaluateCampaignGuardrails({
+      campaign: input.campaign as any,
+      candidates: input.candidates as any,
+      optOutRecords: input.optOutRecords as any,
+      complaintSignals: input.complaintSignals as any,
+      error: compactString(input.errorMessage) || undefined,
+      now: compactString(input.now) || undefined,
+    }),
   },
   {
     name: 'social.draft_content_idea',

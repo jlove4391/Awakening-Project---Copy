@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { runtimeConfig } from '../config.js';
@@ -62,8 +62,63 @@ export async function resolveWritableWorkspacePath(relativePath: string) {
   return { root, target, relativePath: path.relative(root, target) };
 }
 
-function sha256(text: string) {
+function sha256(text: string | Buffer) {
   return createHash('sha256').update(text).digest('hex');
+}
+
+async function fileSha256(target: string) {
+  return sha256(await fs.readFile(target));
+}
+
+async function pathSize(target: string): Promise<number> {
+  const stats = await fs.lstat(target);
+  if (stats.isSymbolicLink()) throw new Error('Symlink paths are not allowed for write operations.');
+  if (stats.isFile()) return stats.size;
+  if (!stats.isDirectory()) return 0;
+  const entries = await fs.readdir(target);
+  const sizes = await Promise.all(entries.map((entry) => pathSize(path.join(target, entry))));
+  return sizes.reduce((total, size) => total + size, 0);
+}
+
+async function assertNoSymlinkAncestors(root: string, target: string) {
+  const relative = path.relative(root, target);
+  if (!relative || relative === '.') return;
+  let current = root;
+  for (const part of relative.split(path.sep).slice(0, -1)) {
+    current = path.join(current, part);
+    try {
+      const stats = await fs.lstat(current);
+      if (stats.isSymbolicLink()) throw new Error('Symlink path components are not allowed for writable paths.');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return;
+    }
+  }
+}
+
+async function resolveWritableWorkspacePathWithExistingAncestor(relativePath: string) {
+  assertRelativePath(relativePath);
+  const root = await existingRootRealPath();
+  const target = path.resolve(root, relativePath);
+  assertInsideRoot(root, target);
+  await assertNoSymlinkAncestors(root, target);
+
+  let ancestor = path.dirname(target);
+  while (ancestor !== root) {
+    try {
+      const realAncestor = await fs.realpath(ancestor);
+      assertInsideRoot(root, realAncestor);
+      return { root, target, relativePath: path.relative(root, target) };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      ancestor = path.dirname(ancestor);
+    }
+  }
+  return { root, target, relativePath: path.relative(root, target) };
+}
+
+function ensureConfirmed(input: ApprovalGateInput, toolName: string) {
+  return isApprovalConfirmed(input) ? null : approvalRequired(toolName);
 }
 
 async function walkFiles(root: string, current: string, files: string[], limit: number) {
@@ -146,6 +201,109 @@ export async function codeEdit(input: { path: string; content: string; mode?: 'o
   const nextContent = mode === 'append' ? `${previousContent}${input.content}` : input.content;
   await fs.writeFile(target, nextContent, 'utf8');
   return { ok: true, workspaceRoot: root, path: relativePath, mode, sha256: sha256(nextContent), bytesWritten: Buffer.byteLength(nextContent) };
+}
+
+
+export async function codeCreateFile(input: { path: string; content: string; expectedSha256?: string } & ApprovalGateInput) {
+  const approval = ensureConfirmed(input, 'code.create_file');
+  if (approval) return approval;
+  const { root, target, relativePath } = await resolveWritableWorkspacePath(input.path);
+  const content = input.content ?? '';
+  if (input.expectedSha256 && input.expectedSha256 !== sha256('')) {
+    return { ok: false, status: 'sha256_mismatch', path: relativePath, expectedSha256: input.expectedSha256, actualSha256: undefined };
+  }
+  await fs.writeFile(target, content, { encoding: 'utf8', flag: 'wx' });
+  return { ok: true, status: 'created', workspaceRoot: root, path: relativePath, sha256: sha256(content), bytesChanged: Buffer.byteLength(content) };
+}
+
+export async function codePatchFile(input: { path: string; search: string; replace: string; expectedSha256?: string; replaceAll?: boolean } & ApprovalGateInput) {
+  const approval = ensureConfirmed(input, 'code.patch_file');
+  if (approval) return approval;
+  if (!input.search) throw new Error('search is required');
+  const { root, target, relativePath } = await resolveExistingWorkspacePath(input.path);
+  const stats = await fs.stat(target);
+  if (!stats.isFile()) throw new Error('code.patch_file can only patch files.');
+  const previousContent = await fs.readFile(target, 'utf8');
+  const previousSha256 = sha256(previousContent);
+  if (input.expectedSha256 && previousSha256 !== input.expectedSha256) {
+    return { ok: false, status: 'sha256_mismatch', path: relativePath, expectedSha256: input.expectedSha256, actualSha256: previousSha256 };
+  }
+  const occurrences = previousContent.split(input.search).length - 1;
+  if (occurrences === 0) return { ok: false, status: 'not_found', path: relativePath, sha256: previousSha256, bytesChanged: 0 };
+  if (occurrences > 1 && !input.replaceAll) return { ok: false, status: 'multiple_matches', path: relativePath, occurrences, sha256: previousSha256, bytesChanged: 0 };
+  const nextContent = input.replaceAll ? previousContent.split(input.search).join(input.replace) : previousContent.replace(input.search, input.replace);
+  await fs.writeFile(target, nextContent, 'utf8');
+  return { ok: true, status: 'patched', workspaceRoot: root, path: relativePath, previousSha256, sha256: sha256(nextContent), bytesChanged: Buffer.byteLength(nextContent) - Buffer.byteLength(previousContent), occurrences: input.replaceAll ? occurrences : 1 };
+}
+
+export async function codeDeleteFile(input: { path: string; expectedSha256?: string } & ApprovalGateInput) {
+  const approval = ensureConfirmed(input, 'code.delete_file');
+  if (approval) return approval;
+  const { root, target, relativePath } = await resolveExistingWorkspacePath(input.path);
+  const stats = await fs.stat(target);
+  if (!stats.isFile()) throw new Error('code.delete_file can only delete files.');
+  const previousSha256 = await fileSha256(target);
+  if (input.expectedSha256 && previousSha256 !== input.expectedSha256) {
+    return { ok: false, status: 'sha256_mismatch', path: relativePath, expectedSha256: input.expectedSha256, actualSha256: previousSha256 };
+  }
+  const bytesChanged = stats.size;
+  await fs.unlink(target);
+  return { ok: true, status: 'deleted', workspaceRoot: root, path: relativePath, previousSha256, bytesChanged };
+}
+
+export async function codeMovePath(input: { fromPath: string; toPath: string; overwrite?: boolean } & ApprovalGateInput) {
+  const approval = ensureConfirmed(input, 'code.move_path');
+  if (approval) return approval;
+  const from = await resolveExistingWorkspacePath(input.fromPath);
+  const to = await resolveWritableWorkspacePath(input.toPath);
+  const sourceStats = await fs.lstat(from.target);
+  if (sourceStats.isSymbolicLink()) throw new Error('Moving symlinks is not allowed.');
+  const bytesChanged = await pathSize(from.target);
+  let sha: string | undefined;
+  if (sourceStats.isFile()) sha = await fileSha256(from.target);
+  if (!input.overwrite) await fs.access(to.target).then(() => { throw new Error('Destination already exists.'); }).catch((error) => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; });
+  await fs.rename(from.target, to.target);
+  return { ok: true, status: 'moved', workspaceRoot: from.root, path: to.relativePath, fromPath: from.relativePath, toPath: to.relativePath, sha256: sha, bytesChanged };
+}
+
+export async function codeCopyPath(input: { fromPath: string; toPath: string; overwrite?: boolean } & ApprovalGateInput) {
+  const approval = ensureConfirmed(input, 'code.copy_path');
+  if (approval) return approval;
+  const from = await resolveExistingWorkspacePath(input.fromPath);
+  const to = await resolveWritableWorkspacePath(input.toPath);
+  const sourceStats = await fs.lstat(from.target);
+  if (sourceStats.isSymbolicLink()) throw new Error('Copying symlinks is not allowed.');
+  const bytesChanged = await pathSize(from.target);
+  let sha: string | undefined;
+  if (sourceStats.isFile()) sha = await fileSha256(from.target);
+  if (sourceStats.isDirectory()) await fs.cp(from.target, to.target, { recursive: true, force: input.overwrite === true, errorOnExist: input.overwrite !== true, verbatimSymlinks: false });
+  else await fs.copyFile(from.target, to.target, input.overwrite ? 0 : fsConstants.COPYFILE_EXCL);
+  return { ok: true, status: 'copied', workspaceRoot: from.root, path: to.relativePath, fromPath: from.relativePath, toPath: to.relativePath, sha256: sha, bytesChanged };
+}
+
+export async function codeMkdir(input: { path: string } & ApprovalGateInput) {
+  const approval = ensureConfirmed(input, 'code.mkdir');
+  if (approval) return approval;
+  const { root, target, relativePath } = await resolveWritableWorkspacePathWithExistingAncestor(input.path);
+  await fs.mkdir(target, { recursive: true });
+  return { ok: true, status: 'created', workspaceRoot: root, path: relativePath, bytesChanged: 0 };
+}
+
+export async function codeWriteJson(input: { path: string; data: unknown; expectedSha256?: string; space?: number } & ApprovalGateInput) {
+  const approval = ensureConfirmed(input, 'code.write_json');
+  if (approval) return approval;
+  const { root, target, relativePath } = await resolveWritableWorkspacePath(input.path);
+  let previousSha256: string | undefined;
+  try { previousSha256 = await fileSha256(target); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  if (input.expectedSha256 && previousSha256 !== input.expectedSha256) return { ok: false, status: 'sha256_mismatch', path: relativePath, expectedSha256: input.expectedSha256, actualSha256: previousSha256 };
+  const content = `${JSON.stringify(input.data, null, Math.min(Math.max(input.space ?? 2, 0), 10))}\n`;
+  await fs.writeFile(target, content, 'utf8');
+  return { ok: true, status: previousSha256 ? 'updated' : 'created', workspaceRoot: root, path: relativePath, sha256: sha256(content), bytesChanged: Buffer.byteLength(content) };
+}
+
+export async function codeReadJson(input: { path: string; maxBytes?: number }) {
+  const result = await codeRead(input);
+  return { ...result, status: 'read', data: JSON.parse(result.content) };
 }
 
 export async function codeDiff(input: { path?: string }) {

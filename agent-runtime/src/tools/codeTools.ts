@@ -475,7 +475,7 @@ async function runWorkspaceShellCommand(input: RunCommandInput, toolName: string
     return Buffer.concat([current, chunk]);
   };
   const result = await new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
-    const child = spawn('/bin/sh', ['-lc', input.command], { cwd: target, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('/bin/sh', ['-c', input.command], { cwd: target, stdio: ['ignore', 'pipe', 'pipe'] });
     const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, timeoutMs);
     child.stdout.on('data', (chunk) => { stdout = append(stdout, Buffer.from(chunk)); });
     child.stderr.on('data', (chunk) => { stderr = append(stderr, Buffer.from(chunk)); });

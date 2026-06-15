@@ -373,6 +373,7 @@ export async function updateExecutionPlanStep(taskId: string, stepId: string, in
         rejectedAt: input.approval.rejectedAt ?? step.approval?.rejectedAt,
         note: input.approval.note ?? step.approval?.note,
         reason: input.approval.reason ?? step.approval?.reason,
+        scope: input.approval.scope ?? step.approval?.scope,
       };
       step.approvalStatus = status;
     }

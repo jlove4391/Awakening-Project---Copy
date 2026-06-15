@@ -66,6 +66,8 @@ export interface RuntimeContext {
   voiceApproval?: VoiceApprovalPolicy;
   agent?: RuntimeAgentName;
   approvedExecutionId?: string;
+  approvedDelegatedTaskId?: string;
+  approvedDelegatedStepId?: string;
 }
 
 export interface AgentMessageRequest {

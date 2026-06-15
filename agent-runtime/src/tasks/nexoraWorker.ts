@@ -1,4 +1,5 @@
 import { executeRegisteredTool, getRegisteredTool, toolRegistry, type RegisteredToolDefinition } from '../tools/registry.js';
+import { evaluateNexoraCapabilityForStep, findNexoraCapabilityForTool } from '../workflows/nexora/capabilities.js';
 import type { RuntimeContext } from '../types.js';
 import { appendExecutionPlanStep, cancelDelegatedTask, getDelegatedTask, updateDelegatedTask, updateExecutionPlanStep } from './store.js';
 import type { DelegatedTask } from './types.js';
@@ -194,7 +195,16 @@ function providerConfigurationBlockFor(toolName: string, message: string): Provi
 
 function isApprovedNexoraTool(toolName: string) {
   const definition = getRegisteredTool(toolName);
-  return Boolean(definition && allowlistByName.has(definition.name) && definition.riskLevel === 'read' && !definition.humanApprovalRequired);
+  const capability = definition ? findNexoraCapabilityForTool(definition.name) : undefined;
+  const decision = definition ? evaluateNexoraCapabilityForStep(definition.name, 'not_required') : undefined;
+  return Boolean(
+    definition &&
+      capability &&
+      decision?.allowed &&
+      allowlistByName.has(definition.name) &&
+      definition.riskLevel === 'read' &&
+      !definition.humanApprovalRequired,
+  );
 }
 
 function chooseExecutionStrategy(task: DelegatedTask) {
@@ -217,7 +227,8 @@ function chooseExecutionStrategy(task: DelegatedTask) {
 
 function isStepHighRisk(toolName: string) {
   const definition = getRegisteredTool(toolName);
-  return !definition || definition.riskLevel !== 'read' || definition.humanApprovalRequired;
+  const capability = definition ? findNexoraCapabilityForTool(definition.name) : undefined;
+  return !definition || !capability || definition.riskLevel !== 'read' || definition.humanApprovalRequired || capability.approvalRequirement !== 'none';
 }
 
 function stepInput(step: NonNullable<DelegatedTask['executionPlan']>[number]): Record<string, unknown> {
@@ -253,6 +264,41 @@ async function blockForStepApproval(task: DelegatedTask, step: NonNullable<Deleg
       actor: 'nexora',
       summary: 'Task is blocked until the pending tool action is approved.',
       details: { blockedReason: reason, pendingToolAction },
+    },
+  });
+}
+
+
+async function blockForCapabilityPolicy(
+  task: DelegatedTask,
+  step: NonNullable<DelegatedTask['executionPlan']>[number],
+  decision: ReturnType<typeof evaluateNexoraCapabilityForStep>,
+) {
+  const blockedReason = decision.reason === 'approval_required' ? 'step_approval_required' : 'policy_block';
+  await updateExecutionPlanStep(task.id, step.id, {
+    status: 'blocked',
+    ...(decision.reason === 'approval_required' ? { approvalStatus: 'pending' as const, approval: { required: true, status: 'pending' as const, reason: blockedReason } } : {}),
+    resultSummary: decision.message,
+  });
+  await updateDelegatedTask(task.id, {
+    status: 'blocked',
+    blockedReason,
+    pendingToolAction: {
+      stepId: step.id,
+      toolName: step.targetTool,
+      riskLevel: decision.capability?.riskLevel,
+      action: decision.capability?.id,
+      arguments: step.arguments,
+      argumentTemplate: step.argumentTemplate,
+      approvalStatus: decision.reason === 'approval_required' ? ('pending' as const) : step.approvalStatus,
+      reason: blockedReason,
+    },
+    log: decision.message || `Nexora blocked before ${step.targetTool} by the capability matrix.`,
+    event: {
+      type: 'task.blocked',
+      actor: 'nexora',
+      summary: decision.message || 'Task is blocked by the Nexora capability matrix.',
+      details: { blockedReason, capability: decision.capability, toolName: step.targetTool, reason: decision.reason },
     },
   });
 }
@@ -315,8 +361,10 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
       }
       if (['completed', 'skipped', 'cancelled'].includes(step.status)) continue;
       const highRisk = isStepHighRisk(step.targetTool);
-      if (highRisk && step.approvalStatus !== 'approved') {
-        await blockForStepApproval(task, step);
+      const capabilityDecision = evaluateNexoraCapabilityForStep(step.targetTool, step.approvalStatus);
+      if (!capabilityDecision.allowed) {
+        if (capabilityDecision.reason === 'approval_required') await blockForStepApproval(task, step);
+        else await blockForCapabilityPolicy(task, step, capabilityDecision);
         return true;
       }
 

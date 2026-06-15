@@ -98,6 +98,7 @@ import {
 } from './delegation.js';
 import { executeDelegatedCode } from '../workers/nexora/bridge.js';
 import { getDelegatedTask as getStoredDelegatedTask } from '../tasks/store.js';
+import { redactForLogs, redactProviderReceiptPayload } from '../workflows/nexora/secretsPolicy.js';
 
 export type ToolCategory =
   | 'calendar'
@@ -3492,7 +3493,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       requestedAction: definition.audit.action,
       sanitizedInputSummary: summarizeApprovalInput(sanitizedInput),
       reason: approvalBlock.result.reason,
-      originalInput: parsedInput,
+      originalInput: redactForLogs(parsedInput),
       approvalScope: requiredApprovalScope(definition),
       requestedAt: executionRecord.timestamps.requestedAt,
     };
@@ -3512,7 +3513,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   }
 
   try {
-    const result = await definition.executor(parsedInput, context);
+    const result = redactProviderReceiptPayload(await definition.executor(parsedInput, context));
     const completedRecord = completeExecutionRecord(executionRecord, {
       status: 'completed',
       executionResult: result,
@@ -3534,7 +3535,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
     });
     return result;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = redactForLogs(error instanceof Error ? error.message : String(error));
     const failedRecord = completeExecutionRecord(executionRecord, {
       status: 'failed',
       errors: [message],

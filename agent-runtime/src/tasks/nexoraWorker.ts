@@ -4,6 +4,7 @@ import type { RuntimeContext } from '../types.js';
 import { appendExecutionPlanStep, cancelDelegatedTask, getDelegatedTask, updateDelegatedTask, updateExecutionPlanStep } from './store.js';
 import type { DelegatedTask } from './types.js';
 import type { DelegatedTaskHandler } from './queue.js';
+import { redactForLogs } from '../workflows/nexora/secretsPolicy.js';
 
 type NexoraToolInputBuilder = (task: DelegatedTask) => Record<string, unknown>;
 
@@ -400,10 +401,10 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
           step.timeoutMs ? `Execution plan step ${step.id} timed out after ${step.timeoutMs}ms.` : `Task timed out after ${task.timeoutMs}ms.`,
         );
         if (await isTaskCancelled(task.id)) return true;
-        executedSteps.push({ stepId: step.id, tool: step.targetTool, input, result });
+        executedSteps.push(redactForLogs({ stepId: step.id, tool: step.targetTool, input, result }));
         await updateExecutionPlanStep(task.id, step.id, { status: 'completed', resultSummary: `Executed ${step.targetTool}.` });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = redactForLogs(error instanceof Error ? error.message : String(error));
         const providerConfigurationBlock = providerConfigurationBlockFor(step.targetTool, message);
         if (providerConfigurationBlock) {
           const { blockedReason, provider, providerName, missingConfigHint, nextManualAction } = providerConfigurationBlock;
@@ -434,7 +435,7 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
               type: 'task.blocked',
               actor: 'nexora',
               summary: `Task is blocked until ${providerName} provider configuration is completed.`,
-              details: { blockedReason, provider, providerName, missingConfigHint, nextManualAction, message },
+              details: redactForLogs({ blockedReason, provider, providerName, missingConfigHint, nextManualAction, message }),
             },
           });
           return true;
@@ -502,7 +503,7 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
       });
 
       const result = await executeRegisteredTool(selectedTool.name, input, context);
-      toolResults.push({ tool: selectedTool.name, input, result });
+      toolResults.push(redactForLogs({ tool: selectedTool.name, input, result }));
 
       await updateDelegatedTask(task.id, {
         log: `Nexora completed approved tool ${selectedTool.name}.`,
@@ -536,7 +537,7 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
       },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = redactForLogs(error instanceof Error ? error.message : String(error));
     await updateDelegatedTask(task.id, {
       status: 'failed',
       result: {
@@ -549,7 +550,7 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
           requiredTools: task.requiredTools,
           executedTools: toolResults,
         },
-        error: error instanceof Error ? { message: error.message, stack: error.stack } : { message },
+        error: error instanceof Error ? redactForLogs({ message: error.message, stack: error.stack }) : { message },
       },
       log: `Nexora tool-execution worker failed: ${message}`,
       event: {

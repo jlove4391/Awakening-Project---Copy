@@ -4,6 +4,12 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { runtimeConfig } from '../config.js';
+import {
+  assertSecretReadAllowed,
+  assertSecretWriteAllowed,
+  redactForLogs,
+  type HighRiskSecretApproval,
+} from '../workflows/nexora/secretsPolicy.js';
 
 const execFileAsync = promisify(execFile);
 const ignoredDirectoryNames = new Set(['.git', 'node_modules', 'dist', 'build', '.runtime-data', 'coverage']);
@@ -111,6 +117,13 @@ function sha256(text: string | Buffer) {
 
 async function fileSha256(target: string) {
   return sha256(await fs.readFile(target));
+}
+
+async function isGitTracked(root: string, relativePath: string) {
+  const result = await execFileAsync('git', ['-C', root, 'ls-files', '--error-unmatch', '--', relativePath], { cwd: root })
+    .then(() => true)
+    .catch(() => false);
+  return result;
 }
 
 async function pathSize(target: string): Promise<number> {
@@ -490,8 +503,8 @@ async function runWorkspaceShellCommand(input: RunCommandInput, toolName: string
     workspaceRoot: root,
     cwd: relativePath,
     command: input.command,
-    stdout: outputSlice(stdout, stdout.length),
-    stderr: outputSlice(stderr, stderr.length),
+    stdout: redactForLogs(outputSlice(stdout, stdout.length)),
+    stderr: redactForLogs(outputSlice(stderr, stderr.length)),
     exitCode: result.exitCode,
     signal: timedOut ? 'SIGTERM' : result.signal,
     timedOut,
@@ -515,8 +528,9 @@ async function runWorkspaceShellCommand(input: RunCommandInput, toolName: string
   };
 }
 
-export async function codeRead(input: { path: string; maxBytes?: number }) {
+export async function codeRead(input: { path: string; maxBytes?: number } & HighRiskSecretApproval) {
   const { root, target, relativePath } = await resolveExistingWorkspacePath(input.path);
+  assertSecretReadAllowed(relativePath, input);
   const stats = await fs.stat(target);
   if (!stats.isFile()) throw new Error('code.read can only read files.');
   const maxBytes = Math.min(Math.max(input.maxBytes || 20_000, 1), 200_000);
@@ -524,7 +538,7 @@ export async function codeRead(input: { path: string; maxBytes?: number }) {
   try {
     const buffer = Buffer.alloc(Math.min(maxBytes, stats.size));
     await handle.read(buffer, 0, buffer.length, 0);
-    const content = buffer.toString('utf8');
+    const content = redactForLogs(buffer.toString('utf8'));
     return { ok: true, workspaceRoot: root, path: relativePath, bytesRead: buffer.length, truncated: stats.size > buffer.length, sha256: sha256(content), content };
   } finally {
     await handle.close();
@@ -545,6 +559,7 @@ export async function codeSearch(input: { query: string; path?: string; isRegex?
   for (const file of candidates) {
     if (matches.length >= maxResults) break;
     const absolute = path.join(root, file);
+    assertSecretReadAllowed(file);
     const stat = await fs.stat(absolute);
     if (stat.size > 1_000_000) continue;
     const text = await fs.readFile(absolute, 'utf8').catch(() => '');
@@ -552,7 +567,7 @@ export async function codeSearch(input: { query: string; path?: string; isRegex?
     lines.forEach((line, index) => {
       if (matches.length >= maxResults) return;
       const found = matcher ? matcher.test(line) : line.toLowerCase().includes(input.query.toLowerCase());
-      if (found) matches.push({ path: file, line: index + 1, preview: line.slice(0, 240) });
+      if (found) matches.push({ path: file, line: index + 1, preview: redactForLogs(line.slice(0, 240)) });
     });
   }
   return { ok: true, workspaceRoot: root, searchedPath: path.relative(root, target) || '.', matches, truncated: matches.length >= maxResults };
@@ -574,6 +589,7 @@ export async function codeEdit(input: { path: string; content: string; mode?: 'o
     return { ok: false, status: 'sha256_mismatch', path: relativePath, expectedSha256: input.expectedSha256, actualSha256: previousSha256 };
   }
   const nextContent = mode === 'append' ? `${previousContent}${input.content}` : input.content;
+  assertSecretWriteAllowed(relativePath, nextContent, { isTracked: await isGitTracked(root, relativePath) });
   await fs.writeFile(target, nextContent, 'utf8');
   return { ok: true, workspaceRoot: root, path: relativePath, mode, sha256: sha256(nextContent), bytesWritten: Buffer.byteLength(nextContent) };
 }
@@ -584,6 +600,7 @@ export async function codeCreateFile(input: { path: string; content: string; exp
   if (approval) return approval;
   const { root, target, relativePath } = await resolveWritableWorkspacePath(input.path);
   const content = input.content ?? '';
+  assertSecretWriteAllowed(relativePath, content, { isTracked: await isGitTracked(root, relativePath) });
   if (input.expectedSha256 && input.expectedSha256 !== sha256('')) {
     return { ok: false, status: 'sha256_mismatch', path: relativePath, expectedSha256: input.expectedSha256, actualSha256: undefined };
   }
@@ -607,6 +624,7 @@ export async function codePatchFile(input: { path: string; search: string; repla
   if (occurrences === 0) return { ok: false, status: 'not_found', path: relativePath, sha256: previousSha256, bytesChanged: 0 };
   if (occurrences > 1 && !input.replaceAll) return { ok: false, status: 'multiple_matches', path: relativePath, occurrences, sha256: previousSha256, bytesChanged: 0 };
   const nextContent = input.replaceAll ? previousContent.split(input.search).join(input.replace) : previousContent.replace(input.search, input.replace);
+  assertSecretWriteAllowed(relativePath, nextContent, { isTracked: await isGitTracked(root, relativePath) });
   await fs.writeFile(target, nextContent, 'utf8');
   return { ok: true, status: 'patched', workspaceRoot: root, path: relativePath, previousSha256, sha256: sha256(nextContent), bytesChanged: Buffer.byteLength(nextContent) - Buffer.byteLength(previousContent), occurrences: input.replaceAll ? occurrences : 1 };
 }
@@ -705,6 +723,7 @@ export async function codeWriteJson(input: { path: string; data: unknown; expect
   try { previousSha256 = await fileSha256(target); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   if (input.expectedSha256 && previousSha256 !== input.expectedSha256) return { ok: false, status: 'sha256_mismatch', path: relativePath, expectedSha256: input.expectedSha256, actualSha256: previousSha256 };
   const content = `${JSON.stringify(input.data, null, Math.min(Math.max(input.space ?? 2, 0), 10))}\n`;
+  assertSecretWriteAllowed(relativePath, content, { isTracked: await isGitTracked(root, relativePath) });
   await fs.writeFile(target, content, 'utf8');
   return { ok: true, status: previousSha256 ? 'updated' : 'created', workspaceRoot: root, path: relativePath, sha256: sha256(content), bytesChanged: Buffer.byteLength(content) };
 }
@@ -731,7 +750,7 @@ export async function codeDiff(input: { path?: string }) {
     args.push(resolved.relativePath);
   }
   const { stdout } = await execFileAsync('git', args, { cwd: root, maxBuffer: 1_000_000 });
-  return { ok: true, workspaceRoot: root, diff: stdout, truncated: stdout.length >= 1_000_000 };
+  return { ok: true, workspaceRoot: root, diff: redactForLogs(stdout), truncated: stdout.length >= 1_000_000 };
 }
 
 export const codeGitDiff = codeDiff;
@@ -749,7 +768,7 @@ export async function codeGitLog(input: { maxCount?: number; path?: string } = {
     const [hash, shortHash, author, date, ...subjectParts] = line.split('\t');
     return { hash, shortHash, author, date, subject: subjectParts.join('\t') };
   });
-  return { ok: true, workspaceRoot: root, commits, log: stdout, truncated: stdout.length >= 1_000_000 };
+  return { ok: true, workspaceRoot: root, commits: redactForLogs(commits), log: redactForLogs(stdout), truncated: stdout.length >= 1_000_000 };
 }
 
 export async function codeGitRestoreFile(input: { path: string } & ApprovalGateInput) {

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { runtimeConfig } from './config.js';
 import type { ToolRiskLevel } from './tools/registry.js';
 import type { ApprovalScope } from './tasks/types.js';
+import { redactProviderReceiptPayload, safeReceiptSummary } from './workflows/nexora/secretsPolicy.js';
 
 export type ExecutionKind = 'tool_call' | 'delegated_task' | 'runtime_action';
 export type ExecutionApprovalStatus = 'not_required' | 'approved' | 'blocked' | 'pending' | 'rejected' | 'unknown';
@@ -74,6 +75,7 @@ function truncate(value: string, maxLength = 360) {
 }
 
 export function summarizeProviderResponse(result: unknown) {
+  result = redactProviderReceiptPayload(result);
   if (result === undefined) return 'No provider response body returned.';
   if (result === null) return 'Provider returned null.';
   if (typeof result === 'string') return truncate(result);
@@ -90,7 +92,7 @@ export function summarizeProviderResponse(result: unknown) {
   }
 
   try {
-    return truncate(JSON.stringify(result));
+    return truncate(safeReceiptSummary(result));
   } catch (_error) {
     return 'Provider response could not be serialized.';
   }
@@ -111,13 +113,13 @@ export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'times
     whoRequested: input.whoRequested,
     chosenByAgent: input.chosenByAgent,
     action: input.action,
-    inputPayload: input.inputPayload,
+    inputPayload: redactProviderReceiptPayload(input.inputPayload),
     riskLevel: input.riskLevel,
     approvalStatus: input.approvalStatus,
     approvalScope: input.approvalScope,
     approvalRequest: input.approvalRequest,
-    executionResult: input.executionResult,
-    providerResponseSummary: input.providerResponseSummary,
+    executionResult: redactProviderReceiptPayload(input.executionResult),
+    providerResponseSummary: input.providerResponseSummary ? redactProviderReceiptPayload(input.providerResponseSummary) : input.providerResponseSummary,
     errors: input.errors || [],
     timestamps: {
       requestedAt,
@@ -152,9 +154,9 @@ export function completeExecutionRecord(
     approvalStatus: patch.approvalStatus || record.approvalStatus,
     approvalScope: record.approvalScope,
     approvalRequest: record.approvalRequest,
-    executionResult: patch.executionResult,
-    providerResponseSummary: patch.providerResponseSummary ?? summarizeProviderResponse(patch.executionResult),
-    errors: patch.errors || record.errors,
+    executionResult: redactProviderReceiptPayload(patch.executionResult),
+    providerResponseSummary: patch.providerResponseSummary ? redactProviderReceiptPayload(patch.providerResponseSummary) : summarizeProviderResponse(patch.executionResult),
+    errors: redactProviderReceiptPayload(patch.errors || record.errors),
     timestamps: {
       ...record.timestamps,
       completedAt,
@@ -221,6 +223,7 @@ async function appendSessionRecord(record: ExecutionRecord) {
 
 export async function writeExecutionRecord(record: ExecutionRecord) {
   await ensureStore();
+  record = redactProviderReceiptPayload(record);
   await fs.appendFile(executionLogPath, `${JSON.stringify(record)}\n`);
   await appendSessionRecord(record);
   return record;

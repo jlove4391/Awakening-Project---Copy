@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { runtimeConfig } from '../config.js';
+import { redactForLogs } from '../workflows/nexora/secretsPolicy.js';
 
 export interface ToolAuditLogEntry {
   event: string;
@@ -20,6 +21,8 @@ const auditDir = path.join(runtimeConfig.dataDir, 'audit');
 const auditLogPath = path.join(auditDir, 'tool-audit.jsonl');
 
 function redactValue(value: unknown): unknown {
+  const secretRedacted = redactForLogs(value);
+  if (secretRedacted !== value) return secretRedacted;
   if (typeof value === 'string') return value.length > 120 ? `${value.slice(0, 117)}...` : value;
   if (Array.isArray(value)) return value.map(redactValue);
   if (value && typeof value === 'object') {

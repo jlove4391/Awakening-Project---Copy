@@ -389,7 +389,11 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
       const input = stepInput(step);
       if (highRisk) {
         input.confirmedByUser = true;
+        input.taskId = task.id;
+        input.stepId = step.id;
         context.approvedExecutionId = step.id;
+        context.approvedDelegatedTaskId = task.id;
+        context.approvedDelegatedStepId = step.id;
       }
       await updateExecutionPlanStep(task.id, step.id, { status: 'running' });
       try {

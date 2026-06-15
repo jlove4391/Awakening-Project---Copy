@@ -3392,8 +3392,8 @@ async function hasExactApprovalScope(definition: RegisteredToolDefinition, input
   const approvedRecord = await getExecutionRecord(executionId);
   if (approvedRecord) return approvedRecord.action === definition.name && approvedRecord.approvalRequest?.approvalScope === scope;
 
-  const taskId = typeof input.taskId === 'string' ? input.taskId : undefined;
-  const stepId = typeof input.stepId === 'string' ? input.stepId : executionId;
+  const taskId = typeof input.taskId === 'string' ? input.taskId : typeof context.approvedDelegatedTaskId === 'string' ? context.approvedDelegatedTaskId : undefined;
+  const stepId = typeof input.stepId === 'string' ? input.stepId : typeof context.approvedDelegatedStepId === 'string' ? context.approvedDelegatedStepId : executionId;
   if (!taskId || !stepId) return false;
   const task = await getStoredDelegatedTask(taskId);
   const step = task?.executionPlan?.find((candidate) => candidate.id === stepId);

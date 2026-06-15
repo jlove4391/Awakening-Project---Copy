@@ -96,6 +96,7 @@ function normalizeExecutionPlanStep(input: AppendExecutionPlanStepInput, order: 
       rejectedAt: input.approval?.rejectedAt,
       note: input.approval?.note,
       reason: input.approval?.reason,
+      scope: input.approval?.scope,
     },
     status: input.status || 'queued',
     ...(input.resultSummary !== undefined ? { resultSummary: input.resultSummary } : {}),

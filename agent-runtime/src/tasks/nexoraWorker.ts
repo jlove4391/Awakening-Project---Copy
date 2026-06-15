@@ -231,6 +231,21 @@ function isStepHighRisk(toolName: string) {
   return !definition || !capability || definition.riskLevel !== 'read' || definition.humanApprovalRequired || capability.approvalRequirement !== 'none';
 }
 
+function approvalScopeForStep(definition: ReturnType<typeof getRegisteredTool>) {
+  if (!definition || definition.riskLevel === 'read') return undefined;
+  if (definition.requiredApprovalScope) return definition.requiredApprovalScope;
+  if (definition.name === 'code.commit') return 'repo.commit';
+  if (definition.riskLevel === 'code_execution') return 'repo.command';
+  if (definition.audit.category === 'code' || definition.audit.category === 'nexora') {
+    return definition.audit.action.includes('delete') ? 'repo.delete' : 'repo.write';
+  }
+  if (definition.riskLevel === 'external_send') return 'external.send';
+  if (definition.name.includes('migrate') || definition.audit.action.includes('migrate')) return 'database.migrate';
+  if (definition.audit.action.includes('delete')) return 'provider.delete';
+  if (definition.audit.action.includes('create')) return 'provider.create';
+  return 'provider.update';
+}
+
 function stepInput(step: NonNullable<DelegatedTask['executionPlan']>[number]): Record<string, unknown> {
   const value = step.arguments ?? step.argumentTemplate ?? {};
   return value && typeof value === 'object' && !Array.isArray(value) ? { ...(value as Record<string, unknown>) } : { value };
@@ -239,6 +254,7 @@ function stepInput(step: NonNullable<DelegatedTask['executionPlan']>[number]): R
 async function blockForStepApproval(task: DelegatedTask, step: NonNullable<DelegatedTask['executionPlan']>[number]) {
   const definition = getRegisteredTool(step.targetTool);
   const reason = 'step_approval_required';
+  const approvalScope = approvalScopeForStep(definition);
   const pendingToolAction = {
     stepId: step.id,
     toolName: step.targetTool,
@@ -248,11 +264,12 @@ async function blockForStepApproval(task: DelegatedTask, step: NonNullable<Deleg
     argumentTemplate: step.argumentTemplate,
     approvalStatus: 'pending' as const,
     reason,
+    approvalScope,
   };
   await updateExecutionPlanStep(task.id, step.id, {
     status: 'blocked',
     approvalStatus: 'pending',
-    approval: { required: true, status: 'pending', reason },
+    approval: { required: true, status: 'pending', reason, scope: approvalScope },
   });
   await updateDelegatedTask(task.id, {
     status: 'blocked',

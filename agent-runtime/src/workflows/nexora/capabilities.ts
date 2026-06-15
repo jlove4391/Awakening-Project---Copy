@@ -111,7 +111,7 @@ export const nexoraCapabilities: Record<NexoraCapabilityId, NexoraCapabilityDefi
   manage_provider_resources: {
     id: 'manage_provider_resources',
     label: 'manage provider resources',
-    allowedTools: ['digitalocean.status', 'digitalocean.list_apps', 'digitalocean.list_databases', 'digitalocean.plan_app', 'digitalocean.plan_database', 'digitalocean.create_app', 'digitalocean.create_database', 'digitalocean.create_infrastructure', 'digitalocean.update_infrastructure', 'digitalocean.delete_infrastructure'],
+    allowedTools: ['digitalocean.status', 'digitalocean.list_apps', 'digitalocean.list_databases', 'digitalocean.plan_app', 'digitalocean.plan_database', 'digitalocean.create_app', 'digitalocean.create_database', 'digitalocean.create_infrastructure', 'digitalocean.update_infrastructure', 'digitalocean.delete_infrastructure', 'drive.create_text_file'],
     riskLevel: 'purchase_or_commit',
     approvalRequirement: 'explicit_human_approval',
     defaultEnabled: false,

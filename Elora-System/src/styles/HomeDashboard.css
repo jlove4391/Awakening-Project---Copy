@@ -352,3 +352,42 @@
   border-color: rgba(224, 92, 92, 0.75);
   color: #ffaaa3;
 }
+
+.execution-approval-summary {
+  background: rgba(139, 207, 139, 0.08);
+  border: 1px solid rgba(139, 207, 139, 0.26);
+  border-radius: 10px;
+  color: #a8f5a8;
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+}
+
+.worker-state-panel {
+  background: rgba(127, 196, 255, 0.06);
+  border: 1px solid rgba(127, 196, 255, 0.18);
+  border-radius: 12px;
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.75rem;
+}
+
+.execution-blocked-detail {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin: 0.15rem 0 0;
+}
+
+.execution-blocked-detail dt {
+  color: #ffb7b0;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.execution-blocked-detail dd {
+  color: #ffe2aa;
+  margin: 0.15rem 0 0;
+}

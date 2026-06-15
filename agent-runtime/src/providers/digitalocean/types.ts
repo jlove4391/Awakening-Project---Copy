@@ -109,3 +109,14 @@ export type DigitalOceanAppsResponse = DigitalOceanPagedResponse<'apps', Digital
 export type DigitalOceanDatabasesResponse = DigitalOceanPagedResponse<'databases', DigitalOceanDatabaseCluster> & {
   databases?: DigitalOceanDatabaseCluster[];
 };
+
+
+export interface DigitalOceanAppCreateResponse {
+  app?: DigitalOceanApp;
+  [key: string]: unknown;
+}
+
+export interface DigitalOceanDatabaseCreateResponse {
+  database?: DigitalOceanDatabaseCluster;
+  [key: string]: unknown;
+}

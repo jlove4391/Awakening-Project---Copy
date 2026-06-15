@@ -2,8 +2,8 @@ import { digitalOceanApiRequest, digitalOceanProviderStatus } from './auth.js';
 import type { DigitalOceanAccountResponse, DigitalOceanListInput, DigitalOceanProjectsResponse } from './types.js';
 
 export { digitalOceanApiRequest, digitalOceanProviderStatus, getDigitalOceanApiToken } from './auth.js';
-export { listDigitalOceanApps } from './apps.js';
-export { listDigitalOceanDatabases } from './databases.js';
+export { createDigitalOceanApp, listDigitalOceanApps } from './apps.js';
+export { createDigitalOceanDatabase, listDigitalOceanDatabases } from './databases.js';
 export { requireDigitalOceanInfrastructureApproval, isDigitalOceanDestructiveOperation } from './approval.js';
 export type * from './approval.js';
 export type * from './types.js';

@@ -125,6 +125,7 @@ export interface DelegatedTaskUiState {
     message?: string;
   };
   executionResult?: DelegatedTaskResult;
+  completionReport?: unknown;
   receiptId?: string;
 }
 

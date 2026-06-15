@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { runtimeConfig } from '../config.js';
+import { attachNexoraCompletion } from '../workflows/nexora/completion.js';
 import { taskEvents } from './events.js';
 import type {
   AppendExecutionPlanStepInput,
@@ -149,6 +150,12 @@ function missingApproval(task: DelegatedTask) {
   );
 }
 
+function taskCompletionReport(task: DelegatedTask) {
+  const data = task.result?.data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
+  return (data as Record<string, unknown>).completion;
+}
+
 function missingConfiguration(task: DelegatedTask) {
   if (task.blockedReason !== 'provider_configuration_required') return undefined;
   const details = [...task.events].reverse().find((event) => event.details?.blockedReason === 'provider_configuration_required')?.details || {};
@@ -174,6 +181,7 @@ export function getDelegatedTaskUiState(task: DelegatedTask, queuedTaskIds: stri
     ...(missingApproval(task) ? { missingApproval: missingApproval(task) } : {}),
     ...(missingConfiguration(task) ? { missingConfiguration: missingConfiguration(task) } : {}),
     ...(task.result ? { executionResult: task.result } : {}),
+    ...(taskCompletionReport(task) ? { completionReport: taskCompletionReport(task) } : {}),
     ...(task.receipt?.id ? { receiptId: task.receipt.id } : {}),
   };
 }
@@ -444,6 +452,10 @@ export async function updateDelegatedTask(taskId: string, input: UpdateDelegated
 
     if (terminalStatuses.has(task.status) && !task.receipt) {
       task.receipt = createReceipt(task);
+      if (task.status === 'completed' && task.assignedAgent === 'nexora' && task.result) {
+        task.result = attachNexoraCompletion(task, task.result);
+        task.receipt.proof.result = task.result;
+      }
       const receiptEvent = createAuditEntry(task.id, 'task.receipt_created', 'system', `Receipt ${task.receipt.id} created for task ${task.id}.`, {
         receiptId: task.receipt.id,
       });

@@ -52,6 +52,7 @@ import { createDriveTextFile, searchDriveFiles } from '../providers/google/drive
 import { searchGmailMessages, sendGmailEmail } from '../providers/google/gmail.js';
 import { readSheetRange, updateSheetRange } from '../providers/google/sheets.js';
 import type { RuntimeContext } from '../types.js';
+import type { ApprovalScope } from '../tasks/types.js';
 import {
   codeCommit,
   codeCopyPath,
@@ -96,6 +97,7 @@ import {
   updateDelegationTask,
 } from './delegation.js';
 import { executeDelegatedCode } from '../workers/nexora/bridge.js';
+import { getDelegatedTask as getStoredDelegatedTask } from '../tasks/store.js';
 
 export type ToolCategory =
   | 'calendar'
@@ -149,6 +151,7 @@ export interface RegisteredToolDefinition {
   inputSchema: JsonSchema;
   parameters: any;
   scopes: string[];
+  requiredApprovalScope?: ApprovalScope;
   riskLevel: ToolRiskLevel;
   humanApprovalRequired: boolean;
   audit: ToolAuditMetadata;
@@ -3350,6 +3353,7 @@ function approvalBlockedResult(definition: RegisteredToolDefinition, context: Ru
     },
     approval: {
       executionId,
+      approvalScope: requiredApprovalScope(definition),
       toolName: definition.name,
       riskLevel: definition.riskLevel,
       requestedAction: definition.audit.action,
@@ -3364,10 +3368,45 @@ function approvalBlockedResult(definition: RegisteredToolDefinition, context: Ru
   };
 }
 
-function enforceApprovalLimits(definition: RegisteredToolDefinition, input: any, context: RuntimeContext, approvedThroughUi: boolean, executionId?: string, sanitizedInput?: Record<string, unknown>) {
+
+function requiredApprovalScope(definition: RegisteredToolDefinition): ApprovalScope | undefined {
+  if (!isHighRisk(definition)) return undefined;
+  if (definition.requiredApprovalScope) return definition.requiredApprovalScope;
+  if (definition.name === 'code.commit') return 'repo.commit';
+  if (definition.riskLevel === 'code_execution') return 'repo.command';
+  if (definition.audit.category === 'code' || definition.audit.category === 'nexora') {
+    return definition.audit.action.includes('delete') ? 'repo.delete' : 'repo.write';
+  }
+  if (definition.riskLevel === 'external_send') return 'external.send';
+  if (definition.name.includes('migrate') || definition.audit.action.includes('migrate')) return 'database.migrate';
+  if (definition.audit.action.includes('delete')) return 'provider.delete';
+  if (definition.audit.action.includes('create')) return 'provider.create';
+  return 'provider.update';
+}
+
+async function hasExactApprovalScope(definition: RegisteredToolDefinition, input: Record<string, unknown>, context: RuntimeContext, executionId?: string) {
+  const scope = requiredApprovalScope(definition);
+  if (!scope) return true;
+  if (!executionId) return false;
+  const approvedRecord = await getExecutionRecord(executionId);
+  if (approvedRecord) return approvedRecord.action === definition.name && approvedRecord.approvalRequest?.approvalScope === scope;
+
+  const taskId = typeof input.taskId === 'string' ? input.taskId : undefined;
+  const stepId = typeof input.stepId === 'string' ? input.stepId : executionId;
+  if (!taskId || !stepId) return false;
+  const task = await getStoredDelegatedTask(taskId);
+  const step = task?.executionPlan?.find((candidate) => candidate.id === stepId);
+  return step?.targetTool === definition.name && step.approval?.scope === scope;
+}
+
+async function enforceApprovalLimits(definition: RegisteredToolDefinition, input: Record<string, unknown>, context: RuntimeContext, approvedThroughUi: boolean, executionId?: string, sanitizedInput?: Record<string, unknown>) {
   if (definition.humanApprovalRequired && !approvedThroughUi) {
     const reason = input?.confirmedByUser === true ? 'missing_react_ui_approval_context' : 'missing_explicit_user_approval';
     return approvalBlockedResult(definition, context, reason, executionId, sanitizedInput);
+  }
+
+  if (approvedThroughUi && !(await hasExactApprovalScope(definition, input, context, executionId))) {
+    return approvalBlockedResult(definition, context, 'approval_scope_mismatch', executionId, sanitizedInput);
   }
 
   if (context.channel === 'voice') {
@@ -3408,7 +3447,8 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   const normalizedInput = normalizeToolInput(input);
   const parsedInput = definition.parameters.parse(normalizedInput) as Record<string, unknown>;
   const sanitizedInput = sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []);
-  const approved = !definition.humanApprovalRequired || Boolean(parsedInput.confirmedByUser === true && context.approvedExecutionId);
+  const approvedExecutionId = typeof context.approvedExecutionId === 'string' ? context.approvedExecutionId : undefined;
+  const approved = !definition.humanApprovalRequired || Boolean(parsedInput.confirmedByUser === true && approvedExecutionId);
   const executionRecord = createExecutionRecord({
     kind: 'tool_call',
     whoRequested: 'user',
@@ -3417,6 +3457,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
     inputPayload: sanitizedInput,
     riskLevel: definition.riskLevel,
     approvalStatus: definition.humanApprovalRequired ? (approved ? 'approved' : 'pending') : 'not_required',
+    approvalScope: requiredApprovalScope(definition),
     linkedIds: {
       sessionId: context.sessionId,
       voiceSessionId: context.voiceSessionId,
@@ -3437,7 +3478,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
     input: sanitizedInput,
   });
 
-  const approvalBlock = enforceApprovalLimits(definition, parsedInput, context, Boolean(approved), executionRecord.id, sanitizedInput);
+  const approvalBlock = await enforceApprovalLimits(definition, parsedInput, context, Boolean(approved), approvedExecutionId || executionRecord.id, sanitizedInput);
   if (approvalBlock) {
     const blockedRecord = completeExecutionRecord(executionRecord, {
       status: 'blocked',
@@ -3452,6 +3493,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       sanitizedInputSummary: summarizeApprovalInput(sanitizedInput),
       reason: approvalBlock.result.reason,
       originalInput: parsedInput,
+      approvalScope: requiredApprovalScope(definition),
       requestedAt: executionRecord.timestamps.requestedAt,
     };
     await writeExecutionRecord(blockedRecord);

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { runtimeConfig } from './config.js';
 import type { ToolRiskLevel } from './tools/registry.js';
+import type { ApprovalScope } from './tasks/types.js';
 
 export type ExecutionKind = 'tool_call' | 'delegated_task' | 'runtime_action';
 export type ExecutionApprovalStatus = 'not_required' | 'approved' | 'blocked' | 'pending' | 'rejected' | 'unknown';
@@ -16,6 +17,7 @@ export interface ExecutionApprovalRequest {
   originalInput: Record<string, unknown>;
   requestedAt: string;
   approvalNote?: string;
+  approvalScope?: ApprovalScope;
 }
 
 export interface ExecutionRecord {
@@ -27,6 +29,7 @@ export interface ExecutionRecord {
   inputPayload: unknown;
   riskLevel: ToolRiskLevel | 'unknown';
   approvalStatus: ExecutionApprovalStatus;
+  approvalScope?: ApprovalScope;
   approvalRequest?: ExecutionApprovalRequest;
   executionResult?: unknown;
   providerResponseSummary?: string;
@@ -111,6 +114,7 @@ export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'times
     inputPayload: input.inputPayload,
     riskLevel: input.riskLevel,
     approvalStatus: input.approvalStatus,
+    approvalScope: input.approvalScope,
     approvalRequest: input.approvalRequest,
     executionResult: input.executionResult,
     providerResponseSummary: input.providerResponseSummary,
@@ -146,6 +150,7 @@ export function completeExecutionRecord(
     ...record,
     status: patch.status,
     approvalStatus: patch.approvalStatus || record.approvalStatus,
+    approvalScope: record.approvalScope,
     approvalRequest: record.approvalRequest,
     executionResult: patch.executionResult,
     providerResponseSummary: patch.providerResponseSummary ?? summarizeProviderResponse(patch.executionResult),

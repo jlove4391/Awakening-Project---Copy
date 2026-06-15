@@ -24,6 +24,17 @@ export type DelegatedTaskEventType =
 
 export type ApprovalRequirementStatus = 'not_required' | 'pending' | 'approved' | 'rejected';
 
+export type ApprovalScope =
+  | 'repo.write'
+  | 'repo.delete'
+  | 'repo.command'
+  | 'repo.commit'
+  | 'provider.create'
+  | 'provider.update'
+  | 'provider.delete'
+  | 'database.migrate'
+  | 'external.send';
+
 export interface ApprovalRequirement {
   required: boolean;
   status: ApprovalRequirementStatus;
@@ -32,6 +43,7 @@ export interface ApprovalRequirement {
   rejectedAt?: string;
   note?: string;
   reason?: string;
+  scope?: ApprovalScope;
 }
 
 export interface TaskAuditEntry {
@@ -81,6 +93,7 @@ export interface ExecutionPlanStepApproval {
   rejectedAt?: string;
   note?: string;
   reason?: string;
+  scope?: ApprovalScope;
 }
 
 export interface PendingToolAction {
@@ -92,6 +105,7 @@ export interface PendingToolAction {
   argumentTemplate?: unknown;
   approvalStatus: ExecutionPlanStepApprovalStatus;
   reason: string;
+  approvalScope?: ApprovalScope;
 }
 
 export interface ExecutionPlanStep {

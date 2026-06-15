@@ -4,6 +4,8 @@ import type { DigitalOceanAccountResponse, DigitalOceanListInput, DigitalOceanPr
 export { digitalOceanApiRequest, digitalOceanProviderStatus, getDigitalOceanApiToken } from './auth.js';
 export { listDigitalOceanApps } from './apps.js';
 export { listDigitalOceanDatabases } from './databases.js';
+export { requireDigitalOceanInfrastructureApproval, isDigitalOceanDestructiveOperation } from './approval.js';
+export type * from './approval.js';
 export type * from './types.js';
 
 export function checkDigitalOceanProviderConfigured() {

@@ -14,6 +14,7 @@ import {
   digitalOceanProviderStatus,
   listDigitalOceanApps,
   listDigitalOceanDatabases,
+  requireDigitalOceanInfrastructureApproval,
 } from '../providers/digitalocean/index.js';
 import { appendActivity, lookupCrmContact, updateLeadStatus, upsertCrmContact } from '../providers/crm/index.js';
 import { enrichPersonWithClay } from '../providers/clay/index.js';
@@ -259,6 +260,29 @@ const digitalOceanListParameters = z.object({
   perPage: z.number().int().min(1).max(200).default(20),
 });
 
+const digitalOceanInfrastructureApprovalSchema = objectSchema({
+  resourceName: stringSchema('DigitalOcean resource name targeted by the infrastructure change.'),
+  region: stringSchema('DigitalOcean region slug for the targeted resource.'),
+  size: stringSchema('DigitalOcean size/plan slug for the targeted resource.'),
+  estimatedCost: stringSchema('Estimated monthly/usage cost, or "unavailable" when DigitalOcean pricing cannot be estimated before apply.'),
+  dryRunPlan: { type: 'object', additionalProperties: true, description: 'Dry-run/plan output reviewed before applying the infrastructure change.' },
+  confirmedByUser: approvalBooleanSchema,
+  approvalNote: stringSchema('Explicit approval note describing who approved this infrastructure action and what was approved.'),
+  typedConfirmation: stringSchema('Required for delete/destroy: exact typed confirmation such as "delete <resourceName>".'),
+  allowDestructiveDelete: { type: 'boolean', description: 'Delete/destroy remains blocked by default; set true only after explicit destructive-action policy approval.' },
+}, ['resourceName', 'region', 'size', 'estimatedCost', 'dryRunPlan', 'confirmedByUser', 'approvalNote']);
+const digitalOceanInfrastructureApprovalParameters = z.object({
+  resourceName: z.string().min(1),
+  region: z.string().min(1),
+  size: z.string().min(1),
+  estimatedCost: z.union([z.string().min(1), z.number()]),
+  dryRunPlan: z.any(),
+  confirmedByUser: z.boolean(),
+  approvalNote: z.string().min(1),
+  typedConfirmation: z.string().optional(),
+  allowDestructiveDelete: z.boolean().optional(),
+});
+
 function databankProviderStatus() {
   const tokenPresent = Boolean((process.env.DATABANK_API_TOKEN || process.env.DATABANK_TOKEN || '').trim());
 
@@ -311,6 +335,30 @@ async function listDigitalOceanDatabasesTool(input: Record<string, unknown>) {
   }
 
   return listDigitalOceanDatabases({ page: input.page as number | undefined, perPage: input.perPage as number | undefined });
+}
+
+async function digitalOceanInfrastructureWriteTool(input: Record<string, unknown>, operation: 'create' | 'update' | 'delete') {
+  const approvalBlock = requireDigitalOceanInfrastructureApproval({
+    operation,
+    resourceName: input.resourceName as string | undefined,
+    region: input.region as string | undefined,
+    size: input.size as string | undefined,
+    estimatedCost: input.estimatedCost as string | number | null | undefined,
+    dryRunPlan: input.dryRunPlan as string | Record<string, unknown> | Array<unknown> | undefined,
+    confirmedByUser: input.confirmedByUser as boolean | undefined,
+    approvalNote: input.approvalNote as string | undefined,
+    typedConfirmation: input.typedConfirmation as string | undefined,
+    allowDestructiveDelete: input.allowDestructiveDelete as boolean | undefined,
+  });
+  if (approvalBlock) return approvalBlock;
+
+  return {
+    ok: false,
+    provider: 'digitalocean',
+    status: 'provider_write_not_implemented',
+    operation,
+    message: 'DigitalOcean infrastructure writes are registered as high-risk purchase/commit actions, but the apply adapter is not implemented yet.',
+  };
 }
 
 async function draftOutreachEmail(input: Record<string, unknown>) {
@@ -755,6 +803,60 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       logEvents: ['tool.digitalocean.list_databases.requested', 'tool.digitalocean.list_databases.completed'],
     },
     executor: listDigitalOceanDatabasesTool,
+  },
+  {
+    name: 'digitalocean.create_infrastructure',
+    description: 'High-risk DigitalOcean infrastructure create placeholder. Requires explicit approval, resource metadata, cost estimate, and dry-run/plan output before any future apply adapter can run.',
+    inputSchema: digitalOceanInfrastructureApprovalSchema,
+    parameters: digitalOceanInfrastructureApprovalParameters,
+    scopes: ['digitalocean.infrastructure.write'],
+    riskLevel: 'purchase_or_commit',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'digitalocean',
+      action: 'create_infrastructure',
+      resourceType: 'digitalocean_infrastructure',
+      resourceIdField: 'resourceName',
+      sensitiveFields: ['approvalNote', 'dryRunPlan'],
+      logEvents: ['tool.digitalocean.create_infrastructure.approval_requested', 'tool.digitalocean.create_infrastructure.completed'],
+    },
+    executor: (input) => digitalOceanInfrastructureWriteTool(input, 'create'),
+  },
+  {
+    name: 'digitalocean.update_infrastructure',
+    description: 'High-risk DigitalOcean infrastructure update placeholder. Requires explicit approval, resource metadata, cost estimate, and dry-run/plan output before any future apply adapter can run.',
+    inputSchema: digitalOceanInfrastructureApprovalSchema,
+    parameters: digitalOceanInfrastructureApprovalParameters,
+    scopes: ['digitalocean.infrastructure.write'],
+    riskLevel: 'purchase_or_commit',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'digitalocean',
+      action: 'update_infrastructure',
+      resourceType: 'digitalocean_infrastructure',
+      resourceIdField: 'resourceName',
+      sensitiveFields: ['approvalNote', 'dryRunPlan'],
+      logEvents: ['tool.digitalocean.update_infrastructure.approval_requested', 'tool.digitalocean.update_infrastructure.completed'],
+    },
+    executor: (input) => digitalOceanInfrastructureWriteTool(input, 'update'),
+  },
+  {
+    name: 'digitalocean.delete_infrastructure',
+    description: 'High-risk DigitalOcean infrastructure delete placeholder. Destructive delete/destroy is blocked by default and requires typed confirmation plus explicit approval metadata before any future apply adapter can run.',
+    inputSchema: digitalOceanInfrastructureApprovalSchema,
+    parameters: digitalOceanInfrastructureApprovalParameters,
+    scopes: ['digitalocean.infrastructure.delete'],
+    riskLevel: 'purchase_or_commit',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'digitalocean',
+      action: 'delete_infrastructure',
+      resourceType: 'digitalocean_infrastructure',
+      resourceIdField: 'resourceName',
+      sensitiveFields: ['approvalNote', 'dryRunPlan', 'typedConfirmation'],
+      logEvents: ['tool.digitalocean.delete_infrastructure.approval_requested', 'tool.digitalocean.delete_infrastructure.completed'],
+    },
+    executor: (input) => digitalOceanInfrastructureWriteTool(input, 'delete'),
   },
   {
     name: 'databank.status',

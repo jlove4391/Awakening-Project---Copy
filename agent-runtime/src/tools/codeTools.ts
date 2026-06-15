@@ -714,6 +714,15 @@ export async function codeReadJson(input: { path: string; maxBytes?: number }) {
   return { ...result, status: 'read', data: JSON.parse(result.content) };
 }
 
+export async function codeGitStatus() {
+  const root = await existingRootRealPath();
+  const [status, branch] = await Promise.all([
+    execFileAsync('git', ['-C', root, 'status', '--short'], { cwd: root }).then((result) => result.stdout).catch((error) => String(error.message)),
+    execFileAsync('git', ['-C', root, 'branch', '--show-current'], { cwd: root }).then((result) => result.stdout.trim()).catch(() => null),
+  ]);
+  return { ok: true, workspaceRoot: root, branch, gitStatus: status };
+}
+
 export async function codeDiff(input: { path?: string }) {
   const root = await existingRootRealPath();
   const args = ['-C', root, 'diff', '--'];
@@ -723,6 +732,44 @@ export async function codeDiff(input: { path?: string }) {
   }
   const { stdout } = await execFileAsync('git', args, { cwd: root, maxBuffer: 1_000_000 });
   return { ok: true, workspaceRoot: root, diff: stdout, truncated: stdout.length >= 1_000_000 };
+}
+
+export const codeGitDiff = codeDiff;
+
+export async function codeGitLog(input: { maxCount?: number; path?: string } = {}) {
+  const root = await existingRootRealPath();
+  const maxCount = Math.min(Math.max(Math.trunc(input.maxCount ?? 20), 1), 100);
+  const args = ['-C', root, 'log', `--max-count=${maxCount}`, '--date=iso-strict', '--pretty=format:%H%x09%h%x09%an%x09%ad%x09%s'];
+  if (input.path) {
+    const resolved = await resolveExistingWorkspacePath(input.path).catch(async () => resolveWritableWorkspacePath(input.path!));
+    args.push('--', resolved.relativePath);
+  }
+  const { stdout } = await execFileAsync('git', args, { cwd: root, maxBuffer: 1_000_000 });
+  const commits = stdout.split('\n').filter(Boolean).map((line) => {
+    const [hash, shortHash, author, date, ...subjectParts] = line.split('\t');
+    return { hash, shortHash, author, date, subject: subjectParts.join('\t') };
+  });
+  return { ok: true, workspaceRoot: root, commits, log: stdout, truncated: stdout.length >= 1_000_000 };
+}
+
+export async function codeGitRestoreFile(input: { path: string } & ApprovalGateInput) {
+  if (!isApprovalConfirmed(input)) return approvalRequired('code.git_restore_file');
+  const root = await existingRootRealPath();
+  const resolved = await resolveExistingWorkspacePath(input.path).catch(async () => resolveWritableWorkspacePath(input.path));
+  await execFileAsync('git', ['-C', root, 'restore', '--', resolved.relativePath], { cwd: root });
+  return { ok: true, workspaceRoot: root, path: resolved.relativePath, status: 'restored' };
+}
+
+export async function codeGitCreateBranch(input: { branch: string; startPoint?: string; checkout?: boolean } & ApprovalGateInput) {
+  if (!isApprovalConfirmed(input)) return approvalRequired('code.git_create_branch');
+  const root = await existingRootRealPath();
+  const branch = input.branch?.trim();
+  if (!branch) throw new Error('branch is required');
+  const args = ['-C', root, input.checkout === false ? 'branch' : 'switch', input.checkout === false ? branch : '-c'];
+  if (input.checkout !== false) args.push(branch);
+  if (input.startPoint?.trim()) args.push(input.startPoint.trim());
+  const { stdout, stderr } = await execFileAsync('git', args, { cwd: root, maxBuffer: 1_000_000 });
+  return { ok: true, workspaceRoot: root, branch, checkedOut: input.checkout !== false, stdout, stderr };
 }
 
 export async function codeRunCommand(input: RunCommandInput) {
@@ -755,11 +802,4 @@ export async function vscodeOpen(input: { path: string; line?: number; column?: 
   return { ok: true, workspaceRoot: root, path: relativePath, uri: `vscode://file/${target}:${line}:${column}` };
 }
 
-export async function vscodeStatus() {
-  const root = await existingRootRealPath();
-  const [status, branch] = await Promise.all([
-    execFileAsync('git', ['-C', root, 'status', '--short'], { cwd: root }).then((result) => result.stdout).catch((error) => String(error.message)),
-    execFileAsync('git', ['-C', root, 'branch', '--show-current'], { cwd: root }).then((result) => result.stdout.trim()).catch(() => null),
-  ]);
-  return { ok: true, workspaceRoot: root, branch, gitStatus: status };
-}
+export const vscodeStatus = codeGitStatus;

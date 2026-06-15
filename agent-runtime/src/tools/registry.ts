@@ -331,6 +331,7 @@ function databankProviderStatus() {
   return {
     ok: true,
     provider: 'databank',
+    status: tokenPresent ? 'configured' : 'provider_not_configured',
     configured: tokenPresent,
     tokenPresent,
     authSource: tokenPresent ? 'env' : 'missing',
@@ -344,6 +345,7 @@ async function digitalOceanStatus() {
   return {
     ok: true,
     ...status,
+    status: status.tokenPresent ? 'configured' : 'provider_not_configured',
     authSource: status.tokenPresent ? 'env' : 'missing',
     envVariables: ['DIGITALOCEAN_API_TOKEN', 'DO_API_TOKEN'],
   };

@@ -94,6 +94,7 @@ import {
   resumeDelegationTask,
   updateDelegationTask,
 } from './delegation.js';
+import { executeDelegatedCode } from '../workers/nexora/bridge.js';
 
 export type ToolCategory =
   | 'calendar'
@@ -3278,9 +3279,9 @@ export const toolRegistry: RegisteredToolDefinition[] = [
   },
   {
     name: 'delegation.execute_code',
-    description: 'Reserve a reviewed code-execution task for a dedicated worker bridge; this does not execute code until an approved adapter is configured.',
-    inputSchema: objectSchema({ taskId: stringSchema('Delegation task ID.'), command: stringSchema('Command or script to execute.'), workingDirectory: stringSchema('Working directory.') }, ['taskId', 'command']),
-    parameters: z.object({ taskId: z.string().min(1), command: z.string().min(1), workingDirectory: z.string().default('.') }),
+    description: 'Execute one approved Nexora execution-plan command through the local worker bridge after task approval, step approval, workspace-root, and command policy checks.',
+    inputSchema: objectSchema({ taskId: stringSchema('Delegation task ID.'), stepId: stringSchema('Approved execution-plan step ID.'), command: stringSchema('Allowlisted command to execute.'), workingDirectory: stringSchema('Workspace-relative working directory.'), timeoutMs: numberSchema('Timeout in milliseconds.', { minimum: 1000, maximum: 600000 }), maxOutputBytes: numberSchema('Maximum captured output bytes.', { minimum: 1024, maximum: 2000000 }), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema }, ['taskId', 'command', 'confirmedByUser']),
+    parameters: z.object({ taskId: z.string().min(1), stepId: z.string().optional(), command: z.string().min(1), workingDirectory: z.string().default('.'), timeoutMs: z.number().int().min(1000).max(600000).optional(), maxOutputBytes: z.number().int().min(1024).max(2000000).optional(), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
     scopes: ['runtime.delegation.execute'],
     riskLevel: 'code_execution',
     humanApprovalRequired: true,
@@ -3292,7 +3293,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       sensitiveFields: ['command', 'workingDirectory'],
       logEvents: ['tool.delegation.execute_code.approval_requested', 'tool.delegation.execute_code.completed'],
     },
-    executor: unavailableProvider('delegation', 'worker-bridge'),
+    executor: executeDelegatedCode,
   },
 ];
 

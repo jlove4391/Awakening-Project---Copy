@@ -10,6 +10,7 @@ import {
 } from '../../tasks/store.js';
 import type { DelegatedTask, DelegatedTaskResult } from '../../tasks/types.js';
 import {
+  codeCommit,
   codeCreateFile,
   codeDiff,
   codeEdit,
@@ -70,6 +71,8 @@ export interface NexoraPlanApplyVerifyInput {
     requested?: boolean;
     message?: string;
     approval?: ApprovalGateInput;
+    allowFailedChecksOverride?: boolean;
+    failedChecksApproval?: ApprovalGateInput;
   };
 }
 
@@ -102,8 +105,10 @@ export interface NexoraPlanApplyVerifyResult {
   };
   commit: {
     requested: boolean;
-    status: 'not_requested' | 'approval_required' | 'not_run';
+    status: 'not_requested' | 'approval_required' | 'blocked_failed_checks' | 'committed' | 'not_run';
     message?: string;
+    approvalRequest?: NexoraCommitApprovalRequest;
+    result?: unknown;
   };
 }
 
@@ -115,6 +120,16 @@ export interface NexoraDiffSummary {
   preview: string;
 }
 
+export interface NexoraCommitApprovalRequest {
+  tool: 'code.commit';
+  message?: string;
+  changedFiles: string[];
+  diffSummary: Pick<NexoraDiffSummary, 'addedLines' | 'removedLines' | 'truncated' | 'preview'>;
+  checksRun: unknown[];
+  failedChecks: unknown[];
+  requiresFailedChecksOverride: boolean;
+}
+
 const readOnlyInspectionLimit = 12;
 
 function now() {
@@ -123,6 +138,23 @@ function now() {
 
 function approvalConfirmed(input?: ApprovalGateInput) {
   return input?.confirmedByUser === true;
+}
+
+function buildCommitApprovalRequest(input: NexoraPlanApplyVerifyInput, diffSummary: NexoraDiffSummary, checksRun: unknown[], failedChecks: unknown[]): NexoraCommitApprovalRequest {
+  return {
+    tool: 'code.commit',
+    ...(input.commit?.message ? { message: input.commit.message } : {}),
+    changedFiles: diffSummary.changedFiles,
+    diffSummary: {
+      addedLines: diffSummary.addedLines,
+      removedLines: diffSummary.removedLines,
+      truncated: diffSummary.truncated,
+      preview: diffSummary.preview,
+    },
+    checksRun,
+    failedChecks,
+    requiresFailedChecksOverride: failedChecks.length > 0,
+  };
 }
 
 function taskObjective(task: DelegatedTask | undefined, input: NexoraPlanApplyVerifyInput) {
@@ -264,7 +296,7 @@ export async function planApplyVerify(input: NexoraPlanApplyVerifyInput): Promis
       planStep(3, 'verify', 'Run approved repo-local checks.', 'code.test', true, needsCheckApproval ? 'pending_approval' : checks.length ? 'ready' : 'skipped', { checks }),
       planStep(4, 'summarize', 'Produce a git diff summary.', 'code.diff', false, 'ready'),
       planStep(5, 'record', 'Record task result and receipt.', task ? 'delegation.complete_task' : 'executions.write_record', false, 'ready'),
-      planStep(6, 'commit', 'Optional git commit remains separate and approval-gated.', 'code.commit', true, input.commit?.requested ? 'pending_approval' : 'skipped', { message: input.commit?.message }),
+      planStep(6, 'commit', 'Optional git commit remains separate and approval-gated by explicit code.commit approval.', 'code.commit', true, input.commit?.requested ? 'pending_approval' : 'skipped', { message: input.commit?.message }),
     ];
 
     if (needsWriteApproval || needsCheckApproval) {
@@ -316,18 +348,38 @@ export async function planApplyVerify(input: NexoraPlanApplyVerifyInput): Promis
     });
     const ok = failedChecks.length === 0;
 
+    const commitRequested = input.commit?.requested === true;
+    const commitApprovalRequest = commitRequested ? buildCommitApprovalRequest(input, diffSummary, checkResults, failedChecks) : undefined;
+    const failedChecksOverrideApproved = input.commit?.allowFailedChecksOverride === true && approvalConfirmed(input.commit.failedChecksApproval);
+    const commitApprovalConfirmed = approvalConfirmed(input.commit?.approval);
+    const commitBlockedByFailedChecks = commitRequested && failedChecks.length > 0 && !failedChecksOverrideApproved;
+    let commitResult: unknown;
+    let commitStatus: NexoraPlanApplyVerifyResult['commit']['status'] = commitRequested ? 'approval_required' : 'not_requested';
+
+    if (commitRequested && commitApprovalConfirmed && !commitBlockedByFailedChecks) {
+      commitResult = await codeCommit({
+        message: input.commit?.message || `Nexora task: ${objective}`,
+        paths: diffSummary.changedFiles.length ? diffSummary.changedFiles : ['.'],
+        confirmedByUser: true,
+        approvalNote: input.commit?.approval?.approvalNote,
+      });
+      commitStatus = 'committed';
+    } else if (commitBlockedByFailedChecks) {
+      commitStatus = 'blocked_failed_checks';
+    }
+
     const taskResult: DelegatedTaskResult = {
       ok,
       summary: ok
-        ? `Nexora applied ${appliedChanges.length} repo-local change(s) and ran ${checkResults.length} check(s).`
-        : `Nexora applied changes, but ${failedChecks.length} check(s) failed.`,
+        ? `Nexora applied ${appliedChanges.length} repo-local change(s) and ran ${checkResults.length} check(s). Uncommitted changes may remain until code.commit is explicitly approved.`
+        : `Nexora applied changes, but ${failedChecks.length} check(s) failed. Commit is blocked unless a high-risk failed-check override is explicitly approved.`,
       data: {
         workflow: 'nexora.planApplyVerify',
         objective,
         appliedChanges,
         checks: checkResults,
         diffSummary,
-        commit: { requested: input.commit?.requested === true, status: input.commit?.requested ? 'approval_required' : 'not_requested' },
+        commit: { requested: commitRequested, status: commitStatus, approvalRequest: commitApprovalRequest, result: commitResult },
       },
     };
     const updatedTask = task ? await recordDelegatedTaskResult(task, taskResult) : undefined;
@@ -349,9 +401,11 @@ export async function planApplyVerify(input: NexoraPlanApplyVerifyInput): Promis
         ...(updatedTask?.receipt?.id ? { delegatedTaskReceiptId: updatedTask.receipt.id } : {}),
       },
       commit: {
-        requested: input.commit?.requested === true,
-        status: input.commit?.requested ? 'approval_required' : 'not_requested',
+        requested: commitRequested,
+        status: commitStatus,
         ...(input.commit?.message ? { message: input.commit.message } : {}),
+        ...(commitApprovalRequest ? { approvalRequest: commitApprovalRequest } : {}),
+        ...(commitResult !== undefined ? { result: commitResult } : {}),
       },
     };
 

@@ -37,6 +37,7 @@
     "smoke:outreach-draft": "npm --workspace @awakening/agent-runtime run smoke:outreach-draft",
     "smoke:proposal-package": "npm --workspace @awakening/agent-runtime run smoke:proposal-package",
     "smoke:objection-report": "npm --workspace @awakening/agent-runtime run smoke:objection-report",
-    "smoke:closing-kickoff": "npm --workspace @awakening/agent-runtime run smoke:closing-kickoff"
+    "smoke:closing-kickoff": "npm --workspace @awakening/agent-runtime run smoke:closing-kickoff",
+    "smoke:nexora-commit-approval": "npm --workspace @awakening/agent-runtime run smoke:nexora-commit-approval"
   }
 }

@@ -1,6 +1,6 @@
 import { executeRegisteredTool, getRegisteredTool, toolRegistry, type RegisteredToolDefinition } from '../tools/registry.js';
 import type { RuntimeContext } from '../types.js';
-import { appendExecutionPlanStep, updateDelegatedTask, updateExecutionPlanStep } from './store.js';
+import { appendExecutionPlanStep, cancelDelegatedTask, getDelegatedTask, updateDelegatedTask, updateExecutionPlanStep } from './store.js';
 import type { DelegatedTask } from './types.js';
 import type { DelegatedTaskHandler } from './queue.js';
 
@@ -273,6 +273,28 @@ function createTaskRuntimeContext(task: DelegatedTask): RuntimeContext {
   };
 }
 
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number | undefined, message: string): Promise<T> {
+  if (!timeoutMs) return promise;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs).unref();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function isTaskCancelled(taskId: string) {
+  return (await getDelegatedTask(taskId))?.status === 'cancelled';
+}
+
 export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
   if (task.assignedAgent !== 'nexora') return false;
 
@@ -284,7 +306,13 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
     const context = createTaskRuntimeContext(task);
     const executedSteps: Array<{ stepId: string; tool: string; input: Record<string, unknown>; result: unknown }> = [];
 
+    const taskDeadline = task.timeoutMs ? Date.now() + task.timeoutMs : undefined;
     for (const step of [...task.executionPlan].sort((left, right) => left.order - right.order)) {
+      if (await isTaskCancelled(task.id)) return true;
+      if (taskDeadline && Date.now() > taskDeadline) {
+        await cancelDelegatedTask(task.id, 'system', `Task timed out after ${task.timeoutMs}ms.`);
+        return true;
+      }
       if (['completed', 'skipped', 'cancelled'].includes(step.status)) continue;
       const highRisk = isStepHighRisk(step.targetTool);
       if (highRisk && step.approvalStatus !== 'approved') {
@@ -299,7 +327,14 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
       }
       await updateExecutionPlanStep(task.id, step.id, { status: 'running' });
       try {
-        const result = await executeRegisteredTool(step.targetTool, input, context);
+        const remainingTaskMs = taskDeadline ? Math.max(1, taskDeadline - Date.now()) : undefined;
+        const stepTimeoutMs = step.timeoutMs ? Math.min(step.timeoutMs, remainingTaskMs || step.timeoutMs) : remainingTaskMs;
+        const result = await withTimeout(
+          executeRegisteredTool(step.targetTool, input, context),
+          stepTimeoutMs,
+          step.timeoutMs ? `Execution plan step ${step.id} timed out after ${step.timeoutMs}ms.` : `Task timed out after ${task.timeoutMs}ms.`,
+        );
+        if (await isTaskCancelled(task.id)) return true;
         executedSteps.push({ stepId: step.id, tool: step.targetTool, input, result });
         await updateExecutionPlanStep(task.id, step.id, { status: 'completed', resultSummary: `Executed ${step.targetTool}.` });
       } catch (error) {
@@ -337,6 +372,11 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
               details: { blockedReason, provider, providerName, missingConfigHint, nextManualAction, message },
             },
           });
+          return true;
+        }
+        if (message.includes('timed out')) {
+          await updateExecutionPlanStep(task.id, step.id, { status: 'cancelled', resultSummary: message });
+          await cancelDelegatedTask(task.id, 'system', message);
           return true;
         }
         throw error;

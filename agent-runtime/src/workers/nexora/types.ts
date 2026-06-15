@@ -31,7 +31,7 @@ export interface NexoraCommandLogChunk {
 
 export interface NexoraCommandResult {
   ok: boolean;
-  status: 'completed' | 'failed' | 'blocked' | 'timed_out';
+  status: 'completed' | 'failed' | 'blocked' | 'timed_out' | 'cancelled';
   taskId: string;
   command: string;
   cwd: string;

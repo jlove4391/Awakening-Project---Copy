@@ -18,6 +18,8 @@ export type DelegatedTaskEventType =
   | 'task.completed'
   | 'task.failed'
   | 'task.cancelled'
+  | 'task.cancellation_requested'
+  | 'task.timeout'
   | 'task.receipt_created';
 
 export type ApprovalRequirementStatus = 'not_required' | 'pending' | 'approved' | 'rejected';
@@ -102,6 +104,9 @@ export interface ExecutionPlanStep {
   approval?: ExecutionPlanStepApproval;
   status: ExecutionPlanStepStatus;
   resultSummary?: string;
+  timeoutMs?: number;
+  startedAt?: string;
+  finishedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -151,6 +156,7 @@ export interface DelegatedTask {
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
+  timeoutMs?: number;
   finishedAt?: string;
 }
 
@@ -162,6 +168,7 @@ export interface CreateDelegatedTaskInput {
   approvalRequirements?: Array<Partial<ApprovalRequirement> | string>;
   executionPlan?: AppendExecutionPlanStepInput[];
   initialLog?: string;
+  timeoutMs?: number;
 }
 
 
@@ -175,6 +182,7 @@ export interface AppendExecutionPlanStepInput {
   approval?: Partial<ExecutionPlanStepApproval>;
   status?: ExecutionPlanStepStatus;
   resultSummary?: string;
+  timeoutMs?: number;
 }
 
 export interface UpdateExecutionPlanStepInput {
@@ -186,6 +194,7 @@ export interface UpdateExecutionPlanStepInput {
   approval?: Partial<ExecutionPlanStepApproval>;
   status?: ExecutionPlanStepStatus;
   resultSummary?: string;
+  timeoutMs?: number;
 }
 
 export interface UpdateDelegatedTaskInput {

@@ -1,10 +1,16 @@
 import { spawn } from 'node:child_process';
-import { updateDelegatedTask } from '../../tasks/store.js';
+import { getDelegatedTask, updateDelegatedTask } from '../../tasks/store.js';
 import { evaluateNexoraCommandPolicy } from './sandboxPolicy.js';
 import type { NexoraCommandLogChunk, NexoraCommandResult, NexoraExecutionRequest } from './types.js';
 
 function now() {
   return new Date().toISOString();
+}
+
+const activeCommands = new Map<string, { kill: (reason: string) => void }>();
+
+export function cancelActiveNexoraCommand(taskId: string, reason = 'Task cancellation requested.') {
+  activeCommands.get(taskId)?.kill(reason);
 }
 
 function appendBounded(current: string, chunk: string, maxBytes: number) {
@@ -57,13 +63,21 @@ export async function executeLocalNexoraCommand(request: NexoraExecutionRequest)
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let cancelled = false;
+    let cancellationReason = '';
     const maxPerStream = Math.max(1_024, Math.floor((policy.maxOutputBytes || 200_000) / 2));
     const child = spawn(policy.executable!, policy.args || [], { cwd: policy.cwd, shell: false, env: process.env });
-    const timeout = setTimeout(() => {
-      timedOut = true;
+    const terminateChild = (reason: string, isTimeout = false) => {
+      if (isTimeout) timedOut = true;
+      else {
+        cancelled = true;
+        cancellationReason = reason;
+      }
       child.kill('SIGTERM');
       setTimeout(() => child.kill('SIGKILL'), 2_000).unref();
-    }, policy.timeoutMs).unref();
+    };
+    activeCommands.set(request.taskId, { kill: (reason) => terminateChild(reason) });
+    const timeout = setTimeout(() => terminateChild(`Command timed out after ${policy.timeoutMs}ms.`, true), policy.timeoutMs).unref();
 
     const recordChunk = (stream: 'stdout' | 'stderr', chunk: Buffer) => {
       const text = chunk.toString('utf8');
@@ -81,11 +95,34 @@ export async function executeLocalNexoraCommand(request: NexoraExecutionRequest)
     });
     child.on('close', async (exitCode, signal) => {
       clearTimeout(timeout);
+      activeCommands.delete(request.taskId);
       const finishedAt = now();
-      const ok = !timedOut && exitCode === 0;
+      const latestTask = await getDelegatedTask(request.taskId);
+      if (latestTask?.status === 'cancelled') {
+        const cancelledResult: NexoraCommandResult = {
+          ok: false,
+          status: 'cancelled',
+          taskId: request.taskId,
+          command,
+          cwd: policy.cwd!,
+          exitCode,
+          signal,
+          startedAt,
+          finishedAt,
+          durationMs: Date.now() - started,
+          stdout,
+          stderr,
+          logs,
+          policy,
+          error: { message: cancellationReason || 'Task was cancelled.' },
+        };
+        resolve(cancelledResult);
+        return;
+      }
+      const ok = !timedOut && !cancelled && exitCode === 0;
       const result: NexoraCommandResult = {
         ok,
-        status: timedOut ? 'timed_out' : ok ? 'completed' : 'failed',
+        status: cancelled ? 'cancelled' : timedOut ? 'timed_out' : ok ? 'completed' : 'failed',
         taskId: request.taskId,
         command,
         cwd: policy.cwd!,
@@ -98,7 +135,7 @@ export async function executeLocalNexoraCommand(request: NexoraExecutionRequest)
         stderr,
         logs,
         policy,
-        ...(!ok ? { error: { message: timedOut ? `Command timed out after ${policy.timeoutMs}ms.` : `Command exited with code ${exitCode}.` } } : {}),
+        ...(!ok ? { error: { message: cancelled ? cancellationReason || 'Task was cancelled.' : timedOut ? `Command timed out after ${policy.timeoutMs}ms.` : `Command exited with code ${exitCode}.` } } : {}),
       };
       await updateDelegatedTask(request.taskId, {
         status: ok ? 'completed' : 'failed',

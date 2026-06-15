@@ -1,5 +1,5 @@
 import { taskEvents } from './events.js';
-import { getDelegatedTask, listDelegatedTasks, resumeDelegatedTask, updateDelegatedTask } from './store.js';
+import { cancelDelegatedTask, getDelegatedTask, listDelegatedTasks, resumeDelegatedTask, updateDelegatedTask } from './store.js';
 import { nexoraToolExecutionWorker } from './nexoraWorker.js';
 import type { DelegatedTask } from './types.js';
 
@@ -84,6 +84,11 @@ class DurableTaskQueue {
     return [...this.pendingIds];
   }
 
+  async cancel(taskId: string, reason = 'Task cancellation requested.', actor: 'system' | 'user' = 'user') {
+    this.pendingIds = this.pendingIds.filter((id) => id !== taskId);
+    return cancelDelegatedTask(taskId, actor, reason);
+  }
+
   private async run() {
     if (this.active) return;
     this.active = true;
@@ -120,10 +125,12 @@ class DurableTaskQueue {
     });
 
     const latest = await getDelegatedTask(task.id);
-    if (!latest) return;
+    if (!latest || latest.status === 'cancelled') return;
 
     for (const handler of this.handlers) {
       const handled = await handler(latest);
+      const afterHandler = await getDelegatedTask(task.id);
+      if (afterHandler?.status === 'cancelled') return;
       if (handled !== false) return;
     }
 

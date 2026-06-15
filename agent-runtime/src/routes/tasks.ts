@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { durableTaskQueue } from '../tasks/queue.js';
+import { cancelActiveNexoraCommand } from '../workers/nexora/localWorker.js';
 import {
   approveExecutionPlanStep,
   createDelegatedTask,
@@ -95,6 +96,7 @@ tasksRouter.post('/', async (req, res, next) => {
       initialLog,
       notes,
       executionPlan,
+      timeoutMs,
     } = req.body || {};
     const taskObjective = String(objective || title || '').trim();
     if (!taskObjective) {
@@ -110,6 +112,7 @@ tasksRouter.post('/', async (req, res, next) => {
       approvalRequirements: approvalRequirementArray(approvalRequirements),
       initialLog: String(initialLog || notes || '').trim() || undefined,
       executionPlan: Array.isArray(executionPlan) ? executionPlan : undefined,
+      timeoutMs: Number.isFinite(Number(timeoutMs)) ? Number(timeoutMs) : undefined,
     });
 
     res.status(201).json(taskResponse(task));
@@ -131,6 +134,22 @@ tasksRouter.post('/:taskId/steps/:stepId/approve', async (req, res, next) => {
       return;
     }
     if (task.status === 'queued') durableTaskQueue.enqueue(task);
+    res.json(taskResponse(task));
+  } catch (error) {
+    next(error);
+  }
+});
+
+
+tasksRouter.post('/:taskId/cancel', async (req, res, next) => {
+  try {
+    const reason = String(req.body?.reason || 'Task cancellation requested.');
+    cancelActiveNexoraCommand(req.params.taskId, reason);
+    const task = await durableTaskQueue.cancel(req.params.taskId, reason, 'user');
+    if (!task) {
+      res.status(404).json({ error: 'task not found' });
+      return;
+    }
     res.json(taskResponse(task));
   } catch (error) {
     next(error);

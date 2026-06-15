@@ -2,12 +2,14 @@ import { durableTaskQueue } from '../tasks/queue.js';
 import {
   approveDelegatedTask,
   approveExecutionPlanStep,
+  cancelDelegatedTask,
   completeDelegatedTask,
   createDelegatedTask,
   getDelegatedTask,
   listDelegatedTasks,
   updateDelegatedTask,
 } from '../tasks/store.js';
+import { cancelActiveNexoraCommand } from '../workers/nexora/localWorker.js';
 import type { RuntimeContext } from '../types.js';
 
 export async function createDelegationTask(
@@ -18,6 +20,7 @@ export async function createDelegationTask(
     approvalRequirements?: string[];
     initialLog?: string;
     executionPlan?: any[];
+    timeoutMs?: number;
   },
   context: RuntimeContext,
 ) {
@@ -29,6 +32,7 @@ export async function createDelegationTask(
     approvalRequirements: input.approvalRequirements || [],
     initialLog: input.initialLog,
     executionPlan: input.executionPlan,
+    timeoutMs: input.timeoutMs,
   });
   if (task.status === 'queued') durableTaskQueue.enqueue(task);
   return task;
@@ -74,4 +78,10 @@ export async function approveDelegationStep(input: { taskId: string; stepId: str
   const task = await approveExecutionPlanStep(input.taskId, input.stepId, input.approver || 'user', input.note || '');
   if (task?.status === 'queued') durableTaskQueue.enqueueById(task.id);
   return task || { ok: false, status: 'not_found', taskId: input.taskId, stepId: input.stepId };
+}
+
+export async function cancelDelegationTask(input: { taskId: string; reason?: string }) {
+  cancelActiveNexoraCommand(input.taskId, input.reason || 'Task cancellation requested.');
+  const task = await durableTaskQueue.cancel(input.taskId, input.reason || 'Task cancellation requested.', 'user');
+  return task || { ok: false, status: 'not_found', taskId: input.taskId };
 }

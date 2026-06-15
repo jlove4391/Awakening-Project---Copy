@@ -99,6 +99,7 @@ function normalizeExecutionPlanStep(input: AppendExecutionPlanStepInput, order: 
     },
     status: input.status || 'queued',
     ...(input.resultSummary !== undefined ? { resultSummary: input.resultSummary } : {}),
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -255,6 +256,7 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       events: [],
       auditTrail: [],
       createdAt: now(),
+      ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
       updatedAt: now(),
     };
 
@@ -373,8 +375,13 @@ export async function updateExecutionPlanStep(taskId: string, stepId: string, in
       };
       step.approvalStatus = status;
     }
-    if (input.status !== undefined) step.status = input.status;
+    if (input.status !== undefined) {
+      step.status = input.status;
+      if (input.status === 'running' && !step.startedAt) step.startedAt = now();
+      if (['completed', 'failed', 'skipped', 'cancelled'].includes(input.status) && !step.finishedAt) step.finishedAt = now();
+    }
     if (input.resultSummary !== undefined) step.resultSummary = input.resultSummary;
+    if (input.timeoutMs !== undefined) step.timeoutMs = input.timeoutMs;
     step.updatedAt = now();
     sortExecutionPlan(task);
 
@@ -395,6 +402,8 @@ export async function updateDelegatedTask(taskId: string, input: UpdateDelegated
   return serializedWrite(async () => {
     const task = await getDelegatedTask(taskId);
     if (!task) return undefined;
+    if (terminalStatuses.has(task.status) && input.status && input.status !== task.status) return task;
+
     let event: DelegatedTaskEvent | undefined;
     const newEvents: DelegatedTaskEvent[] = [];
 
@@ -562,6 +571,47 @@ export async function resumeDelegatedTask(taskId: string, actor: TaskAuditEntry[
     await persistTasks();
     await appendAuditJsonl(event);
     taskEvents.emitTaskUpdated(task, event, getDelegatedTaskUiState(task));
+    return task;
+  });
+}
+
+export async function cancelDelegatedTask(taskId: string, actor: TaskAuditEntry['actor'] = 'user', reason = 'Task cancellation requested.') {
+  return serializedWrite(async () => {
+    const task = await getDelegatedTask(taskId);
+    if (!task) return undefined;
+    if (terminalStatuses.has(task.status)) return task;
+
+    const previousStatus = task.status;
+    const timestamp = now();
+    applyStatusTimestamps(task, 'cancelled');
+    task.blockedReason = undefined;
+    task.pendingToolAction = undefined;
+    task.result = {
+      ok: false,
+      summary: reason || 'Task was cancelled.',
+      data: { previousStatus },
+      error: { message: reason || 'Task was cancelled.' },
+    };
+    task.executionPlan = task.executionPlan?.map((step) =>
+      ['completed', 'failed', 'skipped', 'cancelled'].includes(step.status)
+        ? step
+        : { ...step, status: 'cancelled', resultSummary: reason || 'Task was cancelled.', finishedAt: timestamp, updatedAt: timestamp },
+    );
+
+    const requested = createAuditEntry(task.id, 'task.cancellation_requested', actor, reason || 'Task cancellation requested.', { previousStatus });
+    const cancelled = createAuditEntry(task.id, 'task.cancelled', 'system', `Task cancelled from ${previousStatus}.`, { previousStatus, reason });
+    task.events.push(requested, cancelled);
+    task.auditTrail.push(requested, cancelled);
+    task.receipt = createReceipt(task);
+    const receiptEvent = createAuditEntry(task.id, 'task.receipt_created', 'system', `Receipt ${task.receipt.id} created for cancelled task ${task.id}.`, { receiptId: task.receipt.id });
+    task.events.push(receiptEvent);
+    task.auditTrail.push(receiptEvent);
+    task.receipt.proof.auditTrail = task.auditTrail;
+    task.updatedAt = now();
+    await persistTasks();
+    await Promise.all([requested, cancelled, receiptEvent].map(appendAuditJsonl));
+    taskEvents.emitTaskUpdated(task, cancelled, getDelegatedTaskUiState(task));
+    taskEvents.emitTaskFinished(task, getDelegatedTaskUiState(task));
     return task;
   });
 }

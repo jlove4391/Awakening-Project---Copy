@@ -260,6 +260,21 @@ const digitalOceanListParameters = z.object({
   perPage: z.number().int().min(1).max(200).default(20),
 });
 
+
+const digitalOceanPlanAppSchema = objectSchema({
+  spec: { type: 'object', additionalProperties: true, description: 'Desired DigitalOcean App Platform spec to validate and plan. Common required fields are name, region, and at least one component such as services/static_sites/workers/jobs.' },
+}, ['spec']);
+const digitalOceanPlanAppParameters = z.object({
+  spec: z.record(z.string(), z.any()),
+});
+
+const digitalOceanPlanDatabaseSchema = objectSchema({
+  spec: { type: 'object', additionalProperties: true, description: 'Desired DigitalOcean managed database cluster spec to validate and plan. Required fields are name, engine, region, size, and num_nodes.' },
+}, ['spec']);
+const digitalOceanPlanDatabaseParameters = z.object({
+  spec: z.record(z.string(), z.any()),
+});
+
 const digitalOceanInfrastructureApprovalSchema = objectSchema({
   resourceName: stringSchema('DigitalOcean resource name targeted by the infrastructure change.'),
   region: stringSchema('DigitalOcean region slug for the targeted resource.'),
@@ -335,6 +350,129 @@ async function listDigitalOceanDatabasesTool(input: Record<string, unknown>) {
   }
 
   return listDigitalOceanDatabases({ page: input.page as number | undefined, perPage: input.perPage as number | undefined });
+}
+
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function arrayField(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function estimateDigitalOceanAppCost(spec: Record<string, unknown>) {
+  const components = [
+    ...arrayField(spec.services),
+    ...arrayField(spec.static_sites),
+    ...arrayField(spec.workers),
+    ...arrayField(spec.jobs),
+  ].map(asRecord);
+  const componentEstimates = components.map((component) => {
+    const instanceSizeSlug = compactString(component.instance_size_slug) || (arrayField(spec.static_sites).includes(component) ? 'static-site' : 'basic-xxs');
+    const instanceCount = typeof component.instance_count === 'number' ? component.instance_count : 1;
+    const monthlyBySlug: Record<string, number> = {
+      'static-site': 0,
+      'basic-xxs': 5,
+      'basic-xs': 10,
+      'basic-s': 20,
+      'basic-m': 40,
+      'professional-xs': 12,
+      'professional-s': 25,
+      'professional-m': 50,
+      'professional-1l': 100,
+    };
+    const unitMonthlyUsd = monthlyBySlug[instanceSizeSlug];
+    return {
+      name: compactString(component.name) || 'unnamed-component',
+      type: arrayField(spec.static_sites).includes(component) ? 'static_site' : 'component',
+      resourceClass: instanceSizeSlug,
+      instanceCount,
+      estimatedMonthlyUsd: typeof unitMonthlyUsd === 'number' ? unitMonthlyUsd * instanceCount : null,
+      estimateAvailable: typeof unitMonthlyUsd === 'number',
+    };
+  });
+  const knownTotal = componentEstimates.reduce((sum, item) => sum + (typeof item.estimatedMonthlyUsd === 'number' ? item.estimatedMonthlyUsd : 0), 0);
+  const hasUnavailable = componentEstimates.some((item) => !item.estimateAvailable);
+  return { currency: 'USD', estimatedMonthlyUsd: hasUnavailable ? null : knownTotal, components: componentEstimates, notes: ['Estimates are best-effort static resource-class estimates and exclude bandwidth, build minutes, add-ons, taxes, credits, and future DigitalOcean price changes.'] };
+}
+
+function estimateDigitalOceanDatabaseCost(spec: Record<string, unknown>) {
+  const size = compactString(spec.size);
+  const numNodes = typeof spec.num_nodes === 'number' ? spec.num_nodes : typeof spec.numNodes === 'number' ? spec.numNodes : 1;
+  const monthlyBySize: Record<string, number> = {
+    'db-s-1vcpu-1gb': 15,
+    'db-s-1vcpu-2gb': 30,
+    'db-s-2vcpu-4gb': 60,
+    'db-s-4vcpu-8gb': 120,
+    'db-s-6vcpu-16gb': 240,
+    'db-s-8vcpu-32gb': 480,
+  };
+  const unitMonthlyUsd = monthlyBySize[size];
+  return { currency: 'USD', resourceClass: size || null, numNodes, estimatedMonthlyUsd: typeof unitMonthlyUsd === 'number' ? unitMonthlyUsd * numNodes : null, estimateAvailable: typeof unitMonthlyUsd === 'number', notes: ['Estimates are best-effort static size estimates and exclude backups beyond included allocation, bandwidth, taxes, credits, and future DigitalOcean price changes.'] };
+}
+
+async function planDigitalOceanApp(input: Record<string, unknown>) {
+  const spec = asRecord(input.spec);
+  const components = [...arrayField(spec.services), ...arrayField(spec.static_sites), ...arrayField(spec.workers), ...arrayField(spec.jobs)];
+  const missing = [];
+  if (!compactString(spec.name)) missing.push('spec.name');
+  if (!compactString(spec.region)) missing.push('spec.region');
+  if (components.length === 0) missing.push('spec.services/static_sites/workers/jobs');
+  const valid = missing.length === 0;
+  return {
+    ok: valid,
+    provider: 'digitalocean',
+    action: 'plan_app',
+    mutates: false,
+    status: valid ? 'planned' : 'validation_failed',
+    validation: { valid, missingRequiredFields: missing },
+    plan: {
+      resourceType: 'app',
+      operation: 'plan_only',
+      desiredSpec: spec,
+      resourceName: compactString(spec.name) || null,
+      region: compactString(spec.region) || null,
+      costEstimate: estimateDigitalOceanAppCost(spec),
+      changes: ['Validate desired App Platform spec.', 'Estimate known component resource classes where a static estimate is available.', 'No DigitalOcean API create/update/delete request will be made.'],
+    },
+    risks: ['Creating or updating this app later may incur monthly/usage charges.', 'App deployments can expose services publicly, trigger builds, and consume runtime resources.', 'Environment variables, domains, databases, and component sizing should be reviewed before apply.'],
+    requiredApprovals: ['Explicit human approval is required before any create/update/apply operation.', 'Approval should include reviewed spec, target region, resource classes, and estimated cost or unavailable-cost acknowledgement.'],
+  };
+}
+
+async function planDigitalOceanDatabase(input: Record<string, unknown>) {
+  const spec = asRecord(input.spec);
+  const numNodes = typeof spec.num_nodes === 'number' ? spec.num_nodes : typeof spec.numNodes === 'number' ? spec.numNodes : undefined;
+  const missing = [];
+  if (!compactString(spec.name)) missing.push('spec.name');
+  if (!compactString(spec.engine)) missing.push('spec.engine');
+  if (!compactString(spec.region)) missing.push('spec.region');
+  if (!compactString(spec.size)) missing.push('spec.size');
+  if (typeof numNodes !== 'number') missing.push('spec.num_nodes');
+  const valid = missing.length === 0;
+  return {
+    ok: valid,
+    provider: 'digitalocean',
+    action: 'plan_database',
+    mutates: false,
+    status: valid ? 'planned' : 'validation_failed',
+    validation: { valid, missingRequiredFields: missing },
+    plan: {
+      resourceType: 'database',
+      operation: 'plan_only',
+      desiredSpec: spec,
+      resourceName: compactString(spec.name) || null,
+      engine: compactString(spec.engine) || null,
+      region: compactString(spec.region) || null,
+      size: compactString(spec.size) || null,
+      numNodes: numNodes ?? null,
+      costEstimate: estimateDigitalOceanDatabaseCost(spec),
+      changes: ['Validate desired managed database spec.', 'Estimate known database size class cost where a static estimate is available.', 'No DigitalOcean API create/update/delete request will be made.'],
+    },
+    risks: ['Creating or resizing this database later may incur monthly charges.', 'Database engine/version, region, node count, VPC access, backups, and maintenance windows should be reviewed before apply.', 'Incorrect sizing can affect performance, availability, and cost.'],
+    requiredApprovals: ['Explicit human approval is required before any create/update/apply operation.', 'Approval should include reviewed spec, target region, engine/version, node count, size, and estimated cost or unavailable-cost acknowledgement.'],
+  };
 }
 
 async function digitalOceanInfrastructureWriteTool(input: Record<string, unknown>, operation: 'create' | 'update' | 'delete') {
@@ -803,6 +941,40 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       logEvents: ['tool.digitalocean.list_databases.requested', 'tool.digitalocean.list_databases.completed'],
     },
     executor: listDigitalOceanDatabasesTool,
+  },
+  {
+    name: 'digitalocean.plan_app',
+    description: 'Validate and return a plan-only DigitalOcean App Platform app proposal from a desired spec. This never creates, updates, deletes, deploys, or calls an external create API.',
+    inputSchema: digitalOceanPlanAppSchema,
+    parameters: digitalOceanPlanAppParameters,
+    scopes: ['digitalocean.apps.plan'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'digitalocean',
+      action: 'plan_app',
+      resourceType: 'digitalocean_app_plan',
+      sensitiveFields: ['spec'],
+      logEvents: ['tool.digitalocean.plan_app.requested', 'tool.digitalocean.plan_app.completed'],
+    },
+    executor: planDigitalOceanApp,
+  },
+  {
+    name: 'digitalocean.plan_database',
+    description: 'Validate and return a plan-only DigitalOcean managed database proposal from a desired spec. This never creates, updates, deletes, resizes, or calls an external create API.',
+    inputSchema: digitalOceanPlanDatabaseSchema,
+    parameters: digitalOceanPlanDatabaseParameters,
+    scopes: ['digitalocean.databases.plan'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'digitalocean',
+      action: 'plan_database',
+      resourceType: 'digitalocean_database_plan',
+      sensitiveFields: ['spec'],
+      logEvents: ['tool.digitalocean.plan_database.requested', 'tool.digitalocean.plan_database.completed'],
+    },
+    executor: planDigitalOceanDatabase,
   },
   {
     name: 'digitalocean.create_infrastructure',

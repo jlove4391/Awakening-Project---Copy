@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { tool } from '@openai/agents';
 import { z } from 'zod';
 import { durableMemoryScopes, listMemories, remember, retrieveMemories, summarizeMemories } from '../memory/index.js';
@@ -6,11 +6,14 @@ import { writeToolAuditLog, sanitizeAuditInput } from '../audit/auditLogger.js';
 import {
   completeExecutionRecord,
   createExecutionRecord,
+  getExecutionRecord,
   summarizeProviderResponse,
   writeExecutionRecord,
 } from '../executions.js';
 import { createCalendarEvent, listCalendarEvents } from '../providers/google/calendar.js';
 import {
+  createDigitalOceanApp,
+  createDigitalOceanDatabase,
   digitalOceanProviderStatus,
   listDigitalOceanApps,
   listDigitalOceanDatabases,
@@ -275,6 +278,24 @@ const digitalOceanPlanDatabaseParameters = z.object({
   spec: z.record(z.string(), z.any()),
 });
 
+
+const digitalOceanCreatePlanSchema = objectSchema({
+  planId: stringSchema('Execution receipt ID from digitalocean.plan_app or digitalocean.plan_database. Required unless planPayload and planPayloadHash are provided.'),
+  planPayload: { type: 'object', additionalProperties: true, description: 'Exact plan payload reviewed for approval. Required when using planPayloadHash without a planId.' },
+  planPayloadHash: stringSchema('sha256 hash of the exact approved plan payload. Required when planPayload is supplied directly; optional with planId and verified if present.'),
+  confirmedByUser: approvalBooleanSchema,
+  approvalNote: stringSchema('Explicit approval note describing who approved this create operation and which plan/hash was approved.'),
+}, ['confirmedByUser', 'approvalNote']);
+const digitalOceanCreatePlanParameters = z.object({
+  planId: z.string().min(1).optional(),
+  planPayload: z.record(z.string(), z.any()).optional(),
+  planPayloadHash: z.string().min(1).optional(),
+  confirmedByUser: z.boolean(),
+  approvalNote: z.string().min(1),
+}).refine((value) => Boolean(value.planId || (value.planPayload && value.planPayloadHash)), {
+  message: 'Either planId or both planPayload and planPayloadHash are required.',
+});
+
 const digitalOceanInfrastructureApprovalSchema = objectSchema({
   resourceName: stringSchema('DigitalOcean resource name targeted by the infrastructure change.'),
   region: stringSchema('DigitalOcean region slug for the targeted resource.'),
@@ -472,6 +493,112 @@ async function planDigitalOceanDatabase(input: Record<string, unknown>) {
     },
     risks: ['Creating or resizing this database later may incur monthly charges.', 'Database engine/version, region, node count, VPC access, backups, and maintenance windows should be reviewed before apply.', 'Incorrect sizing can affect performance, availability, and cost.'],
     requiredApprovals: ['Explicit human approval is required before any create/update/apply operation.', 'Approval should include reviewed spec, target region, engine/version, node count, size, and estimated cost or unavailable-cost acknowledgement.'],
+  };
+}
+
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(',')}}`;
+}
+
+function sha256Payload(value: unknown) {
+  return createHash('sha256').update(stableJson(value)).digest('hex');
+}
+
+async function resolveDigitalOceanApprovedPlan(input: Record<string, unknown>, expectedType: 'app' | 'database') {
+  let planPayload = input.planPayload as Record<string, unknown> | undefined;
+  const planId = compactString(input.planId);
+  const suppliedHash = compactString(input.planPayloadHash);
+
+  if (planId) {
+    const planRecord = await getExecutionRecord(planId);
+    if (!planRecord) {
+      return { ok: false, status: 'plan_not_found', message: `DigitalOcean plan execution record was not found: ${planId}` };
+    }
+    const result = asRecord(planRecord.executionResult);
+    if (result.provider !== 'digitalocean' || result.status !== 'planned') {
+      return { ok: false, status: 'invalid_plan_record', message: 'Plan ID must reference a successful DigitalOcean dry-run plan execution receipt.' };
+    }
+    planPayload = asRecord(result.plan);
+  }
+
+  if (!planPayload || Object.keys(planPayload).length === 0) {
+    return { ok: false, status: 'plan_payload_required', message: 'A planId or exact planPayload is required before DigitalOcean create can run.' };
+  }
+
+  const actualHash = sha256Payload(planPayload);
+  if (suppliedHash && suppliedHash !== actualHash) {
+    return { ok: false, status: 'plan_payload_changed', message: 'The DigitalOcean plan payload hash does not match the approved hash; refusing to create resources.', suppliedHash, actualHash };
+  }
+  if (!planId && !suppliedHash) {
+    return { ok: false, status: 'plan_payload_hash_required', message: 'An exact planPayloadHash is required when no planId is supplied.' };
+  }
+
+  if (planPayload.resourceType !== expectedType) {
+    return { ok: false, status: 'wrong_plan_type', message: `Expected a DigitalOcean ${expectedType} plan, but received ${String(planPayload.resourceType || 'unknown')}.`, actualHash };
+  }
+
+  const desiredSpec = asRecord(planPayload.desiredSpec);
+  if (Object.keys(desiredSpec).length === 0) {
+    return { ok: false, status: 'missing_desired_spec', message: 'The approved plan payload does not include desiredSpec.', actualHash };
+  }
+
+  return { ok: true, planId: planId || null, planPayload, planPayloadHash: actualHash, desiredSpec };
+}
+
+function digitalOceanRollbackNotes(resourceType: 'app' | 'database', resourceId: string | null) {
+  return [
+    `No delete or destroy operation was performed by this tool.`,
+    resourceId
+      ? `If rollback is required, review the created ${resourceType} (${resourceId}) in DigitalOcean and use a separate approved rollback workflow; this task intentionally does not delete resources.`
+      : `If creation partially succeeded, inspect DigitalOcean before taking any rollback action; deletion/destruction is outside this tool's scope.`,
+  ];
+}
+
+async function createDigitalOceanAppTool(input: Record<string, unknown>) {
+  const status = digitalOceanProviderStatus();
+  if (!status.configured) {
+    return { ok: false, provider: 'digitalocean', status: 'not_configured', message: 'DigitalOcean API token is not configured. Set DIGITALOCEAN_API_TOKEN or DO_API_TOKEN to create apps.' };
+  }
+  const resolved = await resolveDigitalOceanApprovedPlan(input, 'app');
+  if (!resolved.ok) return { provider: 'digitalocean', ...resolved };
+  const desiredSpec = resolved.desiredSpec as Record<string, unknown>;
+  const providerResult = await createDigitalOceanApp(desiredSpec);
+  return {
+    ok: true,
+    provider: 'digitalocean',
+    action: 'create_app',
+    status: 'created',
+    planId: resolved.planId,
+    planPayloadHash: resolved.planPayloadHash,
+    resourceId: providerResult.resourceId,
+    providerResponseSummary: providerResult.responseSummary,
+    rollbackNotes: digitalOceanRollbackNotes('app', providerResult.resourceId),
+  };
+}
+
+async function createDigitalOceanDatabaseTool(input: Record<string, unknown>) {
+  const status = digitalOceanProviderStatus();
+  if (!status.configured) {
+    return { ok: false, provider: 'digitalocean', status: 'not_configured', message: 'DigitalOcean API token is not configured. Set DIGITALOCEAN_API_TOKEN or DO_API_TOKEN to create databases.' };
+  }
+  const resolved = await resolveDigitalOceanApprovedPlan(input, 'database');
+  if (!resolved.ok) return { provider: 'digitalocean', ...resolved };
+  const desiredSpec = resolved.desiredSpec as Record<string, unknown>;
+  const providerResult = await createDigitalOceanDatabase(desiredSpec);
+  return {
+    ok: true,
+    provider: 'digitalocean',
+    action: 'create_database',
+    status: 'created',
+    planId: resolved.planId,
+    planPayloadHash: resolved.planPayloadHash,
+    resourceId: providerResult.resourceId,
+    providerResponseSummary: providerResult.responseSummary,
+    rollbackNotes: digitalOceanRollbackNotes('database', providerResult.resourceId),
   };
 }
 
@@ -975,6 +1102,42 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       logEvents: ['tool.digitalocean.plan_database.requested', 'tool.digitalocean.plan_database.completed'],
     },
     executor: planDigitalOceanDatabase,
+  },
+  {
+    name: 'digitalocean.create_app',
+    description: 'Create a DigitalOcean App Platform app only after explicit approval of an unchanged dry-run plan payload or plan execution receipt. Writes an execution receipt with resource ID, provider response summary, and non-destructive rollback notes.',
+    inputSchema: digitalOceanCreatePlanSchema,
+    parameters: digitalOceanCreatePlanParameters,
+    scopes: ['digitalocean.apps.write'],
+    riskLevel: 'purchase_or_commit',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'digitalocean',
+      action: 'create_app',
+      resourceType: 'digitalocean_app',
+      resourceIdField: 'resourceId',
+      sensitiveFields: ['approvalNote', 'planPayload'],
+      logEvents: ['tool.digitalocean.create_app.approval_requested', 'tool.digitalocean.create_app.completed'],
+    },
+    executor: createDigitalOceanAppTool,
+  },
+  {
+    name: 'digitalocean.create_database',
+    description: 'Create a DigitalOcean managed database only after explicit approval of an unchanged dry-run plan payload or plan execution receipt. Writes an execution receipt with resource ID, provider response summary, and non-destructive rollback notes.',
+    inputSchema: digitalOceanCreatePlanSchema,
+    parameters: digitalOceanCreatePlanParameters,
+    scopes: ['digitalocean.databases.write'],
+    riskLevel: 'purchase_or_commit',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'digitalocean',
+      action: 'create_database',
+      resourceType: 'digitalocean_database',
+      resourceIdField: 'resourceId',
+      sensitiveFields: ['approvalNote', 'planPayload'],
+      logEvents: ['tool.digitalocean.create_database.approval_requested', 'tool.digitalocean.create_database.completed'],
+    },
+    executor: createDigitalOceanDatabaseTool,
   },
   {
     name: 'digitalocean.create_infrastructure',

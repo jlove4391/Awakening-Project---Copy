@@ -25,7 +25,8 @@
     "smoke:closing-kickoff": "tsx scripts/smoke-closing-kickoff.ts",
     "smoke:delegated-drive-create": "tsx scripts/smoke-delegated-drive-create.ts",
     "smoke:nexora-commit-approval": "tsx scripts/smoke-nexora-commit-approval.ts",
-    "smoke:delegated-file-create": "tsx scripts/smoke-delegated-file-create.ts"
+    "smoke:delegated-file-create": "tsx scripts/smoke-delegated-file-create.ts",
+    "smoke:delegated-resume": "tsx scripts/smoke-delegated-resume.ts"
   },
   "dependencies": {
     "@openai/agents": "latest",

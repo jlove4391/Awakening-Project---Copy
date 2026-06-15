@@ -39,6 +39,8 @@
     "smoke:objection-report": "npm --workspace @awakening/agent-runtime run smoke:objection-report",
     "smoke:closing-kickoff": "npm --workspace @awakening/agent-runtime run smoke:closing-kickoff",
     "smoke:nexora-commit-approval": "npm --workspace @awakening/agent-runtime run smoke:nexora-commit-approval",
-    "smoke:delegated-file-create": "npm --workspace @awakening/agent-runtime run smoke:delegated-file-create"
+    "smoke:delegated-file-create": "npm --workspace @awakening/agent-runtime run smoke:delegated-file-create",
+    "smoke:digitalocean-status": "npm --workspace @awakening/agent-runtime run smoke:digitalocean-status",
+    "smoke:databank-status": "npm --workspace @awakening/agent-runtime run smoke:databank-status"
   }
 }

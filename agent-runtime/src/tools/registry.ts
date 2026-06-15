@@ -10,6 +10,11 @@ import {
   writeExecutionRecord,
 } from '../executions.js';
 import { createCalendarEvent, listCalendarEvents } from '../providers/google/calendar.js';
+import {
+  digitalOceanProviderStatus,
+  listDigitalOceanApps,
+  listDigitalOceanDatabases,
+} from '../providers/digitalocean/index.js';
 import { appendActivity, lookupCrmContact, updateLeadStatus, upsertCrmContact } from '../providers/crm/index.js';
 import { enrichPersonWithClay } from '../providers/clay/index.js';
 import { exportSequence, findLeadsWorkflow } from '../workflows/leadgen/index.js';
@@ -93,6 +98,8 @@ export type ToolCategory =
   | 'sheets'
   | 'crm'
   | 'clay'
+  | 'digitalocean'
+  | 'databank'
   | 'leadgen'
   | 'campaign'
   | 'outreach'
@@ -242,6 +249,69 @@ const objectionRecordArrayJsonSchema = { type: 'array', description: 'Internal o
 const callInsightReportJsonSchema = { type: 'object', additionalProperties: true, description: 'Internal call insight report produced by objection.create_call_insight_report.' };
 const scaffoldFileArrayJsonSchema = { type: 'array', description: 'Files to create under appDir; each item can include content or json.', items: genericObjectJsonSchema };
 const scaffoldCommandArrayJsonSchema = { type: 'array', description: 'Optional approved install/build/test commands to run after scaffolding.', items: genericObjectJsonSchema };
+
+const digitalOceanListSchema = objectSchema({
+  page: numberSchema('DigitalOcean API page number.', { minimum: 1 }),
+  perPage: numberSchema('DigitalOcean API items per page.', { minimum: 1, maximum: 200 }),
+});
+const digitalOceanListParameters = z.object({
+  page: z.number().int().min(1).default(1),
+  perPage: z.number().int().min(1).max(200).default(20),
+});
+
+function databankProviderStatus() {
+  const tokenPresent = Boolean((process.env.DATABANK_API_TOKEN || process.env.DATABANK_TOKEN || '').trim());
+
+  return {
+    ok: true,
+    provider: 'databank',
+    configured: tokenPresent,
+    tokenPresent,
+    authSource: tokenPresent ? 'env' : 'missing',
+    envVariables: ['DATABANK_API_TOKEN', 'DATABANK_TOKEN'],
+  };
+}
+
+async function digitalOceanStatus() {
+  const status = digitalOceanProviderStatus();
+
+  return {
+    ok: true,
+    ...status,
+    authSource: status.tokenPresent ? 'env' : 'missing',
+    envVariables: ['DIGITALOCEAN_API_TOKEN', 'DO_API_TOKEN'],
+  };
+}
+
+async function listDigitalOceanAppsTool(input: Record<string, unknown>) {
+  const status = digitalOceanProviderStatus();
+  if (!status.configured) {
+    return {
+      ok: false,
+      provider: 'digitalocean',
+      configured: false,
+      apps: [],
+      message: 'DigitalOcean API token is not configured. Set DIGITALOCEAN_API_TOKEN or DO_API_TOKEN to enable app reads.',
+    };
+  }
+
+  return listDigitalOceanApps({ page: input.page as number | undefined, perPage: input.perPage as number | undefined });
+}
+
+async function listDigitalOceanDatabasesTool(input: Record<string, unknown>) {
+  const status = digitalOceanProviderStatus();
+  if (!status.configured) {
+    return {
+      ok: false,
+      provider: 'digitalocean',
+      configured: false,
+      databases: [],
+      message: 'DigitalOcean API token is not configured. Set DIGITALOCEAN_API_TOKEN or DO_API_TOKEN to enable database reads.',
+    };
+  }
+
+  return listDigitalOceanDatabases({ page: input.page as number | undefined, perPage: input.perPage as number | undefined });
+}
 
 async function draftOutreachEmail(input: Record<string, unknown>) {
   const lead = (input.lead && typeof input.lead === 'object' ? input.lead : {}) as Record<string, unknown>;
@@ -636,6 +706,72 @@ function createClientProject(input: Record<string, unknown>) {
 }
 
 export const toolRegistry: RegisteredToolDefinition[] = [
+  {
+    name: 'digitalocean.status',
+    description: 'Report whether the DigitalOcean provider is configured from environment variables without returning provider tokens.',
+    inputSchema: objectSchema({}),
+    parameters: z.object({}),
+    scopes: ['digitalocean.status.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'digitalocean',
+      action: 'status',
+      resourceType: 'digitalocean_provider_status',
+      logEvents: ['tool.digitalocean.status.requested', 'tool.digitalocean.status.completed'],
+    },
+    executor: digitalOceanStatus,
+  },
+  {
+    name: 'digitalocean.list_apps',
+    description: 'List DigitalOcean App Platform apps using a provider token sourced only from environment variables. Tokens are never returned.',
+    inputSchema: digitalOceanListSchema,
+    parameters: digitalOceanListParameters,
+    scopes: ['digitalocean.apps.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'digitalocean',
+      action: 'list_apps',
+      resourceType: 'digitalocean_app',
+      sensitiveFields: ['page', 'perPage'],
+      logEvents: ['tool.digitalocean.list_apps.requested', 'tool.digitalocean.list_apps.completed'],
+    },
+    executor: listDigitalOceanAppsTool,
+  },
+  {
+    name: 'digitalocean.list_databases',
+    description: 'List DigitalOcean managed databases using a provider token sourced only from environment variables. Tokens are never returned.',
+    inputSchema: digitalOceanListSchema,
+    parameters: digitalOceanListParameters,
+    scopes: ['digitalocean.databases.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'digitalocean',
+      action: 'list_databases',
+      resourceType: 'digitalocean_database',
+      sensitiveFields: ['page', 'perPage'],
+      logEvents: ['tool.digitalocean.list_databases.requested', 'tool.digitalocean.list_databases.completed'],
+    },
+    executor: listDigitalOceanDatabasesTool,
+  },
+  {
+    name: 'databank.status',
+    description: 'Report whether the Databank provider is configured from environment variables without returning provider tokens.',
+    inputSchema: objectSchema({}),
+    parameters: z.object({}),
+    scopes: ['databank.status.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'databank',
+      action: 'status',
+      resourceType: 'databank_provider_status',
+      logEvents: ['tool.databank.status.requested', 'tool.databank.status.completed'],
+    },
+    executor: async () => databankProviderStatus(),
+  },
   {
     name: 'calendar.list_events',
     description: 'List calendar events for a time range using the configured calendar provider adapter.',

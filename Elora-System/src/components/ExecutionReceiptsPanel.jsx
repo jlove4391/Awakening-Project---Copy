@@ -21,6 +21,121 @@ const formatDateTime = (value) => {
 const riskClass = (riskLevel) =>
   `execution-risk execution-risk-${String(riskLevel || "unknown").replace(/_/g, "-")}`;
 
+const humanizeStatus = (value) =>
+  String(value || "unknown")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const taskApprovalStatus = (task) => {
+  if (task.uiState?.approvalStatus) return task.uiState.approvalStatus;
+  const requirements = task.approvalRequirements || [];
+  if (requirements.some((item) => item.status === "rejected")) return "rejected";
+  if (requirements.some((item) => item.status === "pending" || !item.status)) return "pending";
+  return requirements.length ? "approved" : "not_required";
+};
+
+const latestApprovedRequirement = (task) =>
+  [...(task.approvalRequirements || [])]
+    .filter((item) => item.status === "approved")
+    .sort((a, b) => String(b.approvedAt || "").localeCompare(String(a.approvedAt || "")))[0];
+
+const taskWorkerStateCopy = (task) => {
+  const status = task.uiState?.status || task.status;
+  const currentStep = task.uiState?.currentWorkerStep;
+  const receiptSummary = task.receipt?.summary || task.result?.summary;
+  const errorSummary = task.result?.error?.message || task.result?.summary;
+
+  switch (status) {
+    case "pending_approval":
+      return {
+        primary: "Waiting for task approval.",
+        secondary: "Nexora has not started this delegated task yet.",
+      };
+    case "queued":
+      return {
+        primary: "Queued for Nexora.",
+        secondary: "This task is saved and will start automatically.",
+      };
+    case "running":
+      return {
+        primary: "Nexora is working on this task.",
+        secondary: currentStep?.targetTool
+          ? `Current step: ${currentStep.targetTool}.`
+          : "Worker progress is active.",
+      };
+    case "blocked": {
+      const reason = task.uiState?.blockedReason || task.blockedReason || "unknown";
+      const pendingTool = task.pendingToolAction || task.uiState?.missingApproval;
+      const missingConfig = task.uiState?.missingConfiguration;
+      if (reason === "provider_configuration_required") {
+        return {
+          primary: `${missingConfig?.providerName || missingConfig?.provider || "Provider"} needs setup before Nexora can continue.`,
+          secondary: missingConfig?.message || missingConfig?.missingConfigHint || "Provider configuration is required.",
+          nextAction: missingConfig?.nextManualAction || "Connect the provider, then resume the task.",
+          reason: humanizeStatus(reason),
+        };
+      }
+      if (reason === "step_approval_required") {
+        const toolName = pendingTool?.toolName || currentStep?.targetTool || "the next tool action";
+        return {
+          primary: "Approval needed before Nexora can continue.",
+          secondary: `Review ${toolName} before approving this worker step.`,
+          nextAction: "Approve the blocked step only if the action is expected.",
+          reason: humanizeStatus(reason),
+        };
+      }
+      if (reason === "worker_unavailable") {
+        return {
+          primary: "Task saved. Nexora worker is not available yet.",
+          secondary: "No configured worker accepted this task.",
+          nextAction: "Resume when worker support is available.",
+          reason: humanizeStatus(reason),
+        };
+      }
+      if (reason === "policy_block") {
+        return {
+          primary: "Nexora cannot perform this action under the current policy.",
+          secondary: "Review the blocked tool and policy reason.",
+          nextAction: "Change the request or policy before retrying.",
+          reason: humanizeStatus(reason),
+        };
+      }
+      return {
+        primary: "Nexora is blocked.",
+        secondary: "Review the latest task event for details.",
+        nextAction: "Resolve the blocker, then resume the task.",
+        reason: humanizeStatus(reason),
+      };
+    }
+    case "completed":
+      return {
+        primary: "Task completed.",
+        secondary: receiptSummary || "Receipt summary pending.",
+      };
+    case "failed":
+      return {
+        primary: "Task failed.",
+        secondary: errorSummary || "Failure receipt pending.",
+      };
+    default:
+      return {
+        primary: "Task cancelled.",
+        secondary: receiptSummary || "Cancellation receipt pending.",
+      };
+  }
+};
+
+const executionSummary = (execution) => {
+  if (execution.action === "delegation.approve_task") {
+    return "Approval recorded";
+  }
+  return (
+    execution.receipt?.summary ||
+    execution.providerResponseSummary ||
+    "Receipt pending"
+  );
+};
+
 const ExecutionReceiptsPanel = ({
   sessionId,
   limit = 12,
@@ -110,60 +225,86 @@ const ExecutionReceiptsPanel = ({
       )}
 
       <div className="execution-record-list">
-        {delegatedTasks.map((task) => (
-          <article
-            className="execution-record-card delegated-task-card"
-            key={`${task.id}-${task.updatedAt}`}
-          >
-            <div className="execution-record-topline">
-              <strong>{task.objective}</strong>
-              <span className={`execution-risk task-status-${task.status}`}>
-                {task.status}
-              </span>
-            </div>
+        {delegatedTasks.map((task) => {
+          const workerCopy = taskWorkerStateCopy(task);
+          const approval = latestApprovedRequirement(task);
+          const approvalState = taskApprovalStatus(task);
 
-            <div className="execution-record-meta">
-              <span>{task.parentAgent} → {task.assignedAgent}</span>
-              <span>events: {task.auditTrail?.length || 0}</span>
-              <span>tools: {task.requiredTools?.join(", ") || "none"}</span>
-            </div>
+          return (
+            <article
+              className="execution-record-card delegated-task-card"
+              key={`${task.id}-${task.updatedAt}`}
+            >
+              <div className="execution-record-topline">
+                <strong>{task.objective}</strong>
+                <span className={`execution-risk task-status-${task.status}`}>
+                  Worker: {humanizeStatus(task.uiState?.status || task.status)}
+                </span>
+              </div>
 
-            <p className="execution-receipt-summary">
-              {task.receipt?.summary || task.result?.summary || "Task receipt pending"}
-            </p>
+              <div className="execution-record-meta">
+                <span>{task.parentAgent} → {task.assignedAgent}</span>
+                <span>events: {task.auditTrail?.length || 0}</span>
+                <span>tools: {task.requiredTools?.join(", ") || "none"}</span>
+              </div>
 
-            <dl className="execution-detail-grid">
-              <div>
-                <dt>Session</dt>
-                <dd>{task.sessionId || "—"}</dd>
-              </div>
-              <div>
-                <dt>Approvals</dt>
-                <dd>
-                  {task.approvalRequirements?.length
-                    ? task.approvalRequirements
-                        .map((item) => item.status || "pending")
-                        .join(", ")
-                    : "not required"}
-                </dd>
-              </div>
-              <div>
-                <dt>Receipt</dt>
-                <dd>{task.receipt?.id || "—"}</dd>
-              </div>
-              <div>
-                <dt>Updated</dt>
-                <dd>{formatDateTime(task.updatedAt || task.createdAt)}</dd>
-              </div>
-            </dl>
+              {approvalState === "approved" && (
+                <p className="execution-approval-summary">
+                  Approval recorded{approval?.approver ? ` by ${approval.approver}` : ""}
+                  {approval?.approvedAt ? ` at ${formatDateTime(approval.approvedAt)}` : ""}.
+                </p>
+              )}
 
-            {task.constraints?.length > 0 && (
-              <p className="execution-provider-summary">
-                Constraints: {task.constraints.join("; ")}
-              </p>
-            )}
-          </article>
-        ))}
+              <div className="worker-state-panel">
+                <p className="execution-receipt-summary">{workerCopy.primary}</p>
+                <p className="execution-provider-summary">{workerCopy.secondary}</p>
+                {task.status === "blocked" && (
+                  <dl className="execution-blocked-detail">
+                    <div>
+                      <dt>Blocked reason</dt>
+                      <dd>{workerCopy.reason || humanizeStatus(task.blockedReason)}</dd>
+                    </div>
+                    <div>
+                      <dt>Next action</dt>
+                      <dd>{workerCopy.nextAction || "Resolve the blocker, then resume the task."}</dd>
+                    </div>
+                  </dl>
+                )}
+              </div>
+
+              {task.status === "completed" && (
+                <p className="execution-receipt-summary">
+                  Receipt: {task.receipt?.summary || task.result?.summary || "Receipt summary pending"}
+                </p>
+              )}
+
+              <dl className="execution-detail-grid">
+                <div>
+                  <dt>Session</dt>
+                  <dd>{task.sessionId || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Approvals</dt>
+                  <dd>{humanizeStatus(approvalState)}</dd>
+                </div>
+                <div>
+                  <dt>Receipt</dt>
+                  <dd>{task.receipt?.id || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Updated</dt>
+                  <dd>{formatDateTime(task.updatedAt || task.createdAt)}</dd>
+                </div>
+              </dl>
+
+              {task.constraints?.length > 0 && (
+                <p className="execution-provider-summary">
+                  Constraints: {task.constraints.join("; ")}
+                </p>
+              )}
+            </article>
+          );
+        })}
 
         {executions.length === 0 && delegatedTasks.length === 0 && !error ? (
           <div className="execution-empty-state">
@@ -189,9 +330,7 @@ const ExecutionReceiptsPanel = ({
               </div>
 
               <p className="execution-receipt-summary">
-                {execution.receipt?.summary ||
-                  execution.providerResponseSummary ||
-                  "Receipt pending"}
+                {executionSummary(execution)}
               </p>
 
               <dl className="execution-detail-grid">
@@ -218,11 +357,12 @@ const ExecutionReceiptsPanel = ({
                 </div>
               </dl>
 
-              {execution.providerResponseSummary && (
-                <p className="execution-provider-summary">
-                  Provider: {execution.providerResponseSummary}
-                </p>
-              )}
+              {execution.providerResponseSummary &&
+                execution.action !== "delegation.approve_task" && (
+                  <p className="execution-provider-summary">
+                    Provider: {execution.providerResponseSummary}
+                  </p>
+                )}
 
               {execution.errors?.length > 0 && (
                 <p className="execution-error-summary">

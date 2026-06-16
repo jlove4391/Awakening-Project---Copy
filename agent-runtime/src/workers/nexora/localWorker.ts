@@ -85,7 +85,7 @@ export async function executeLocalNexoraCommand(request: NexoraExecutionRequest)
       else stderr = appendBounded(stderr, text, maxPerStream);
       const log = { stream, text: text.slice(0, 4_000), at: now() } satisfies NexoraCommandLogChunk;
       logs.push(log);
-      void updateDelegatedTask(request.taskId, { log: `[${stream}] ${log.text}` });
+      void updateDelegatedTask(request.taskId, { commandOutputChunk: { stream, text, command, stepId: request.stepId } });
     };
 
     child.stdout.on('data', (chunk: Buffer) => recordChunk('stdout', chunk));

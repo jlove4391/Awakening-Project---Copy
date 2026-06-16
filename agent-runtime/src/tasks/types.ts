@@ -13,6 +13,11 @@ export type DelegatedTaskEventType =
   | 'task.rejected'
   | 'task.started'
   | 'task.blocked'
+  | 'task.approval_needed'
+  | 'task.provider_blocked'
+  | 'task.current_step_changed'
+  | 'task.command_output_chunk'
+  | 'task.completion_receipt'
   | 'task.log'
   | 'task.result_recorded'
   | 'task.completed'
@@ -42,6 +47,20 @@ export interface TaskAuditEntry {
   occurredAt: string;
   summary: string;
   details?: Record<string, unknown>;
+}
+
+export interface DelegatedTaskLogReference {
+  path: string;
+  byteLength: number;
+  sha256?: string;
+}
+
+export interface DelegatedTaskCommandOutputSummary {
+  stream?: 'stdout' | 'stderr' | 'combined';
+  textPreview: string;
+  byteLength: number;
+  truncated: boolean;
+  fullLog?: DelegatedTaskLogReference;
 }
 
 export interface DelegatedTaskEvent extends TaskAuditEntry {}
@@ -148,6 +167,7 @@ export interface DelegatedTask {
   blockedReason?: DelegatedTaskBlockedReason;
   pendingToolAction?: PendingToolAction;
   logs: string[];
+  logReferences?: DelegatedTaskLogReference[];
   events: DelegatedTaskEvent[];
   result?: DelegatedTaskResult;
   receipt?: TaskReceipt;
@@ -203,6 +223,7 @@ export interface UpdateDelegatedTaskInput {
   result?: DelegatedTaskResult;
   blockedReason?: DelegatedTaskBlockedReason;
   pendingToolAction?: PendingToolAction;
+  commandOutputChunk?: { stream?: 'stdout' | 'stderr' | 'combined'; text: string; command?: string; stepId?: string; fullLogPath?: string };
   event?: {
     type?: DelegatedTaskEventType;
     actor?: RuntimeAgentName | 'system' | 'user';

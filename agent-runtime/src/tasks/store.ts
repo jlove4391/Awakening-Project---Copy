@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { runtimeConfig } from '../config.js';
@@ -23,6 +23,10 @@ import type {
 const taskDir = path.join(runtimeConfig.dataDir, 'tasks');
 const tasksPath = path.join(taskDir, 'delegated-tasks.json');
 const auditPath = path.join(taskDir, 'delegated-task-audit.jsonl');
+const taskLogDir = path.join(taskDir, 'logs');
+const maxInlineLogBytes = 4_096;
+const maxInlineLogs = 100;
+const maxInlineCommandOutputBytes = 8_192;
 
 const terminalStatuses = new Set<DelegatedTaskStatus>(['completed', 'failed', 'cancelled']);
 let cache: DelegatedTask[] | undefined;
@@ -34,6 +38,7 @@ function now() {
 
 async function ensureStore() {
   await fs.mkdir(taskDir, { recursive: true });
+  await fs.mkdir(taskLogDir, { recursive: true });
 }
 
 async function loadTasks() {
@@ -58,6 +63,91 @@ async function serializedWrite<T>(operation: () => Promise<T>) {
   const next = writeChain.then(operation, operation);
   writeChain = next.then(() => undefined, () => undefined);
   return next;
+}
+
+
+function byteLength(value: string) {
+  return Buffer.byteLength(value, 'utf8');
+}
+
+function truncateUtf8(value: string, maxBytes: number) {
+  if (byteLength(value) <= maxBytes) return { text: value, truncated: false };
+  const buffer = Buffer.from(value, 'utf8');
+  return { text: buffer.subarray(0, maxBytes).toString('utf8'), truncated: true };
+}
+
+function summarizeLogLine(value: string) {
+  const summary = truncateUtf8(value, maxInlineLogBytes);
+  return summary.truncated ? `${summary.text}\n… [truncated; ${byteLength(value)} bytes total]` : summary.text;
+}
+
+async function writeTaskLogReference(taskId: string, label: string, content: string) {
+  await ensureStore();
+  const safeLabel = label.replace(/[^a-z0-9_.-]/gi, '-').slice(0, 48) || 'log';
+  const digest = createHash('sha256').update(content).digest('hex');
+  const fileName = `${new Date().toISOString().replace(/[:.]/g, '-')}-${safeLabel}-${digest.slice(0, 12)}.log`;
+  const relativePath = path.join('tasks', 'logs', taskId, fileName);
+  const absoluteDir = path.join(taskLogDir, taskId);
+  await fs.mkdir(absoluteDir, { recursive: true });
+  await fs.writeFile(path.join(absoluteDir, fileName), content);
+  return { path: relativePath, byteLength: byteLength(content), sha256: digest };
+}
+
+async function commandOutputSummary(taskId: string, chunk: { stream?: 'stdout' | 'stderr' | 'combined'; text: string; command?: string; stepId?: string; fullLogPath?: string }) {
+  const original = String(chunk.text || '');
+  const preview = truncateUtf8(original, maxInlineCommandOutputBytes);
+  return {
+    stream: chunk.stream || 'combined',
+    textPreview: preview.text,
+    byteLength: byteLength(original),
+    truncated: preview.truncated,
+    ...(preview.truncated || chunk.fullLogPath
+      ? { fullLog: chunk.fullLogPath ? { path: chunk.fullLogPath, byteLength: byteLength(original) } : await writeTaskLogReference(taskId, `${chunk.stream || 'combined'}-chunk`, original) }
+      : {}),
+  };
+}
+
+async function sanitizeDetails(taskId: string, eventType: DelegatedTaskEventType, details?: Record<string, unknown>) {
+  if (!details) return undefined;
+  const next: Record<string, unknown> = { ...details };
+  for (const key of ['stdout', 'stderr', 'output', 'rawOutput', 'logs']) {
+    const value = next[key];
+    if (typeof value === 'string' && byteLength(value) > maxInlineCommandOutputBytes) {
+      next[`${key}Summary`] = await commandOutputSummary(taskId, key === 'stderr' ? { stream: 'stderr', text: value } : { stream: key === 'stdout' ? 'stdout' : 'combined', text: value });
+      delete next[key];
+    } else if (Array.isArray(value) && JSON.stringify(value).length > maxInlineCommandOutputBytes) {
+      const raw = JSON.stringify(value, null, 2);
+      next[`${key}Summary`] = await commandOutputSummary(taskId, { stream: 'combined', text: raw });
+      delete next[key];
+    }
+  }
+  if (eventType === 'task.command_output_chunk' && typeof next.text === 'string') {
+    next.commandOutput = await commandOutputSummary(taskId, { stream: next.stream as 'stdout' | 'stderr' | 'combined' | undefined, text: next.text, fullLogPath: typeof next.fullLogPath === 'string' ? next.fullLogPath : undefined });
+    delete next.text;
+  }
+  return next;
+}
+
+async function sanitizeResult(taskId: string, result: DelegatedTaskResult): Promise<DelegatedTaskResult> {
+  if (!result.data || typeof result.data !== 'object' || Array.isArray(result.data)) return result;
+  const data = { ...(result.data as Record<string, unknown>) };
+  for (const stream of ['stdout', 'stderr'] as const) {
+    if (typeof data[stream] === 'string') {
+      data[`${stream}Summary`] = await commandOutputSummary(taskId, { stream, text: data[stream] });
+      delete data[stream];
+    }
+  }
+  if (Array.isArray(data.logs)) {
+    const raw = JSON.stringify(data.logs, null, 2);
+    data.logSummary = await commandOutputSummary(taskId, { stream: 'combined', text: raw });
+    delete data.logs;
+  }
+  return { ...result, data };
+}
+
+function appendBoundedTaskLog(task: DelegatedTask, log: string) {
+  task.logs.push(summarizeLogLine(log));
+  if (task.logs.length > maxInlineLogs) task.logs.splice(0, task.logs.length - maxInlineLogs);
 }
 
 function normalizeApprovalRequirements(input?: Array<Partial<ApprovalRequirement> | string>): ApprovalRequirement[] {
@@ -272,8 +362,11 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       const approval = createAuditEntry(task.id, 'task.approval_requested', 'system', 'Task is waiting for required approval before queueing.', {
         approvalRequirements,
       });
-      task.events.push(approval);
-      task.auditTrail.push(approval);
+      const approvalNeeded = createAuditEntry(task.id, 'task.approval_needed', 'system', 'Task needs approval before queueing.', {
+        approvalRequirements,
+      });
+      task.events.push(approval, approvalNeeded);
+      task.auditTrail.push(approval, approvalNeeded);
     } else {
       const queued = createAuditEntry(task.id, 'task.queued', 'system', 'Task was added to the durable Nexora queue.');
       task.events.push(queued);
@@ -307,10 +400,10 @@ export async function appendDelegatedTaskEvent(
   return serializedWrite(async () => {
     const task = await getDelegatedTask(taskId);
     if (!task) return undefined;
-    const event = createAuditEntry(task.id, eventType, options.actor || 'system', summary, options.details);
+    const event = createAuditEntry(task.id, eventType, options.actor || 'system', summary, await sanitizeDetails(task.id, eventType, options.details));
     task.events.push(event);
     task.auditTrail.push(event);
-    if (options.log) task.logs.push(summary);
+    if (options.log) appendBoundedTaskLog(task, summary);
     task.updatedAt = now();
     await persistTasks();
     await appendAuditJsonl(event);
@@ -353,6 +446,7 @@ export async function updateExecutionPlanStep(taskId: string, stepId: string, in
     const task = await getDelegatedTask(taskId);
     const step = task?.executionPlan?.find((candidate) => candidate.id === stepId);
     if (!task || !step) return undefined;
+    const previousCurrentStepId = currentWorkerStep(task)?.id;
 
     if (input.order !== undefined) step.order = input.order;
     if (input.targetTool !== undefined) step.targetTool = input.targetTool;
@@ -390,10 +484,21 @@ export async function updateExecutionPlanStep(taskId: string, stepId: string, in
     });
     task.events.push(event);
     task.auditTrail.push(event);
+    const currentStep = currentWorkerStep(task);
+    const currentStepEvent = currentStep?.id !== previousCurrentStepId
+      ? createAuditEntry(task.id, 'task.current_step_changed', 'system', currentStep ? `Current execution step changed to ${currentStep.id}.` : 'Current execution step cleared.', {
+          previousStepId: previousCurrentStepId,
+          currentStep,
+        })
+      : undefined;
+    if (currentStepEvent) {
+      task.events.push(currentStepEvent);
+      task.auditTrail.push(currentStepEvent);
+    }
     task.updatedAt = now();
     await persistTasks();
-    await appendAuditJsonl(event);
-    taskEvents.emitTaskUpdated(task, event, getDelegatedTaskUiState(task));
+    await Promise.all([event, ...(currentStepEvent ? [currentStepEvent] : [])].map(appendAuditJsonl));
+    taskEvents.emitTaskUpdated(task, currentStepEvent || event, getDelegatedTaskUiState(task));
     return task;
   });
 }
@@ -421,7 +526,7 @@ export async function updateDelegatedTask(taskId: string, input: UpdateDelegated
     }
 
     if (input.log) {
-      task.logs.push(input.log);
+      appendBoundedTaskLog(task, input.log);
       const logEvent = createAuditEntry(task.id, 'task.log', input.event?.actor || 'system', input.log);
       task.events.push(logEvent);
       task.auditTrail.push(logEvent);
@@ -432,12 +537,49 @@ export async function updateDelegatedTask(taskId: string, input: UpdateDelegated
     if (input.blockedReason !== undefined) task.blockedReason = input.blockedReason;
     if (input.pendingToolAction !== undefined) task.pendingToolAction = input.pendingToolAction;
 
+    if (input.status === 'blocked' && (task.pendingToolAction || task.blockedReason === 'step_approval_required')) {
+      const approvalEvent = createAuditEntry(task.id, 'task.approval_needed', input.event?.actor || 'system', 'Task needs approval before execution can continue.', {
+        blockedReason: task.blockedReason,
+        pendingToolAction: task.pendingToolAction,
+        missingApproval: missingApproval(task),
+      });
+      task.events.push(approvalEvent);
+      task.auditTrail.push(approvalEvent);
+      newEvents.push(approvalEvent);
+      event = approvalEvent;
+    }
+
+    if (input.status === 'blocked' && task.blockedReason === 'provider_configuration_required') {
+      const providerEvent = createAuditEntry(task.id, 'task.provider_blocked', input.event?.actor || 'system', 'Task is blocked by provider configuration.', missingConfiguration(task));
+      task.events.push(providerEvent);
+      task.auditTrail.push(providerEvent);
+      newEvents.push(providerEvent);
+      event = providerEvent;
+    }
+
+    if (input.commandOutputChunk) {
+      const outputSummary = await commandOutputSummary(task.id, input.commandOutputChunk);
+      if (outputSummary.fullLog) {
+        task.logReferences ||= [];
+        task.logReferences.push(outputSummary.fullLog);
+      }
+      const commandEvent = createAuditEntry(task.id, 'task.command_output_chunk', input.event?.actor || 'nexora', `Command ${outputSummary.stream || 'combined'} output chunk recorded.`, {
+        ...(input.commandOutputChunk.command ? { command: input.commandOutputChunk.command } : {}),
+        ...(input.commandOutputChunk.stepId ? { stepId: input.commandOutputChunk.stepId } : {}),
+        output: outputSummary,
+      });
+      task.events.push(commandEvent);
+      task.auditTrail.push(commandEvent);
+      newEvents.push(commandEvent);
+      event = commandEvent;
+    }
+
     if (input.result) {
-      task.result = input.result;
-      const resultEvent = createAuditEntry(task.id, 'task.result_recorded', input.event?.actor || 'nexora', input.result.summary, {
-        ok: input.result.ok,
-        data: input.result.data,
-        error: input.result.error,
+      task.result = await sanitizeResult(task.id, input.result);
+      const resultEvent = createAuditEntry(task.id, 'task.result_recorded', input.event?.actor || 'nexora', task.result.summary, {
+        ok: task.result.ok,
+        data: task.result.data,
+        error: task.result.error,
       });
       task.events.push(resultEvent);
       task.auditTrail.push(resultEvent);
@@ -451,7 +593,7 @@ export async function updateDelegatedTask(taskId: string, input: UpdateDelegated
         input.event.type || 'task.log',
         input.event.actor || 'system',
         input.event.summary,
-        input.event.details,
+        await sanitizeDetails(task.id, input.event.type || 'task.log', input.event.details),
       );
       task.events.push(customEvent);
       task.auditTrail.push(customEvent);
@@ -465,7 +607,7 @@ export async function updateDelegatedTask(taskId: string, input: UpdateDelegated
         task.result = attachNexoraCompletion(task, task.result);
         task.receipt.proof.result = task.result;
       }
-      const receiptEvent = createAuditEntry(task.id, 'task.receipt_created', 'system', `Receipt ${task.receipt.id} created for task ${task.id}.`, {
+      const receiptEvent = createAuditEntry(task.id, 'task.completion_receipt', 'system', `Receipt ${task.receipt.id} created for task ${task.id}.`, {
         receiptId: task.receipt.id,
       });
       task.events.push(receiptEvent);
@@ -603,7 +745,7 @@ export async function cancelDelegatedTask(taskId: string, actor: TaskAuditEntry[
     task.events.push(requested, cancelled);
     task.auditTrail.push(requested, cancelled);
     task.receipt = createReceipt(task);
-    const receiptEvent = createAuditEntry(task.id, 'task.receipt_created', 'system', `Receipt ${task.receipt.id} created for cancelled task ${task.id}.`, { receiptId: task.receipt.id });
+    const receiptEvent = createAuditEntry(task.id, 'task.completion_receipt', 'system', `Receipt ${task.receipt.id} created for cancelled task ${task.id}.`, { receiptId: task.receipt.id });
     task.events.push(receiptEvent);
     task.auditTrail.push(receiptEvent);
     task.receipt.proof.auditTrail = task.auditTrail;

@@ -1,3 +1,4 @@
+import { memoryService } from './memoryService.js';
 import { retrieveMemories } from './retrieve.js';
 import { remember, writeMemory } from './write.js';
 import type { MemoryScope } from '../types.js';
@@ -18,7 +19,7 @@ export async function summarizeMemories(input: SummarizeMemoryInput) {
   const byScope = new Map<string, string[]>();
   for (const memory of memories) {
     const items = byScope.get(memory.scope) || [];
-    items.push(firstSentence(memory.text));
+    items.push(firstSentence(memory.summary || memory.text));
     byScope.set(memory.scope, items);
   }
 
@@ -33,9 +34,11 @@ export async function summarizeMemories(input: SummarizeMemoryInput) {
 export async function writeConversationSummary(sessionId: string, text: string, tags: string[] = []) {
   return remember(sessionId, text, {
     scope: 'conversation_summary',
+    category: 'conversation_summary',
     tags: ['summary', ...tags],
     source: 'system',
     importance: 0.8,
+    actor: { actorType: 'system', actorId: 'system' },
   });
 }
 
@@ -45,8 +48,12 @@ export async function replaceConversationSummary(sessionId: string, id: string, 
     sessionId,
     text,
     scope: 'conversation_summary',
+    category: 'conversation_summary',
     tags: ['summary'],
     source: 'system',
     importance: 0.8,
+    actor: { actorType: 'system', actorId: 'system' },
   });
 }
+
+export const getSessionContext = memoryService.getSessionContext.bind(memoryService);

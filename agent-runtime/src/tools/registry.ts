@@ -3408,7 +3408,7 @@ async function enforceApprovalLimits(definition: RegisteredToolDefinition, input
     return approvalBlockedResult(definition, context, reason, executionId, sanitizedInput);
   }
 
-  if (approvedThroughUi && !(await hasExactApprovalScope(definition, input, context, executionId))) {
+  if (definition.humanApprovalRequired && approvedThroughUi && !(await hasExactApprovalScope(definition, input, context, executionId))) {
     return approvalBlockedResult(definition, context, 'approval_scope_mismatch', executionId, sanitizedInput);
   }
 

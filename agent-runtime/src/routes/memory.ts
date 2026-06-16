@@ -26,7 +26,7 @@ memoryRouter.get('/', async (req, res, next) => {
 
 memoryRouter.post('/', async (req, res, next) => {
   try {
-    const { sessionId = 'default', text, scope = 'conversation_summary', tags = [], importance, metadata, source = 'api' } = req.body || {};
+    const { sessionId = 'default', text, scope = 'conversation_summary', tags = [], importance, metadata, source = 'api', actor } = req.body || {};
     if (!text?.trim()) {
       res.status(400).json({ error: 'text is required' });
       return;
@@ -37,6 +37,7 @@ memoryRouter.post('/', async (req, res, next) => {
       importance,
       metadata,
       source,
+      actor,
     });
     res.status(201).json({ memory });
   } catch (error) {

@@ -1,4 +1,4 @@
-import { executeRegisteredTool, getRegisteredTool, toolRegistry, type RegisteredToolDefinition } from '../tools/registry.js';
+import type { RegisteredToolDefinition } from '../tools/registry.js';
 import { evaluateNexoraCapabilityForStep, findNexoraCapabilityForTool } from '../workflows/nexora/capabilities.js';
 import type { RuntimeContext } from '../types.js';
 import { appendExecutionPlanStep, cancelDelegatedTask, getDelegatedTask, updateDelegatedTask, updateExecutionPlanStep } from './store.js';
@@ -194,7 +194,13 @@ function providerConfigurationBlockFor(toolName: string, message: string): Provi
   return undefined;
 }
 
-function isApprovedNexoraTool(toolName: string) {
+
+async function loadToolRegistry() {
+  return import('../tools/registry.js');
+}
+
+async function isApprovedNexoraTool(toolName: string) {
+  const { getRegisteredTool } = await loadToolRegistry();
   const definition = getRegisteredTool(toolName);
   const capability = definition ? findNexoraCapabilityForTool(definition.name) : undefined;
   const decision = definition ? evaluateNexoraCapabilityForStep(definition.name, 'not_required') : undefined;
@@ -208,31 +214,33 @@ function isApprovedNexoraTool(toolName: string) {
   );
 }
 
-function chooseExecutionStrategy(task: DelegatedTask) {
+async function chooseExecutionStrategy(task: DelegatedTask) {
   const selected = new Map<string, NexoraAllowedTool>();
 
+  const { getRegisteredTool } = await loadToolRegistry();
   for (const requiredTool of task.requiredTools.map(normalizeRequiredTool)) {
     const directDefinition = getRegisteredTool(requiredTool);
-    if (directDefinition && isApprovedNexoraTool(directDefinition.name)) {
+    if (directDefinition && await isApprovedNexoraTool(directDefinition.name)) {
       selected.set(directDefinition.name, allowlistByName.get(directDefinition.name)!);
       continue;
     }
 
     for (const toolName of categoryAliases.get(requiredTool) || []) {
-      if (isApprovedNexoraTool(toolName)) selected.set(toolName, allowlistByName.get(toolName)!);
+      if (await isApprovedNexoraTool(toolName)) selected.set(toolName, allowlistByName.get(toolName)!);
     }
   }
 
   return [...selected.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function isStepHighRisk(toolName: string) {
+async function isStepHighRisk(toolName: string) {
+  const { getRegisteredTool } = await loadToolRegistry();
   const definition = getRegisteredTool(toolName);
   const capability = definition ? findNexoraCapabilityForTool(definition.name) : undefined;
   return !definition || !capability || definition.riskLevel !== 'read' || definition.humanApprovalRequired || capability.approvalRequirement !== 'none';
 }
 
-function approvalScopeForStep(definition: ReturnType<typeof getRegisteredTool>) {
+function approvalScopeForStep(definition: RegisteredToolDefinition | undefined) {
   if (!definition || definition.riskLevel === 'read') return undefined;
   if (definition.requiredApprovalScope) return definition.requiredApprovalScope;
   if (definition.name === 'code.commit') return 'repo.commit';
@@ -253,6 +261,7 @@ function stepInput(step: NonNullable<DelegatedTask['executionPlan']>[number]): R
 }
 
 async function blockForStepApproval(task: DelegatedTask, step: NonNullable<DelegatedTask['executionPlan']>[number]) {
+  const { getRegisteredTool } = await loadToolRegistry();
   const definition = getRegisteredTool(step.targetTool);
   const reason = 'step_approval_required';
   const approvalScope = approvalScopeForStep(definition);
@@ -378,7 +387,7 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
         return true;
       }
       if (['completed', 'skipped', 'cancelled'].includes(step.status)) continue;
-      const highRisk = isStepHighRisk(step.targetTool);
+      const highRisk = await isStepHighRisk(step.targetTool);
       const capabilityDecision = evaluateNexoraCapabilityForStep(step.targetTool, step.approvalStatus);
       if (!capabilityDecision.allowed) {
         if (capabilityDecision.reason === 'approval_required') await blockForStepApproval(task, step);
@@ -400,7 +409,7 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
         const remainingTaskMs = taskDeadline ? Math.max(1, taskDeadline - Date.now()) : undefined;
         const stepTimeoutMs = step.timeoutMs ? Math.min(step.timeoutMs, remainingTaskMs || step.timeoutMs) : remainingTaskMs;
         const result = await withTimeout(
-          executeRegisteredTool(step.targetTool, input, context),
+          (await loadToolRegistry()).executeRegisteredTool(step.targetTool, input, context),
           stepTimeoutMs,
           step.timeoutMs ? `Execution plan step ${step.id} timed out after ${step.timeoutMs}ms.` : `Task timed out after ${task.timeoutMs}ms.`,
         );
@@ -470,7 +479,7 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
     return true;
   }
 
-  const strategy = chooseExecutionStrategy(task);
+  const strategy = await chooseExecutionStrategy(task);
   if (!strategy.length) return false;
 
   await updateDelegatedTask(task.id, {
@@ -493,7 +502,7 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
 
   try {
     for (const selectedTool of strategy) {
-      if (!isApprovedNexoraTool(selectedTool.name)) throw new Error(`Tool ${selectedTool.name} is not approved for deterministic Nexora execution.`);
+      if (!(await isApprovedNexoraTool(selectedTool.name))) throw new Error(`Tool ${selectedTool.name} is not approved for deterministic Nexora execution.`);
 
       const input = selectedTool.buildInput(task);
       await updateDelegatedTask(task.id, {
@@ -506,7 +515,7 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
         },
       });
 
-      const result = await executeRegisteredTool(selectedTool.name, input, context);
+      const result = await (await loadToolRegistry()).executeRegisteredTool(selectedTool.name, input, context);
       toolResults.push(redactForLogs({ tool: selectedTool.name, input, result }));
 
       await updateDelegatedTask(task.id, {
@@ -569,6 +578,4 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
   return true;
 };
 
-export const nexoraApprovedToolNames = toolRegistry
-  .filter((definition) => isApprovedNexoraTool(definition.name))
-  .map((definition) => definition.name);
+export const nexoraApprovedToolNames = deterministicNexoraToolAllowlist.map((definition) => definition.name);

@@ -121,7 +121,27 @@ export async function updateTask(sessionId: string, taskId: string, patch: Parti
   return task;
 }
 
-export { durableMemoryScopes, memoryStore, normalizeMemoryScope, type StoredMemory } from './store.js';
+export { durableMemoryScopes, memoryStore, normalizeMemoryScope, type MemoryListFilter, type MemoryWriteInput, type StoredMemory } from './store.js';
 export { listMemories, retrieveMemories, type RetrieveMemoryInput, type RetrievedMemory } from './retrieve.js';
 export { deleteMemory, remember, writeMemory, type RememberOptions } from './write.js';
 export { replaceConversationSummary, summarizeMemories, writeConversationSummary, type SummarizeMemoryInput } from './summarize.js';
+export { memoryService, MemoryService } from './memoryService.js';
+export type {
+  CreateMemoryInput,
+  MemoryActorIdentity,
+  MemoryActorType,
+  MemoryCategory,
+  MemoryDecisionInput,
+  MemoryRecord,
+  MemorySearchFilter,
+  MemorySource,
+  ProjectTimeline,
+  ReceiptMemoryInput,
+  SessionContext,
+  TchaiMemoryMetadata,
+  UpdateMemoryPatch,
+  WorkOrderMemoryInput,
+} from './memoryTypes.js';
+export type { MemoryRepository } from './memoryRepository.js';
+export { JsonMemoryAdapter, jsonMemoryAdapter } from './adapters/jsonMemoryAdapter.js';
+export { PostgresMemoryAdapterStub } from './adapters/postgresMemoryAdapter.stub.js';

@@ -1,12 +1,18 @@
-import { memoryStore, normalizeMemoryScope, type MemoryWriteInput, type StoredMemory } from './store.js';
+import { memoryService } from './memoryService.js';
+import { normalizeMemoryScope, type MemoryWriteInput, type StoredMemory } from './store.js';
 import type { MemoryReference, MemoryScope } from '../types.js';
+import type { MemoryActorIdentity, MemoryCategory } from './memoryTypes.js';
 
 export interface RememberOptions extends Partial<Omit<MemoryWriteInput, 'sessionId' | 'text' | 'scope'>> {
   scope?: MemoryScope | string;
+  category?: MemoryCategory;
+  type?: MemoryCategory;
+  actor?: MemoryActorIdentity;
 }
 
 export async function writeMemory(input: MemoryWriteInput): Promise<StoredMemory> {
-  return memoryStore.upsert({ ...input, scope: normalizeMemoryScope(input.scope) });
+  const memory = await memoryService.createMemory({ ...input, scope: normalizeMemoryScope(input.scope) });
+  return memory as StoredMemory;
 }
 
 export async function remember(sessionId: string, text: string, options: RememberOptions = {}): Promise<MemoryReference> {
@@ -19,10 +25,19 @@ export async function remember(sessionId: string, text: string, options: Remembe
     metadata: options.metadata,
     importance: options.importance,
     source: options.source,
+    ownerUserId: options.ownerUserId,
+    organizationId: options.organizationId,
+    projectId: options.projectId,
+    personaId: options.personaId,
+    category: options.category,
+    type: options.type,
+    title: options.title,
+    summary: options.summary,
+    actor: options.actor,
     createdAt: options.createdAt,
   });
 }
 
 export async function deleteMemory(id: string) {
-  return memoryStore.remove(id);
+  return memoryService.deleteMemory(id);
 }

@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { runtimeConfig } from '../config.js';
 import type { MemoryReference, MemoryScope } from '../types.js';
+import type { MemoryActorIdentity, MemoryCategory, TchaiMemoryMetadata } from './memoryTypes.js';
 
 export const durableMemoryScopes = [
   'user_profile',
@@ -23,8 +24,15 @@ const legacyScopeMap: Record<string, MemoryScope> = {
 
 export interface StoredMemory extends MemoryReference {
   sessionId: string;
+  ownerUserId?: string;
+  organizationId?: string;
+  projectId?: string;
+  personaId?: string;
+  category?: MemoryCategory;
+  title?: string;
+  summary?: string;
   updatedAt: string;
-  metadata: Record<string, unknown>;
+  metadata: TchaiMemoryMetadata;
   importance: number;
   source: 'agent' | 'user' | 'system' | 'api' | 'voice' | 'migration';
 }
@@ -43,6 +51,15 @@ export interface MemoryWriteInput {
   metadata?: Record<string, unknown>;
   importance?: number;
   source?: StoredMemory['source'];
+  ownerUserId?: string;
+  organizationId?: string;
+  projectId?: string;
+  personaId?: string;
+  category?: MemoryCategory;
+  type?: MemoryCategory;
+  title?: string;
+  summary?: string;
+  actor?: MemoryActorIdentity;
   createdAt?: string;
 }
 
@@ -50,6 +67,12 @@ export interface MemoryListFilter {
   sessionId?: string;
   scopes?: Array<MemoryScope | string>;
   tags?: string[];
+  ownerUserId?: string;
+  organizationId?: string;
+  projectId?: string;
+  personaId?: string;
+  categories?: MemoryCategory[];
+  types?: MemoryCategory[];
   includeGlobal?: boolean;
   limit?: number;
 }
@@ -95,7 +118,27 @@ function normalizeMemory(input: MemoryWriteInput, existing?: StoredMemory): Stor
     tags: cleanTags(input.tags ?? existing?.tags),
     createdAt: input.createdAt || existing?.createdAt || timestamp,
     updatedAt: timestamp,
-    metadata: { ...(existing?.metadata || {}), ...(input.metadata || {}) },
+    ownerUserId: input.ownerUserId ?? existing?.ownerUserId ?? (input.metadata?.ownerUserId as string | undefined) ?? (existing?.metadata?.ownerUserId as string | undefined),
+    organizationId: input.organizationId ?? existing?.organizationId ?? (input.metadata?.organizationId as string | undefined) ?? (existing?.metadata?.organizationId as string | undefined),
+    projectId: input.projectId ?? existing?.projectId ?? (input.metadata?.projectId as string | undefined) ?? (existing?.metadata?.projectId as string | undefined),
+    personaId: input.personaId ?? existing?.personaId ?? (input.metadata?.personaId as string | undefined) ?? (existing?.metadata?.personaId as string | undefined),
+    category: input.category || input.type || existing?.category || (input.metadata?.category as MemoryCategory | undefined) || (existing?.metadata?.category as MemoryCategory | undefined) || (input.scope === 'conversation_summary' ? 'conversation_summary' : undefined),
+    title: input.title ?? existing?.title ?? (input.metadata?.title as string | undefined) ?? (existing?.metadata?.title as string | undefined),
+    summary: input.summary ?? existing?.summary ?? (input.metadata?.summary as string | undefined) ?? (existing?.metadata?.summary as string | undefined),
+    metadata: {
+      ...(existing?.metadata || {}),
+      ...(input.metadata || {}),
+      ...(input.ownerUserId ? { ownerUserId: input.ownerUserId } : {}),
+      ...(input.organizationId ? { organizationId: input.organizationId } : {}),
+      ...(input.projectId ? { projectId: input.projectId } : {}),
+      ...(input.personaId ? { personaId: input.personaId } : {}),
+      ...(input.category || input.type ? { category: input.category || input.type } : {}),
+      ...(input.title ? { title: input.title } : {}),
+      ...(input.summary ? { summary: input.summary } : {}),
+      ...(input.actor?.actorId ? { actorId: input.actor.actorId } : {}),
+      ...(input.actor?.actorType ? { actorType: input.actor.actorType } : {}),
+      ...(input.actor?.displayName ? { actorDisplayName: input.actor.displayName } : {}),
+    },
     importance: clampImportance(input.importance ?? existing?.importance),
     source: input.source || existing?.source || 'agent',
   };
@@ -141,6 +184,15 @@ function isVisibleToSession(memory: StoredMemory, sessionId: string | undefined,
 
 function matchesFilter(memory: StoredMemory, filter: MemoryListFilter = {}) {
   if (!isVisibleToSession(memory, filter.sessionId, filter.includeGlobal)) return false;
+  if (filter.ownerUserId && memory.ownerUserId !== filter.ownerUserId && memory.metadata?.ownerUserId !== filter.ownerUserId) return false;
+  if (filter.organizationId && memory.organizationId !== filter.organizationId && memory.metadata?.organizationId !== filter.organizationId) return false;
+  if (filter.projectId && memory.projectId !== filter.projectId && memory.metadata?.projectId !== filter.projectId) return false;
+  if (filter.personaId && memory.personaId !== filter.personaId && memory.metadata?.personaId !== filter.personaId) return false;
+  const categories = filter.categories || filter.types;
+  if (categories?.length) {
+    const actual = memory.category || memory.metadata?.category;
+    if (!actual || !categories.includes(actual as MemoryCategory)) return false;
+  }
   if (filter.scopes?.length) {
     const scopes = new Set(filter.scopes.map((scope) => normalizeMemoryScope(scope)));
     if (!scopes.has(memory.scope)) return false;

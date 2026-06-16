@@ -647,3 +647,90 @@ export interface FollowUpRecord {
   note?: string;
   metadata?: Record<string, SharedRecordValue>;
 }
+
+export type MemoryCategory =
+  | 'fact'
+  | 'preference'
+  | 'decision'
+  | 'event'
+  | 'project_note'
+  | 'work_order'
+  | 'approval'
+  | 'receipt'
+  | 'relationship'
+  | 'persona_lesson'
+  | 'conversation_summary';
+
+export type MemoryActorType = 'user' | 'persona' | 'system' | 'agent' | 'api' | 'voice' | 'migration';
+
+export interface MemoryActorIdentity {
+  actorId?: string;
+  actorType?: MemoryActorType;
+  displayName?: string;
+}
+
+export interface VireonMemoryRecord {
+  id: string;
+  ownerUserId?: string;
+  sessionId?: string;
+  organizationId?: string;
+  projectId?: string;
+  personaId?: string;
+  category: MemoryCategory;
+  type?: MemoryCategory;
+  title?: string;
+  text: string;
+  summary?: string;
+  source: 'agent' | 'user' | 'system' | 'api' | 'voice' | 'migration';
+  importance: number;
+  tags: string[];
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type VireonPermission =
+  | 'memory:read'
+  | 'memory:write'
+  | 'memory:approve'
+  | 'project:read'
+  | 'project:write'
+  | 'workflow:create'
+  | 'workflow:approve'
+  | 'execution:request'
+  | 'execution:execute'
+  | 'receipt:write'
+  | 'admin:all';
+
+export type VireonIdentityKind = 'user' | 'persona' | 'system';
+
+export interface VireonRole {
+  id: string;
+  name: string;
+  description?: string;
+  permissions: VireonPermission[];
+}
+
+export interface VireonIdentityRecord {
+  id: string;
+  kind: VireonIdentityKind;
+  displayName: string;
+  handle?: string;
+  title?: string;
+  roleIds: string[];
+  permissions: VireonPermission[];
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VireonProjectIdentity {
+  id: string;
+  name: string;
+  ownerUserId: string;
+  organizationId?: string;
+  roleAssignments: Array<{ identityId: string; roleId: string }>;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { durableTaskQueue } from '../tasks/queue.js';
 import { cancelActiveNexoraCommand } from '../workers/nexora/localWorker.js';
 import {
+  appendDelegatedTaskEvent,
   approveExecutionPlanStep,
   createDelegatedTask,
   getDelegatedTask,
@@ -9,7 +10,7 @@ import {
   listDelegatedTasks,
   updateDelegatedTask,
 } from '../tasks/store.js';
-import type { ApprovalRequirement, DelegatedTask, DelegatedTaskStatus } from '../tasks/types.js';
+import type { ApprovalRequirement, DelegatedTask, DelegatedTaskEventType, DelegatedTaskStatus, TaskAuditEntry } from '../tasks/types.js';
 
 export const tasksRouter = Router();
 
@@ -30,6 +31,27 @@ function taskResponse(task: DelegatedTask, queuedTaskIds = durableTaskQueue.snap
     taskState,
     queuedTaskIds,
   };
+}
+
+
+function taskEventType(value: unknown): DelegatedTaskEventType {
+  const type = String(value || 'task.log') as DelegatedTaskEventType;
+  const supported: DelegatedTaskEventType[] = [
+    'task.log',
+    'task.current_step_changed',
+    'task.command_output_chunk',
+    'task.approval_needed',
+    'task.provider_blocked',
+    'task.completion_receipt',
+    'task.approval_requested',
+    'task.blocked',
+  ];
+  return supported.includes(type) ? type : 'task.log';
+}
+
+function taskEventActor(value: unknown): TaskAuditEntry['actor'] {
+  const actor = String(value || 'system') as TaskAuditEntry['actor'];
+  return ['elora', 'nexora', 'kaz', 'jynx', 'kalyra', 'system', 'user'].includes(actor) ? actor : 'system';
 }
 
 function approvalRequirementArray(value: unknown): Array<Partial<ApprovalRequirement> | string> {
@@ -121,6 +143,32 @@ tasksRouter.post('/', async (req, res, next) => {
   }
 });
 
+
+
+tasksRouter.post('/:taskId/events', async (req, res, next) => {
+  try {
+    const eventType = taskEventType(req.body?.type || req.body?.eventType);
+    const summary = String(req.body?.summary || req.body?.message || '').trim();
+    if (!summary) {
+      res.status(400).json({ error: 'summary is required' });
+      return;
+    }
+
+    const details = req.body?.details && typeof req.body.details === 'object' && !Array.isArray(req.body.details) ? req.body.details : undefined;
+    const task = await appendDelegatedTaskEvent(req.params.taskId, eventType, summary, {
+      actor: taskEventActor(req.body?.actor),
+      details,
+      log: eventType === 'task.log' || req.body?.log === true,
+    });
+    if (!task) {
+      res.status(404).json({ error: 'task not found' });
+      return;
+    }
+    res.status(201).json(taskResponse(task));
+  } catch (error) {
+    next(error);
+  }
+});
 
 tasksRouter.post('/:taskId/steps/:stepId/approve', async (req, res, next) => {
   try {

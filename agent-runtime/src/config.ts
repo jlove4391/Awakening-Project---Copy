@@ -4,6 +4,13 @@ import { fileURLToPath } from 'node:url';
 const runtimeRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = path.resolve(runtimeRoot, '..');
 
+export type AutonomyLevel = 0 | 1 | 2 | 3;
+
+function parseAutonomyLevel(value: string | undefined): AutonomyLevel {
+  const parsed = Number(value ?? 0);
+  return parsed === 0 || parsed === 1 || parsed === 2 || parsed === 3 ? parsed : 0;
+}
+
 export const runtimeConfig = {
   port: Number(process.env.AGENT_RUNTIME_PORT || process.env.PORT || 4317),
   model: process.env.ELORA_MODEL || process.env.OPENAI_MODEL || 'gpt-5.4',
@@ -11,6 +18,10 @@ export const runtimeConfig = {
   openaiBaseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
   dataDir: process.env.AGENT_RUNTIME_DATA_DIR || path.join(runtimeRoot, '.runtime-data'),
   sessionBackend: process.env.AGENT_RUNTIME_SESSION_BACKEND || 'auto',
+  autonomy: {
+    level: parseAutonomyLevel(process.env.ELORA_AUTONOMY_LEVEL || process.env.CORE_AUTONOMY_LEVEL),
+    supportedLevels: [0, 1, 2, 3] as AutonomyLevel[],
+  },
   coreTestingMode: process.env.AGENT_RUNTIME_CORE_TESTING_MODE === 'true' || process.env.AGENT_RUNTIME_PROFILE === 'core_testing',
   corsOrigin: process.env.AGENT_RUNTIME_CORS_ORIGIN || 'http://localhost:3000',
   codeWorkspaceRoot: process.env.NEXORA_WORKSPACE_ROOT || process.env.CODE_WORKSPACE_ROOT || repoRoot,

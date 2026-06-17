@@ -1,4 +1,5 @@
 import type { Session } from '@openai/agents';
+import type { AutonomyLevel } from './config.js';
 export type RuntimeAgentName = 'elora' | 'nexora' | 'kaz' | 'jynx' | 'kalyra';
 
 export type TaskStatus = 'queued' | 'running' | 'blocked' | 'completed' | 'failed';
@@ -70,6 +71,7 @@ export interface RuntimeContext {
   approvedDelegatedTaskId?: string;
   approvedDelegatedStepId?: string;
   autonomyProfile?: 'dev_autonomy' | 'proactive_observation';
+  autonomyLevel?: AutonomyLevel;
   executionMode?: ExecutionMode;
 }
 
@@ -82,6 +84,7 @@ export interface AgentMessageRequest {
   agent?: RuntimeAgentName;
   approvedExecutionId?: string;
   autonomyProfile?: 'dev_autonomy' | 'proactive_observation';
+  autonomyLevel?: AutonomyLevel;
   executionMode?: ExecutionMode;
 }
 
@@ -96,5 +99,6 @@ export interface ChatRequestBody {
   agent?: RuntimeAgentName;
   approvedExecutionId?: string;
   autonomyProfile?: 'dev_autonomy' | 'proactive_observation';
+  autonomyLevel?: AutonomyLevel;
   executionMode?: ExecutionMode;
 }

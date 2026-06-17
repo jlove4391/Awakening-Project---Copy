@@ -11,6 +11,7 @@ export interface ToolAuditLogEntry {
   humanApprovalRequired: boolean;
   approved: boolean;
   executionMode?: string;
+  autonomyLevel?: number;
   workspaceRoot?: string;
   input?: Record<string, unknown>;
   resultStatus?: string;

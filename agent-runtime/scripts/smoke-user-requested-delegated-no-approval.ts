@@ -24,6 +24,21 @@ await mkdir(path.join(workspaceRoot, '.runtime-smoke'), { recursive: true });
 const { createDelegatedTask, getDelegatedTask } = await import('../src/tasks/store.js');
 await import('../src/tasks/queue.js');
 
+const { evaluateNexoraCapabilityForStep, requiresHardApprovalGate } = await import('../src/workflows/nexora/capabilities.js');
+const { getRegisteredTool } = await import('../src/tools/registry.js');
+const commitDefinition = getRegisteredTool('code.commit');
+const testDefinition = getRegisteredTool('code.test');
+const editDefinition = getRegisteredTool('code.edit');
+const driveWriteDefinition = getRegisteredTool('drive.create_text_file');
+const gmailSendDefinition = getRegisteredTool('gmail.send_email');
+assert.equal(requiresHardApprovalGate(commitDefinition), true, 'commits must remain hard approval gates');
+assert.equal(requiresHardApprovalGate(driveWriteDefinition), true, 'provider/account writes must remain hard approval gates');
+assert.equal(requiresHardApprovalGate(gmailSendDefinition), true, 'external sends must remain hard approval gates');
+assert.equal(requiresHardApprovalGate(testDefinition), false, 'ordinary local tests must not be hard approval gates');
+assert.equal(requiresHardApprovalGate(editDefinition), false, 'ordinary local file edits must not be hard approval gates');
+assert.equal(evaluateNexoraCapabilityForStep('code.commit', 'pending', 'delegated').reason, 'approval_required');
+assert.equal(evaluateNexoraCapabilityForStep('code.test', 'pending', 'delegated').allowed, true);
+
 const task = await createDelegatedTask({
   sessionId,
   objective: `Create ${targetPath} from an explicit user-requested delegated task.`,
@@ -92,6 +107,33 @@ const directUserTask = await createDelegatedTask({
 assert.equal(directUserTask.status, 'queued');
 assert.equal(directUserTask.approvalRequirements[0]?.status, 'approved');
 assert.ok(!directUserTask.events.some((event) => event.eventType === 'task.approval_needed'), 'direct user request should not create a pending approval item');
+
+
+const hardGateTask = await createDelegatedTask({
+  sessionId,
+  objective: 'User-delegated high-risk commit must still require explicit approval.',
+  requiredTools: ['code.commit'],
+  authorizationSource: 'user_delegated',
+  executionPlan: [
+    {
+      id: 'commit-hard-gate',
+      targetTool: 'code.commit',
+      arguments: { message: 'smoke: should require explicit approval' },
+      approvalStatus: 'pending',
+      approval: { required: true, status: 'pending', reason: 'commit_requires_explicit_approval' },
+    },
+  ],
+});
+assert.equal(hardGateTask.status, 'queued', 'task can queue, but the commit step itself must not be pre-approved');
+assert.equal(hardGateTask.executionPlan?.[0]?.approvalStatus, 'pending');
+assert.equal(hardGateTask.executionPlan?.[0]?.approval?.status, 'pending');
+
+const blockedHardGateTask = await waitForTask(hardGateTask.id, (candidate) => ['blocked', 'failed', 'completed'].includes(candidate.status));
+assert.equal(blockedHardGateTask.status, 'blocked');
+assert.equal(blockedHardGateTask.blockedReason, 'step_approval_required');
+assert.equal(blockedHardGateTask.pendingToolAction?.toolName, 'code.commit');
+assert.equal(blockedHardGateTask.pendingToolAction?.approvalScope, 'repo.commit');
+assert.ok(blockedHardGateTask.events.some((event) => event.eventType === 'task.approval_needed'), 'hard-gated commit should emit approval-needed prompt');
 
 const finalTask = await waitForTask(task.id, (candidate) => ['completed', 'failed', 'blocked'].includes(candidate.status));
 assert.equal(finalTask.status, 'completed', `task should complete without an approval block, got ${finalTask.status}: ${finalTask.blockedReason || finalTask.result?.summary}`);

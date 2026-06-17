@@ -204,7 +204,7 @@ const cancelTaskWithReason = async (taskId: string, reason: string) => {
   return durableTaskQueue.cancel(taskId, reason, 'user');
 };
 
-tasksRouter.post('/:taskId/steps/:stepId/approve', async (req, res, next) => {
+const approveStep: RequestHandler<{ taskId: string; stepId: string }> = async (req, res, next) => {
   try {
     if (req.body?.confirmedByUser !== true) {
       res.status(400).json({ error: 'confirmedByUser=true is required to approve a pending step action' });
@@ -220,7 +220,10 @@ tasksRouter.post('/:taskId/steps/:stepId/approve', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
+};
+
+tasksRouter.post('/:taskId/steps/:stepId/approve', approveStep);
+tasksRouter.post('/:taskId/steps/:stepId/approval', approveStep);
 
 
 const denyTask: RequestHandler<{ taskId: string }> = async (req, res, next) => {

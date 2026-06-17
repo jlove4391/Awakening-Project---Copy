@@ -44,6 +44,17 @@ const latestApprovedRequirement = (task) =>
     .filter((item) => item.status === "approved")
     .sort((a, b) => String(b.approvedAt || "").localeCompare(String(a.approvedAt || "")))[0];
 
+const pendingStepAction = (task) => {
+  if (task.pendingToolAction?.approvalStatus === "pending") {
+    return task.pendingToolAction;
+  }
+  return (task.executionPlan || []).find(
+    (step) =>
+      step.approval?.required &&
+      (step.approvalStatus === "pending" || step.approval?.status === "pending"),
+  );
+};
+
 const taskWorkerStateCopy = (task) => {
   const status = task.uiState?.status || task.status;
   const currentStep = task.uiState?.currentWorkerStep;
@@ -245,6 +256,53 @@ const ExecutionReceiptsPanel = ({
     }
   };
 
+  const handleStepDecision = async (task, stepAction, decision) => {
+    const actionKey = `${task.id}:${stepAction.stepId || stepAction.id}`;
+    setApprovalActions((prev) => ({
+      ...prev,
+      [actionKey]: decision === "approve" ? "approving" : "denying",
+    }));
+    try {
+      const stepId = stepAction.stepId || stepAction.id;
+      const response = await fetch(
+        `${runtimeBaseUrl}/api/tasks/${task.id}/steps/${stepId}/${decision}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            confirmedByUser: decision === "approve" ? true : undefined,
+            approver: "user",
+            note:
+              decision === "approve"
+                ? "Approved blocked worker step from execution receipts panel."
+                : "Denied blocked worker step from execution receipts panel.",
+          }),
+        },
+      );
+      if (!response.ok)
+        throw new Error(`step ${decision} returned ${response.status}`);
+      const payload = await response.json();
+      if (payload.task) {
+        setDelegatedTasks((prev) =>
+          prev.map((item) => (item.id === payload.task.id ? payload.task : item)),
+        );
+      }
+      await loadExecutions({ showLoading: false });
+    } catch (approvalError) {
+      setError(
+        approvalError instanceof Error
+          ? approvalError.message
+          : `Unable to ${decision} delegated step`,
+      );
+    } finally {
+      setApprovalActions((prev) => {
+        const next = { ...prev };
+        delete next[actionKey];
+        return next;
+      });
+    }
+  };
+
   return (
     <section
       className="execution-receipts-panel"
@@ -282,6 +340,10 @@ const ExecutionReceiptsPanel = ({
             task.status === "pending_approval" &&
             approvalState === "pending" &&
             hasPendingTaskApproval(task);
+          const stepAction = pendingStepAction(task);
+          const stepActionKey = stepAction
+            ? `${task.id}:${stepAction.stepId || stepAction.id}`
+            : "";
 
           return (
             <article
@@ -320,6 +382,36 @@ const ExecutionReceiptsPanel = ({
                       {approvalActions[task.id] === "approving"
                         ? "Approving…"
                         : "Approve task"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {task.status === "blocked" && stepAction && (
+                <div className="execution-approval-summary">
+                  <p>
+                    Step approval is pending for{" "}
+                    {stepAction.toolName || stepAction.targetTool || "the blocked tool action"}.
+                  </p>
+                  <div className="approval-actions">
+                    <button
+                      type="button"
+                      onClick={() => handleStepDecision(task, stepAction, "approve")}
+                      disabled={Boolean(approvalActions[stepActionKey])}
+                    >
+                      {approvalActions[stepActionKey] === "approving"
+                        ? "Approving…"
+                        : "Approve step"}
+                    </button>
+                    <button
+                      type="button"
+                      className="approval-deny-button"
+                      onClick={() => handleStepDecision(task, stepAction, "deny")}
+                      disabled={Boolean(approvalActions[stepActionKey])}
+                    >
+                      {approvalActions[stepActionKey] === "denying"
+                        ? "Denying…"
+                        : "Deny step"}
                     </button>
                   </div>
                 </div>

@@ -30,7 +30,8 @@
     "smoke:approvals": "tsx scripts/smoke-delegated-resume.ts",
     "smoke:digitalocean-status": "tsx scripts/smoke-digitalocean-status.ts",
     "smoke:databank-status": "tsx scripts/smoke-databank-status.ts",
-    "smoke:web-tools": "tsx scripts/smoke-web-tools.ts"
+    "smoke:web-tools": "tsx scripts/smoke-web-tools.ts",
+    "smoke:delegated-approval-routing": "tsx scripts/smoke-delegated-approval-routing.ts"
   },
   "dependencies": {
     "@openai/agents": "latest",

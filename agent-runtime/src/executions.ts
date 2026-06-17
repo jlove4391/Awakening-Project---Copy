@@ -46,6 +46,7 @@ export interface ExecutionRecord {
     taskIds?: string[];
     toolCallId?: string;
     voiceSessionId?: string;
+    executionMode?: string;
   };
   status: ExecutionStatus;
   receipt: {

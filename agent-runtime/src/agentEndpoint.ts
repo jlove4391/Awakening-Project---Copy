@@ -59,6 +59,7 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
   context.voiceApproval = request.voiceApproval;
   context.agent = selectedAgent;
   context.autonomyProfile = request.autonomyProfile;
+  context.executionMode = request.executionMode || (request.autonomyProfile ? 'autonomous' : 'reactive');
 
   await sink?.({
     event: 'session',
@@ -69,6 +70,7 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
       channel: context.channel,
       voiceSessionId: context.voiceSessionId,
       agent: selectedAgent,
+      executionMode: context.executionMode,
     },
   });
   await sink?.({ event: 'memory', data: { references: await listMemories(context.sessionId, 5) } });

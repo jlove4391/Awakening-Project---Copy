@@ -330,11 +330,20 @@ async function blockForCapabilityPolicy(
   });
 }
 
+function executionModeForTask(task: DelegatedTask): RuntimeContext['executionMode'] {
+  return task.authorizationSource === 'autonomous' ? 'autonomous' : 'delegated';
+}
+
+function isUserAuthorizedTask(task: DelegatedTask) {
+  return task.authorizationSource === 'user_requested' || task.authorizationSource === 'user_delegated';
+}
+
 function createTaskRuntimeContext(task: DelegatedTask): RuntimeContext {
   return {
     sessionId: task.sessionId,
     agent: 'nexora',
     channel: 'text',
+    executionMode: executionModeForTask(task),
     session: undefined as unknown as RuntimeContext['session'],
     record: {
       id: task.sessionId,
@@ -388,7 +397,23 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
       }
       if (['completed', 'skipped', 'cancelled'].includes(step.status)) continue;
       const highRisk = await isStepHighRisk(step.targetTool);
-      const capabilityDecision = evaluateNexoraCapabilityForStep(step.targetTool, step.approvalStatus);
+      let capabilityDecision = evaluateNexoraCapabilityForStep(step.targetTool, step.approvalStatus);
+      if (!capabilityDecision.allowed && capabilityDecision.reason === 'approval_required' && isUserAuthorizedTask(task)) {
+        await updateExecutionPlanStep(task.id, step.id, {
+          approvalStatus: 'approved',
+          approval: {
+            required: true,
+            status: 'approved',
+            approver: 'user_authorized_execution_mode',
+            approvedAt: new Date().toISOString(),
+            note: 'Approved automatically because this delegated task was explicitly authorized by the user.',
+            reason: 'user_authorized_delegated_execution',
+            scope: approvalScopeForStep((await loadToolRegistry()).getRegisteredTool(step.targetTool)),
+          },
+        });
+        step.approvalStatus = 'approved';
+        capabilityDecision = evaluateNexoraCapabilityForStep(step.targetTool, step.approvalStatus);
+      }
       if (!capabilityDecision.allowed) {
         if (capabilityDecision.reason === 'approval_required') await blockForStepApproval(task, step);
         else await blockForCapabilityPolicy(task, step, capabilityDecision);

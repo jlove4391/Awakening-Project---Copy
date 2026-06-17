@@ -100,6 +100,7 @@ import { executeDelegatedCode } from '../workers/nexora/bridge.js';
 import { getDelegatedTask as getStoredDelegatedTask } from '../tasks/store.js';
 import { redactForLogs, redactProviderReceiptPayload } from '../workflows/nexora/secretsPolicy.js';
 import { webCrawlSite, webFetchUrl } from './webTools.js';
+import { requiresApprovalForAutonomyProfile } from '../governance/autonomyProfiles.js';
 
 export type ToolCategory =
   | 'calendar'
@@ -3440,13 +3441,13 @@ async function hasExactApprovalScope(definition: RegisteredToolDefinition, input
   return step?.targetTool === definition.name && step.approval?.scope === scope;
 }
 
-async function enforceApprovalLimits(definition: RegisteredToolDefinition, input: Record<string, unknown>, context: RuntimeContext, approvedThroughUi: boolean, executionId?: string, sanitizedInput?: Record<string, unknown>) {
-  if (definition.humanApprovalRequired && !approvedThroughUi) {
+async function enforceApprovalLimits(definition: RegisteredToolDefinition, input: Record<string, unknown>, context: RuntimeContext, approvedThroughUi: boolean, executionId?: string, sanitizedInput?: Record<string, unknown>, approvalRequired = definition.humanApprovalRequired) {
+  if (approvalRequired && !approvedThroughUi) {
     const reason = input?.confirmedByUser === true ? 'missing_react_ui_approval_context' : 'missing_explicit_user_approval';
     return approvalBlockedResult(definition, context, reason, executionId, sanitizedInput);
   }
 
-  if (definition.humanApprovalRequired && approvedThroughUi && !(await hasExactApprovalScope(definition, input, context, executionId))) {
+  if (approvalRequired && definition.humanApprovalRequired && approvedThroughUi && !(await hasExactApprovalScope(definition, input, context, executionId))) {
     return approvalBlockedResult(definition, context, 'approval_scope_mismatch', executionId, sanitizedInput);
   }
 
@@ -3489,7 +3490,8 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   const parsedInput = definition.parameters.parse(normalizedInput) as Record<string, unknown>;
   const sanitizedInput = sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []);
   const approvedExecutionId = typeof context.approvedExecutionId === 'string' ? context.approvedExecutionId : undefined;
-  const approved = !definition.humanApprovalRequired || Boolean(parsedInput.confirmedByUser === true && approvedExecutionId);
+  const approvalRequired = requiresApprovalForAutonomyProfile(context.autonomyProfile, definition, parsedInput);
+  const approved = !approvalRequired || Boolean(parsedInput.confirmedByUser === true && approvedExecutionId);
   const executionRecord = createExecutionRecord({
     kind: 'tool_call',
     whoRequested: 'user',
@@ -3497,7 +3499,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
     action: definition.name,
     inputPayload: sanitizedInput,
     riskLevel: definition.riskLevel,
-    approvalStatus: definition.humanApprovalRequired ? (approved ? 'approved' : 'pending') : 'not_required',
+    approvalStatus: approvalRequired ? (approved ? 'approved' : 'pending') : 'not_required',
     approvalScope: requiredApprovalScope(definition),
     linkedIds: {
       sessionId: context.sessionId,
@@ -3519,7 +3521,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
     input: sanitizedInput,
   });
 
-  const approvalBlock = await enforceApprovalLimits(definition, parsedInput, context, Boolean(approved), approvedExecutionId || executionRecord.id, sanitizedInput);
+  const approvalBlock = await enforceApprovalLimits(definition, parsedInput, context, Boolean(approved), approvedExecutionId || executionRecord.id, sanitizedInput, approvalRequired);
   if (approvalBlock) {
     const blockedRecord = completeExecutionRecord(executionRecord, {
       status: 'blocked',
@@ -3558,7 +3560,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       status: 'completed',
       executionResult: result,
       providerResponseSummary: summarizeProviderResponse(result),
-      approvalStatus: approved ? 'approved' : 'not_required',
+      approvalStatus: approvalRequired ? 'approved' : 'not_required',
       receiptSummary: `${definition.name} completed`,
     });
     await writeExecutionRecord(completedRecord);

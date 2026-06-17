@@ -58,6 +58,7 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
   context.voiceSessionId = request.voiceSessionId;
   context.voiceApproval = request.voiceApproval;
   context.agent = selectedAgent;
+  context.autonomyProfile = request.autonomyProfile;
 
   await sink?.({
     event: 'session',

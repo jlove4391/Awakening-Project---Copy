@@ -29,6 +29,8 @@ export type DelegatedTaskEventType =
 
 export type ApprovalRequirementStatus = 'not_required' | 'pending' | 'approved' | 'rejected';
 
+export type DelegatedTaskAuthorizationSource = 'autonomous' | 'user_requested' | 'user_delegated';
+
 export type ApprovalScope =
   | 'repo.write'
   | 'repo.delete'
@@ -49,6 +51,7 @@ export interface ApprovalRequirement {
   note?: string;
   reason?: string;
   scope?: ApprovalScope;
+  authorizationSource?: DelegatedTaskAuthorizationSource;
 }
 
 export interface TaskAuditEntry {
@@ -113,6 +116,7 @@ export interface ExecutionPlanStepApproval {
   note?: string;
   reason?: string;
   scope?: ApprovalScope;
+  authorizationSource?: DelegatedTaskAuthorizationSource;
 }
 
 export interface PendingToolAction {
@@ -176,6 +180,7 @@ export interface DelegatedTask {
   constraints: string[];
   requiredTools: string[];
   approvalRequirements: ApprovalRequirement[];
+  authorizationSource: DelegatedTaskAuthorizationSource;
   executionPlan?: ExecutionPlanStep[];
   status: DelegatedTaskStatus;
   blockedReason?: DelegatedTaskBlockedReason;
@@ -203,6 +208,7 @@ export interface CreateDelegatedTaskInput {
   executionPlan?: AppendExecutionPlanStepInput[];
   initialLog?: string;
   timeoutMs?: number;
+  authorizationSource?: DelegatedTaskAuthorizationSource;
 }
 
 

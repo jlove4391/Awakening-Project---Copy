@@ -8,6 +8,7 @@ import type {
   AppendExecutionPlanStepInput,
   ApprovalRequirement,
   CreateDelegatedTaskInput,
+  DelegatedTaskAuthorizationSource,
   DelegatedTask,
   DelegatedTaskEvent,
   DelegatedTaskEventType,
@@ -150,27 +151,41 @@ function appendBoundedTaskLog(task: DelegatedTask, log: string) {
   if (task.logs.length > maxInlineLogs) task.logs.splice(0, task.logs.length - maxInlineLogs);
 }
 
-function normalizeApprovalRequirements(input?: Array<Partial<ApprovalRequirement> | string>): ApprovalRequirement[] {
+function authorizedByUser(source: DelegatedTaskAuthorizationSource | undefined) {
+  return source === 'user_requested' || source === 'user_delegated';
+}
+
+function approvalBypassedReason(source: DelegatedTaskAuthorizationSource) {
+  return source === 'user_requested'
+    ? 'Direct user request authorizes this delegated task without an additional approval prompt.'
+    : 'Explicit user delegation chain authorizes this delegated task without an additional approval prompt.';
+}
+
+function normalizeApprovalRequirements(input?: Array<Partial<ApprovalRequirement> | string>, authorizationSource: DelegatedTaskAuthorizationSource = 'autonomous'): ApprovalRequirement[] {
+  const userAuthorized = authorizedByUser(authorizationSource);
   return (input || []).map((item) => {
     const base = typeof item === 'string' ? { reason: item } : item;
     const required = base.required ?? true;
+    const status = required ? (userAuthorized ? 'approved' : base.status || 'pending') : 'not_required';
     return {
       required,
-      status: required ? base.status || 'pending' : 'not_required',
+      status,
       approver: base.approver,
-      approvedAt: base.approvedAt,
+      approvedAt: base.approvedAt || (required && userAuthorized ? now() : undefined),
       rejectedAt: base.rejectedAt,
-      note: base.note,
+      note: base.note || (required && userAuthorized ? approvalBypassedReason(authorizationSource) : undefined),
       reason: base.reason,
+      authorizationSource,
     } satisfies ApprovalRequirement;
   });
 }
 
-function normalizeExecutionPlanStep(input: AppendExecutionPlanStepInput, order: number) {
+function normalizeExecutionPlanStep(input: AppendExecutionPlanStepInput, order: number, authorizationSource: DelegatedTaskAuthorizationSource = 'autonomous') {
   const timestamp = now();
+  const userAuthorized = authorizedByUser(authorizationSource);
   const requestedApprovalStatus = input.approval?.status || input.approvalStatus || 'not_required';
   const approvalRequired = input.approval?.required ?? requestedApprovalStatus === 'pending';
-  const approvalStatus = approvalRequired && requestedApprovalStatus === 'not_required' ? 'pending' : requestedApprovalStatus;
+  const approvalStatus = userAuthorized && approvalRequired ? 'approved' : (approvalRequired && requestedApprovalStatus === 'not_required' ? 'pending' : requestedApprovalStatus);
   return {
     id: input.id || randomUUID(),
     order: input.order ?? order,
@@ -182,10 +197,11 @@ function normalizeExecutionPlanStep(input: AppendExecutionPlanStepInput, order: 
       required: approvalRequired,
       status: approvalStatus,
       approver: input.approval?.approver,
-      approvedAt: input.approval?.approvedAt,
+      approvedAt: input.approval?.approvedAt || (approvalRequired && userAuthorized ? timestamp : undefined),
       rejectedAt: input.approval?.rejectedAt,
-      note: input.approval?.note,
+      note: input.approval?.note || (approvalRequired && userAuthorized ? approvalBypassedReason(authorizationSource) : undefined),
       reason: input.approval?.reason,
+      authorizationSource,
       scope: input.approval?.scope,
     },
     status: input.status || 'queued',
@@ -328,7 +344,8 @@ function applyStatusTimestamps(task: DelegatedTask, status: DelegatedTaskStatus)
 export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
   return serializedWrite(async () => {
     const tasks = await loadTasks();
-    const approvalRequirements = normalizeApprovalRequirements(input.approvalRequirements);
+    const authorizationSource = input.authorizationSource || 'autonomous';
+    const approvalRequirements = normalizeApprovalRequirements(input.approvalRequirements, authorizationSource);
     const status: DelegatedTaskStatus = needsApproval(approvalRequirements) ? 'pending_approval' : 'queued';
     const task: DelegatedTask = {
       id: randomUUID(),
@@ -339,8 +356,9 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       constraints: input.constraints || [],
       requiredTools: input.requiredTools || [],
       approvalRequirements,
+      authorizationSource,
       ...(input.executionPlan?.length
-        ? { executionPlan: input.executionPlan.map((step, index) => normalizeExecutionPlanStep(step, index + 1)) }
+        ? { executionPlan: input.executionPlan.map((step, index) => normalizeExecutionPlanStep(step, index + 1, authorizationSource)) }
         : {}),
       status,
       logs: input.initialLog ? [input.initialLog] : [],
@@ -356,6 +374,7 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       parentAgent: task.parentAgent,
       assignedAgent: task.assignedAgent,
       requiredTools: task.requiredTools,
+      authorizationSource: task.authorizationSource,
     });
     task.events.push(created);
     task.auditTrail.push(created);
@@ -369,7 +388,7 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       task.events.push(approval, approvalNeeded);
       task.auditTrail.push(approval, approvalNeeded);
     } else {
-      const queued = createAuditEntry(task.id, 'task.queued', 'system', 'Task was added to the durable Nexora queue.');
+      const queued = createAuditEntry(task.id, 'task.queued', 'system', 'Task was added to the durable Nexora queue.', { authorizationSource: task.authorizationSource });
       task.events.push(queued);
       task.auditTrail.push(queued);
     }
@@ -419,7 +438,7 @@ export async function appendExecutionPlanStep(taskId: string, input: AppendExecu
     if (!task) return undefined;
     task.executionPlan ||= [];
     const nextOrder = task.executionPlan.length ? Math.max(...task.executionPlan.map((step) => step.order)) + 1 : 1;
-    const step = normalizeExecutionPlanStep(input, nextOrder);
+    const step = normalizeExecutionPlanStep(input, nextOrder, task.authorizationSource);
     task.executionPlan.push(step);
     sortExecutionPlan(task);
 

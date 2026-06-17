@@ -4,6 +4,28 @@ export type DelegatedTaskStatus = 'queued' | 'pending_approval' | 'running' | 'b
 
 export type DelegatedTaskBlockedReason = 'step_approval_required' | 'provider_configuration_required' | 'worker_unavailable' | 'policy_block' | 'unknown';
 
+export type AutonomousImprovementRiskLevel = 'low' | 'medium' | 'high';
+
+export interface AutonomousImprovementProposal {
+  id: string;
+  title: string;
+  summary: string;
+  rationale: string;
+  affectedFiles: string[];
+  riskLevel: AutonomousImprovementRiskLevel;
+  proposedDiff?: string;
+  implementationNotes?: string;
+  changes?: unknown[];
+  status: 'proposed' | 'approved' | 'applied' | 'completed';
+  proposedBy: RuntimeAgentName | 'core';
+  createdAt: string;
+  approvedAt?: string;
+  approvedBy?: string;
+  appliedAt?: string;
+  completedAt?: string;
+  receipts: Array<{ id: string; type: 'proposal_created' | 'proposal_approved' | 'patch_applied' | 'proposal_completed'; summary: string; issuedAt: string }>;
+}
+
 export type DelegatedTaskEventType =
   | 'task.created'
   | 'task.queued'
@@ -25,7 +47,11 @@ export type DelegatedTaskEventType =
   | 'task.cancelled'
   | 'task.cancellation_requested'
   | 'task.timeout'
-  | 'task.receipt_created';
+  | 'task.receipt_created'
+  | 'proposal.created'
+  | 'proposal.approved'
+  | 'proposal.patch_applied'
+  | 'proposal.completed';
 
 export type ApprovalRequirementStatus = 'not_required' | 'pending' | 'approved' | 'rejected';
 
@@ -202,6 +228,7 @@ export interface DelegatedTask {
   parentTaskId?: string;
   delegationChain: string[];
   executionPlan?: ExecutionPlanStep[];
+  proposal?: AutonomousImprovementProposal;
   status: DelegatedTaskStatus;
   blockedReason?: DelegatedTaskBlockedReason;
   pendingToolAction?: PendingToolAction;

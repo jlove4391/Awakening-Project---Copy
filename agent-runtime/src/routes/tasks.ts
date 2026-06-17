@@ -192,6 +192,18 @@ const approveTask: RequestHandler<{ taskId: string }> = async (req, res, next) =
 tasksRouter.post('/:taskId/approve', approveTask);
 tasksRouter.post('/:taskId/approval', approveTask);
 
+const cancellationReason = (value: unknown, fallback: string) => String(value || fallback);
+
+const approvalDenialReason = (value: unknown) => {
+  const note = String(value || '').trim();
+  return note ? `Denied by user during approval flow: ${note}` : 'Denied by user during approval flow';
+};
+
+const cancelTaskWithReason = async (taskId: string, reason: string) => {
+  cancelActiveNexoraCommand(taskId, reason);
+  return durableTaskQueue.cancel(taskId, reason, 'user');
+};
+
 tasksRouter.post('/:taskId/steps/:stepId/approve', async (req, res, next) => {
   try {
     if (req.body?.confirmedByUser !== true) {
@@ -211,11 +223,51 @@ tasksRouter.post('/:taskId/steps/:stepId/approve', async (req, res, next) => {
 });
 
 
+const denyTask: RequestHandler<{ taskId: string }> = async (req, res, next) => {
+  try {
+    const reason = approvalDenialReason(req.body?.reason || req.body?.note);
+    const task = await cancelTaskWithReason(req.params.taskId, reason);
+    if (!task) {
+      res.status(404).json({ error: 'task not found' });
+      return;
+    }
+    res.json(taskResponse(task));
+  } catch (error) {
+    next(error);
+  }
+};
+
+tasksRouter.post('/:taskId/deny', denyTask);
+tasksRouter.post('/:taskId/reject', denyTask);
+
+const denyStep: RequestHandler<{ taskId: string; stepId: string }> = async (req, res, next) => {
+  try {
+    const existing = await getDelegatedTask(req.params.taskId);
+    const step = existing?.executionPlan?.find((candidate) => candidate.id === req.params.stepId);
+    if (!existing || !step) {
+      res.status(404).json({ error: 'task or step not found' });
+      return;
+    }
+
+    const reason = approvalDenialReason(req.body?.reason || req.body?.note);
+    const task = await cancelTaskWithReason(req.params.taskId, reason);
+    if (!task) {
+      res.status(404).json({ error: 'task or step not found' });
+      return;
+    }
+    res.json(taskResponse(task));
+  } catch (error) {
+    next(error);
+  }
+};
+
+tasksRouter.post('/:taskId/steps/:stepId/deny', denyStep);
+tasksRouter.post('/:taskId/steps/:stepId/reject', denyStep);
+
 tasksRouter.post('/:taskId/cancel', async (req, res, next) => {
   try {
-    const reason = String(req.body?.reason || 'Task cancellation requested.');
-    cancelActiveNexoraCommand(req.params.taskId, reason);
-    const task = await durableTaskQueue.cancel(req.params.taskId, reason, 'user');
+    const reason = cancellationReason(req.body?.reason, 'Task cancellation requested.');
+    const task = await cancelTaskWithReason(req.params.taskId, reason);
     if (!task) {
       res.status(404).json({ error: 'task not found' });
       return;

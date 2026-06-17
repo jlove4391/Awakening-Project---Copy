@@ -60,8 +60,38 @@ function isUserRequestedOrTraceableDelegatedOrigin(origin: ExecutionOrigin | und
   return origin === 'reactive' || origin === 'delegated';
 }
 
-export function isAllowedUserRequestedOrDelegatedCoreTool(toolName: string, origin: ExecutionOrigin | undefined) {
-  return isUserRequestedOrTraceableDelegatedOrigin(origin) && USER_REQUESTED_OR_DELEGATED_CORE_TOOLS.has(toolName as RegisteredToolDefinition['name']);
+const HARD_APPROVAL_ACTION_PATTERNS = [
+  /purchase/u,
+  /deploy/u,
+  /infrastructure/u,
+  /credential/u,
+  /secret/u,
+  /publish/u,
+  /push/u,
+  /migrate/u,
+];
+
+const LOW_RISK_PROVIDER_ACTION_PATTERNS = /^(status|list|search|read|lookup|plan|validate|estimate|classify|score|extract|create_draft|draft)/u;
+
+export function requiresHardApprovalGate(definition: Pick<RegisteredToolDefinition, 'name' | 'riskLevel' | 'audit' | 'requiredApprovalScope'> | undefined) {
+  if (!definition) return true;
+  if (definition.requiredApprovalScope) return true;
+  if (definition.name === 'code.commit') return true;
+  if (definition.riskLevel === 'external_send' || definition.riskLevel === 'purchase_or_commit') return true;
+
+  const action = definition.audit.action.toLowerCase();
+  const category = definition.audit.category;
+  if (definition.name.includes('migrate') || action.includes('migrate')) return true;
+  if (category === 'databank' && definition.riskLevel !== 'read') return true;
+  if (category !== 'code' && category !== 'nexora' && definition.riskLevel !== 'read' && !LOW_RISK_PROVIDER_ACTION_PATTERNS.test(action)) return true;
+  if (category === 'code' && action === 'push') return true;
+  return HARD_APPROVAL_ACTION_PATTERNS.some((pattern) => pattern.test(action));
+}
+
+export function isAllowedUserRequestedOrDelegatedCoreTool(toolName: string, origin: ExecutionOrigin | undefined, definition?: RegisteredToolDefinition) {
+  return isUserRequestedOrTraceableDelegatedOrigin(origin)
+    && USER_REQUESTED_OR_DELEGATED_CORE_TOOLS.has(toolName as RegisteredToolDefinition['name'])
+    && (!definition || !requiresHardApprovalGate(definition));
 }
 
 export interface NexoraCapabilityDecision {
@@ -208,7 +238,12 @@ export function evaluateNexoraCapabilityForStep(toolName: string, approvalStatus
     return { allowed: false, reason: 'tool_not_allowed', message: `Tool ${toolName} is not allowed by the Nexora capability matrix.` };
   }
 
-  const allowedByUserRequestedOrDelegatedOrigin = isAllowedUserRequestedOrDelegatedCoreTool(toolName, executionOrigin);
+  const capabilityRequiresHardApproval = capability.approvalRequirement === 'explicit_human_approval' || capability.riskLevel === 'purchase_or_commit';
+  const allowedByUserRequestedOrDelegatedOrigin = isAllowedUserRequestedOrDelegatedCoreTool(toolName, executionOrigin) && !capabilityRequiresHardApproval;
+
+  if (capabilityRequiresHardApproval && approvalStatus !== 'approved') {
+    return { allowed: false, capability, reason: 'approval_required', message: `Nexora capability ${capability.id} requires explicit user approval before running high-risk ${toolName}.` };
+  }
 
   if (!allowedByUserRequestedOrDelegatedOrigin && !envFlagEnabled(capability.environmentFlag, capability.defaultEnabled)) {
     return {

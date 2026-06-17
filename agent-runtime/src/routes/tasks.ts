@@ -4,6 +4,9 @@ import { cancelActiveNexoraCommand } from '../workers/nexora/localWorker.js';
 import {
   appendDelegatedTaskEvent,
   approveDelegatedTask,
+  createAutonomousImprovementProposal,
+  markAutonomousImprovementProposalApplied,
+  markAutonomousImprovementProposalApproved,
   approveExecutionPlanStep,
   createDelegatedTask,
   getDelegatedTask,
@@ -11,6 +14,7 @@ import {
   listDelegatedTasks,
   updateDelegatedTask,
 } from '../tasks/store.js';
+import { planApplyVerify, type NexoraPlanApplyVerifyChange } from '../workflows/nexora/planApplyVerify.js';
 import type { ApprovalRequirement, DelegatedTask, DelegatedTaskEventType, DelegatedTaskStatus, TaskAuditEntry } from '../tasks/types.js';
 
 export const tasksRouter = Router();
@@ -53,6 +57,24 @@ function taskEventType(value: unknown): DelegatedTaskEventType {
 function taskEventActor(value: unknown): TaskAuditEntry['actor'] {
   const actor = String(value || 'system') as TaskAuditEntry['actor'];
   return ['elora', 'nexora', 'kaz', 'jynx', 'kalyra', 'system', 'user'].includes(actor) ? actor : 'system';
+}
+
+
+function proposalRiskLevel(value: unknown) {
+  return value === 'low' || value === 'medium' || value === 'high' ? value : 'medium';
+}
+
+function proposalChanges(value: unknown): NexoraPlanApplyVerifyChange[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((change): change is NexoraPlanApplyVerifyChange => {
+    if (!change || typeof change !== 'object') return false;
+    const item = change as Record<string, unknown>;
+    return (
+      (item.kind === 'create_file' && typeof item.path === 'string' && typeof item.content === 'string') ||
+      (item.kind === 'edit_file' && typeof item.path === 'string' && typeof item.content === 'string') ||
+      (item.kind === 'patch_file' && typeof item.path === 'string' && typeof item.search === 'string' && typeof item.replace === 'string')
+    );
+  });
 }
 
 function approvalRequirementArray(value: unknown): Array<Partial<ApprovalRequirement> | string> {
@@ -179,13 +201,66 @@ tasksRouter.post('/:taskId/events', async (req, res, next) => {
   }
 });
 
+
+tasksRouter.post('/:taskId/proposals', async (req, res, next) => {
+  try {
+    const task = await createAutonomousImprovementProposal(req.params.taskId, {
+      title: String(req.body?.title || '').trim(),
+      summary: String(req.body?.summary || '').trim(),
+      rationale: String(req.body?.rationale || '').trim(),
+      affectedFiles: stringArray(req.body?.affectedFiles),
+      riskLevel: proposalRiskLevel(req.body?.riskLevel),
+      proposedDiff: typeof req.body?.proposedDiff === 'string' ? req.body.proposedDiff : undefined,
+      implementationNotes: typeof req.body?.implementationNotes === 'string' ? req.body.implementationNotes : undefined,
+      changes: proposalChanges(req.body?.changes),
+      proposedBy: req.body?.proposedBy === 'core' || req.body?.proposedBy === 'elora' || req.body?.proposedBy === 'nexora' ? req.body.proposedBy : 'nexora',
+    });
+    if (!task) {
+      res.status(404).json({ error: 'task not found' });
+      return;
+    }
+    res.status(201).json(taskResponse(task));
+  } catch (error) {
+    next(error);
+  }
+});
+
 const approveTask: RequestHandler<{ taskId: string }> = async (req, res, next) => {
   try {
     if (req.body?.confirmedByUser !== true) {
       res.status(400).json({ error: 'confirmedByUser=true is required to approve a pending task' });
       return;
     }
-    const task = await approveDelegatedTask(req.params.taskId, String(req.body?.approver || 'user'), String(req.body?.note || ''));
+    const approver = String(req.body?.approver || 'user');
+    const note = String(req.body?.note || '');
+    const existing = await getDelegatedTask(req.params.taskId);
+    if (!existing) {
+      res.status(404).json({ error: 'task not found' });
+      return;
+    }
+    if (existing.proposal?.status === 'proposed') {
+      if (!existing.proposal.changes?.length) {
+        res.status(400).json({ error: 'proposal has no executable changes; add changes before approval can apply a patch through the governed path' });
+        return;
+      }
+      await approveDelegatedTask(req.params.taskId, approver, note);
+      await markAutonomousImprovementProposalApproved(req.params.taskId, approver, note);
+      await planApplyVerify({
+        objective: existing.proposal.title,
+        delegatedTaskId: existing.id,
+        relevantPaths: existing.proposal.affectedFiles,
+        changes: existing.proposal.changes as NexoraPlanApplyVerifyChange[],
+        writeApproval: { confirmedByUser: true, approvalNote: note || `Approved proposal ${existing.proposal.id}` },
+      });
+      const task = await markAutonomousImprovementProposalApplied(req.params.taskId, `Proposal ${existing.proposal.id} patch applied through nexora.plan_apply_verify.`, { approver });
+      if (!task) {
+        res.status(404).json({ error: 'task not found' });
+        return;
+      }
+      res.json(taskResponse(task));
+      return;
+    }
+    const task = await approveDelegatedTask(req.params.taskId, approver, note);
     if (!task) {
       res.status(404).json({ error: 'task not found' });
       return;

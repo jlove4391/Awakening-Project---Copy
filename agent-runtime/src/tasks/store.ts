@@ -8,6 +8,7 @@ import { taskEvents } from './events.js';
 import type {
   AppendExecutionPlanStepInput,
   ApprovalRequirement,
+  AutonomousImprovementProposal,
   CreateDelegatedTaskInput,
   DelegatedTaskAuthorizationSource,
   DelegatedTask,
@@ -345,6 +346,49 @@ function createAuditEntry(
 async function appendAuditJsonl(entry: TaskAuditEntry) {
   await ensureStore();
   await fs.appendFile(auditPath, `${JSON.stringify(entry)}\n`);
+}
+
+
+function createProposalReceipt(type: AutonomousImprovementProposal['receipts'][number]['type'], summary: string) {
+  return { id: randomUUID(), type, summary, issuedAt: now() };
+}
+
+function normalizeProposal(input: {
+  title: string;
+  summary: string;
+  rationale: string;
+  affectedFiles?: string[];
+  riskLevel?: AutonomousImprovementProposal['riskLevel'];
+  proposedDiff?: string;
+  implementationNotes?: string;
+  changes?: unknown[];
+  proposedBy?: AutonomousImprovementProposal['proposedBy'];
+}): AutonomousImprovementProposal {
+  const title = String(input.title || '').trim();
+  const summary = String(input.summary || '').trim();
+  const rationale = String(input.rationale || '').trim();
+  if (!title || !summary || !rationale) throw new Error('proposal title, summary, and rationale are required');
+  if (!input.proposedDiff && !input.implementationNotes && !input.changes?.length) {
+    throw new Error('proposal requires proposedDiff, implementationNotes, or executable changes');
+  }
+  const riskLevel = input.riskLevel === 'high' || input.riskLevel === 'medium' || input.riskLevel === 'low' ? input.riskLevel : 'medium';
+  const createdAt = now();
+  const id = randomUUID();
+  return {
+    id,
+    title,
+    summary,
+    rationale,
+    affectedFiles: (input.affectedFiles || []).map(String).map((item) => item.trim()).filter(Boolean),
+    riskLevel,
+    ...(input.proposedDiff ? { proposedDiff: String(input.proposedDiff) } : {}),
+    ...(input.implementationNotes ? { implementationNotes: String(input.implementationNotes) } : {}),
+    ...(input.changes?.length ? { changes: input.changes } : {}),
+    status: 'proposed',
+    proposedBy: input.proposedBy || 'nexora',
+    createdAt,
+    receipts: [createProposalReceipt('proposal_created', `Proposal ${id} created: ${title}`)],
+  };
 }
 
 function createReceipt(task: DelegatedTask): TaskReceipt {
@@ -887,6 +931,62 @@ export async function approveExecutionPlanStep(taskId: string, stepId: string, a
     await persistTasks();
     await Promise.all([event, queued].map(appendAuditJsonl));
     taskEvents.emitTaskUpdated(task, queued, getDelegatedTaskUiState(task));
+    return task;
+  });
+}
+
+
+export async function createAutonomousImprovementProposal(taskId: string, input: Parameters<typeof normalizeProposal>[0]) {
+  return serializedWrite(async () => {
+    const task = await getDelegatedTask(taskId);
+    if (!task) return undefined;
+    const proposal = normalizeProposal(input);
+    task.proposal = proposal;
+    const event = createAuditEntry(task.id, 'proposal.created', proposal.proposedBy === 'core' ? 'system' : proposal.proposedBy, proposal.receipts[0].summary, { proposal });
+    task.events.push(event);
+    task.auditTrail.push(event);
+    task.updatedAt = now();
+    await persistTasks();
+    await appendAuditJsonl(event);
+    taskEvents.emitTaskUpdated(task, event, getDelegatedTaskUiState(task));
+    return task;
+  });
+}
+
+export async function markAutonomousImprovementProposalApproved(taskId: string, approver = 'user', note = '') {
+  return serializedWrite(async () => {
+    const task = await getDelegatedTask(taskId);
+    if (!task?.proposal) return undefined;
+    const timestamp = now();
+    const receipt = createProposalReceipt('proposal_approved', `Proposal ${task.proposal.id} approved by ${approver}.`);
+    task.proposal = { ...task.proposal, status: 'approved', approvedAt: timestamp, approvedBy: approver, receipts: [...task.proposal.receipts, receipt] };
+    const event = createAuditEntry(task.id, 'proposal.approved', 'user', receipt.summary, { proposalId: task.proposal.id, note });
+    task.events.push(event);
+    task.auditTrail.push(event);
+    task.updatedAt = timestamp;
+    await persistTasks();
+    await appendAuditJsonl(event);
+    taskEvents.emitTaskUpdated(task, event, getDelegatedTaskUiState(task));
+    return task;
+  });
+}
+
+export async function markAutonomousImprovementProposalApplied(taskId: string, summary: string, details?: Record<string, unknown>) {
+  return serializedWrite(async () => {
+    const task = await getDelegatedTask(taskId);
+    if (!task?.proposal) return undefined;
+    const timestamp = now();
+    const appliedReceipt = createProposalReceipt('patch_applied', summary || `Proposal ${task.proposal.id} patch applied.`);
+    const completedReceipt = createProposalReceipt('proposal_completed', `Proposal ${task.proposal.id} completed.`);
+    task.proposal = { ...task.proposal, status: 'completed', appliedAt: timestamp, completedAt: timestamp, receipts: [...task.proposal.receipts, appliedReceipt, completedReceipt] };
+    const applied = createAuditEntry(task.id, 'proposal.patch_applied', 'nexora', appliedReceipt.summary, { proposalId: task.proposal.id, ...details });
+    const completed = createAuditEntry(task.id, 'proposal.completed', 'system', completedReceipt.summary, { proposalId: task.proposal.id });
+    task.events.push(applied, completed);
+    task.auditTrail.push(applied, completed);
+    task.updatedAt = timestamp;
+    await persistTasks();
+    await Promise.all([applied, completed].map(appendAuditJsonl));
+    taskEvents.emitTaskUpdated(task, completed, getDelegatedTaskUiState(task));
     return task;
   });
 }

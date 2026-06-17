@@ -12,13 +12,12 @@ const workspaceRoot = path.join(smokeRoot, 'workspace');
 const dataDir = path.join(smokeRoot, 'data');
 const targetPath = '.runtime-smoke/user-requested-no-approval.txt';
 const targetContent = 'User-requested delegated task executed without approval prompt.\n';
+const testMarkerPath = '.runtime-smoke/user-requested-test-command.txt';
 const sessionId = `smoke-user-requested-delegated-no-approval-${Date.now()}`;
 const timeoutMs = Number(process.env.SMOKE_USER_REQUESTED_DELEGATED_NO_APPROVAL_TIMEOUT_MS || 30000);
 
 process.env.AGENT_RUNTIME_DATA_DIR = dataDir;
-process.env.AGENT_RUNTIME_CORE_TESTING_MODE = 'true';
 process.env.NEXORA_WORKSPACE_ROOT = workspaceRoot;
-process.env.NEXORA_ENABLE_WRITE_FILES = 'true';
 
 await mkdir(path.join(workspaceRoot, '.runtime-smoke'), { recursive: true });
 
@@ -29,7 +28,7 @@ const task = await createDelegatedTask({
   sessionId,
   objective: `Create ${targetPath} from an explicit user-requested delegated task.`,
   constraints: [`path: ${targetPath}`, `content: ${targetContent.trim()}`],
-  requiredTools: ['code.create_file'],
+  requiredTools: ['code.create_file', 'code.test'],
   authorizationSource: 'user_delegated',
   approvalRequirements: ['Would require approval if this were autonomous/proactive.'],
   executionPlan: [
@@ -40,6 +39,18 @@ const task = await createDelegatedTask({
       approvalStatus: 'pending',
       approval: { required: true, status: 'pending', reason: 'write_requires_user_authorization' },
     },
+    {
+      id: 'run-user-requested-test',
+      targetTool: 'code.test',
+      arguments: {
+        command: `node -e \"require('fs').writeFileSync('${testMarkerPath}', 'test command executed without approval prompt\\n')\"`,
+        cwd: '.',
+        timeoutMs: 5000,
+        maxOutputBytes: 4096,
+      },
+      approvalStatus: 'pending',
+      approval: { required: true, status: 'pending', reason: 'test_command_requires_user_authorization' },
+    },
   ],
   initialLog: 'Smoke task verifies user-requested delegated execution bypasses approval prompts while preserving audit receipts.',
 });
@@ -48,12 +59,13 @@ assert.equal(task.authorizationSource, 'user_delegated');
 assert.equal(task.status, 'queued');
 assert.equal(task.approvalRequirements[0]?.status, 'approved');
 assert.equal(task.executionPlan?.[0]?.approvalStatus, 'approved');
+assert.equal(task.executionPlan?.[1]?.approvalStatus, 'approved');
 assert.ok(task.events.some((event) => event.eventType === 'task.queued'), 'created task should emit queued audit event');
-assert.ok(!task.events.some((event) => event.eventType === 'task.approval_needed'), 'CORE testing mode should not create a pending approval item for explicit delegated/user-requested work');
+assert.ok(!task.events.some((event) => event.eventType === 'task.approval_needed'), 'user-authorized governance should not create a pending approval item for explicit delegated/user-requested work');
 
 const autonomousTask = await createDelegatedTask({
   sessionId,
-  objective: 'Autonomous mutation still requires approval in CORE testing mode.',
+  objective: 'Autonomous mutation still requires approval.',
   requiredTools: ['code.create_file'],
   authorizationSource: 'autonomous',
   approvalRequirements: ['Autonomous write must still wait for approval.'],
@@ -73,19 +85,20 @@ assert.ok(autonomousTask.events.some((event) => event.eventType === 'task.approv
 
 const directUserTask = await createDelegatedTask({
   sessionId,
-  objective: 'Direct user request also starts without an additional approval prompt in CORE testing mode.',
+  objective: 'Direct user request also starts without an additional approval prompt.',
   authorizationSource: 'user_requested',
-  approvalRequirements: ['Direct request should be treated as already authorized in CORE testing mode.'],
+  approvalRequirements: ['Direct request should be treated as already authorized.'],
 });
 assert.equal(directUserTask.status, 'queued');
 assert.equal(directUserTask.approvalRequirements[0]?.status, 'approved');
-assert.ok(!directUserTask.events.some((event) => event.eventType === 'task.approval_needed'), 'direct user request should not create a pending approval item in CORE testing mode');
+assert.ok(!directUserTask.events.some((event) => event.eventType === 'task.approval_needed'), 'direct user request should not create a pending approval item');
 
 const finalTask = await waitForTask(task.id, (candidate) => ['completed', 'failed', 'blocked'].includes(candidate.status));
 assert.equal(finalTask.status, 'completed', `task should complete without an approval block, got ${finalTask.status}: ${finalTask.blockedReason || finalTask.result?.summary}`);
 assert.equal(finalTask.blockedReason, undefined);
 assert.ok(!finalTask.events.some((event) => event.eventType === 'task.approval_needed'), 'user-requested delegated task should not emit approval-needed prompt');
 assert.ok(existsSync(path.join(workspaceRoot, targetPath)), `expected ${targetPath} to exist`);
+assert.ok(existsSync(path.join(workspaceRoot, testMarkerPath)), `expected ${testMarkerPath} to exist`);
 assert.ok(finalTask.receipt?.id, 'completed task should include a receipt');
 assert.ok(finalTask.auditTrail.length > 0, 'completed task should retain audit trail entries');
 console.log('User-requested delegated no-approval smoke passed.');

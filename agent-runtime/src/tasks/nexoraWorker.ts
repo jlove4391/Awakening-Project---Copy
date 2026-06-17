@@ -1,6 +1,5 @@
 import type { RegisteredToolDefinition } from '../tools/registry.js';
-import { runtimeConfig } from '../config.js';
-import { evaluateNexoraCapabilityForStep, findNexoraCapabilityForTool } from '../workflows/nexora/capabilities.js';
+import { evaluateNexoraCapabilityForStep, findNexoraCapabilityForTool, isAllowedUserRequestedOrDelegatedCoreTool } from '../workflows/nexora/capabilities.js';
 import type { RuntimeContext } from '../types.js';
 import { appendExecutionPlanStep, cancelDelegatedTask, getDelegatedTask, updateDelegatedTask, updateExecutionPlanStep } from './store.js';
 import type { DelegatedTask } from './types.js';
@@ -335,8 +334,8 @@ function executionModeForTask(task: DelegatedTask): RuntimeContext['executionMod
   return task.executionOrigin;
 }
 
-function isUserAuthorizedTask(task: DelegatedTask) {
-  return runtimeConfig.coreTestingMode && (task.authorizationSource === 'user_requested' || task.authorizationSource === 'user_delegated');
+function isUserAuthorizedForStep(task: DelegatedTask, toolName: string) {
+  return (task.authorizationSource === 'user_requested' || task.authorizationSource === 'user_delegated') && isAllowedUserRequestedOrDelegatedCoreTool(toolName, task.executionOrigin);
 }
 
 function createTaskRuntimeContext(task: DelegatedTask): RuntimeContext {
@@ -398,8 +397,8 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
       }
       if (['completed', 'skipped', 'cancelled'].includes(step.status)) continue;
       const highRisk = await isStepHighRisk(step.targetTool);
-      let capabilityDecision = evaluateNexoraCapabilityForStep(step.targetTool, step.approvalStatus);
-      if (!capabilityDecision.allowed && capabilityDecision.reason === 'approval_required' && isUserAuthorizedTask(task)) {
+      let capabilityDecision = evaluateNexoraCapabilityForStep(step.targetTool, step.approvalStatus, task.executionOrigin);
+      if (!capabilityDecision.allowed && capabilityDecision.reason === 'approval_required' && isUserAuthorizedForStep(task, step.targetTool)) {
         await updateExecutionPlanStep(task.id, step.id, {
           approvalStatus: 'approved',
           approval: {
@@ -413,7 +412,7 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
           },
         });
         step.approvalStatus = 'approved';
-        capabilityDecision = evaluateNexoraCapabilityForStep(step.targetTool, step.approvalStatus);
+        capabilityDecision = evaluateNexoraCapabilityForStep(step.targetTool, step.approvalStatus, task.executionOrigin);
       }
       if (!capabilityDecision.allowed) {
         if (capabilityDecision.reason === 'approval_required') await blockForStepApproval(task, step);

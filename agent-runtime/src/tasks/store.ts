@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { runtimeConfig } from '../config.js';
+import { isAllowedUserRequestedOrDelegatedCoreTool } from '../workflows/nexora/capabilities.js';
 import { attachNexoraCompletion } from '../workflows/nexora/completion.js';
 import { taskEvents } from './events.js';
 import type {
@@ -153,7 +154,7 @@ function appendBoundedTaskLog(task: DelegatedTask, log: string) {
 }
 
 function authorizedByUser(source: DelegatedTaskAuthorizationSource | undefined) {
-  return runtimeConfig.coreTestingMode && (source === 'user_requested' || source === 'user_delegated');
+  return source === 'user_requested' || source === 'user_delegated';
 }
 
 function originForAuthorizationSource(source: DelegatedTaskAuthorizationSource): ExecutionOrigin {
@@ -198,7 +199,8 @@ function normalizeExecutionPlanStep(
   originContext?: { executionOrigin: ExecutionOrigin; rootTaskId?: string; parentTaskId?: string; delegationChain?: string[] },
 ) {
   const timestamp = now();
-  const userAuthorized = authorizedByUser(authorizationSource);
+  const executionOrigin = input.executionOrigin || originContext?.executionOrigin || originForAuthorizationSource(authorizationSource);
+  const userAuthorized = authorizedByUser(authorizationSource) && isAllowedUserRequestedOrDelegatedCoreTool(input.targetTool, executionOrigin);
   const requestedApprovalStatus = input.approval?.status || input.approvalStatus || 'not_required';
   const approvalRequired = input.approval?.required ?? requestedApprovalStatus === 'pending';
   const approvalStatus = userAuthorized && approvalRequired ? 'approved' : (approvalRequired && requestedApprovalStatus === 'not_required' ? 'pending' : requestedApprovalStatus);
@@ -221,7 +223,7 @@ function normalizeExecutionPlanStep(
       scope: input.approval?.scope,
     },
     status: input.status || 'queued',
-    executionOrigin: input.executionOrigin || originContext?.executionOrigin || originForAuthorizationSource(authorizationSource),
+    executionOrigin,
     ...(input.parentTaskId || originContext?.parentTaskId ? { parentTaskId: input.parentTaskId || originContext?.parentTaskId } : {}),
     ...(input.rootTaskId || originContext?.rootTaskId ? { rootTaskId: input.rootTaskId || originContext?.rootTaskId } : {}),
     delegationChain: originContext?.delegationChain || [],

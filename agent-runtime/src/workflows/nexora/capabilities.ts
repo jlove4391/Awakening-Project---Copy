@@ -1,3 +1,4 @@
+import type { ExecutionOrigin } from '../../tasks/types.js';
 import type { RegisteredToolDefinition, ToolRiskLevel } from '../../tools/registry.js';
 
 export type NexoraCapabilityId =
@@ -10,7 +11,9 @@ export type NexoraCapabilityId =
   | 'create_app'
   | 'manage_provider_resources'
   | 'inspect_databanks'
-  | 'mutate_databanks';
+  | 'mutate_databanks'
+  | 'fetch_url'
+  | 'bounded_crawl';
 
 export type NexoraCapabilityApprovalRequirement = 'none' | 'explicit_step_approval' | 'explicit_human_approval';
 
@@ -23,6 +26,42 @@ export interface NexoraCapabilityDefinition {
   defaultEnabled: boolean;
   environmentFlag?: string;
   requiredReceiptFields: string[];
+}
+
+const USER_REQUESTED_OR_DELEGATED_CORE_TOOLS = new Set<RegisteredToolDefinition['name']>([
+  'code.read',
+  'code.search',
+  'code.tree',
+  'code.read_json',
+  'code.diff',
+  'code.git_status',
+  'code.git_diff',
+  'code.git_log',
+  'code.project_summary',
+  'code.package_scripts',
+  'code.dependency_summary',
+  'code.find_entrypoints',
+  'code.find_configs',
+  'code.edit',
+  'code.create_file',
+  'code.patch_file',
+  'code.move_path',
+  'code.copy_path',
+  'code.mkdir',
+  'code.write_json',
+  'code.git_restore_file',
+  'code.run_command',
+  'code.test',
+  'web.fetch_url',
+  'web.crawl_site',
+]);
+
+function isUserRequestedOrTraceableDelegatedOrigin(origin: ExecutionOrigin | undefined) {
+  return origin === 'reactive' || origin === 'delegated';
+}
+
+export function isAllowedUserRequestedOrDelegatedCoreTool(toolName: string, origin: ExecutionOrigin | undefined) {
+  return isUserRequestedOrTraceableDelegatedOrigin(origin) && USER_REQUESTED_OR_DELEGATED_CORE_TOOLS.has(toolName as RegisteredToolDefinition['name']);
 }
 
 export interface NexoraCapabilityDecision {
@@ -137,6 +176,24 @@ export const nexoraCapabilities: Record<NexoraCapabilityId, NexoraCapabilityDefi
     environmentFlag: 'NEXORA_ENABLE_MUTATE_DATABANKS',
     requiredReceiptFields: ['capabilityId', 'toolName', 'databankId', 'migrationId', 'backupId', 'approvalNote', 'resultSummary'],
   },
+  fetch_url: {
+    id: 'fetch_url',
+    label: 'fetch URL',
+    allowedTools: ['web.fetch_url'],
+    riskLevel: 'read',
+    approvalRequirement: 'none',
+    defaultEnabled: true,
+    requiredReceiptFields: ['capabilityId', 'toolName', 'url', 'resultSummary'],
+  },
+  bounded_crawl: {
+    id: 'bounded_crawl',
+    label: 'bounded crawl',
+    allowedTools: ['web.crawl_site'],
+    riskLevel: 'read',
+    approvalRequirement: 'none',
+    defaultEnabled: true,
+    requiredReceiptFields: ['capabilityId', 'toolName', 'startUrl', 'maxPages', 'maxDepth', 'resultSummary'],
+  },
 };
 
 export const nexoraCapabilityMatrix = Object.values(nexoraCapabilities);
@@ -145,13 +202,15 @@ export function findNexoraCapabilityForTool(toolName: string) {
   return nexoraCapabilityMatrix.find((capability) => capability.allowedTools.includes(toolName as RegisteredToolDefinition['name']));
 }
 
-export function evaluateNexoraCapabilityForStep(toolName: string, approvalStatus: string | undefined): NexoraCapabilityDecision {
+export function evaluateNexoraCapabilityForStep(toolName: string, approvalStatus: string | undefined, executionOrigin?: ExecutionOrigin): NexoraCapabilityDecision {
   const capability = findNexoraCapabilityForTool(toolName);
   if (!capability) {
     return { allowed: false, reason: 'tool_not_allowed', message: `Tool ${toolName} is not allowed by the Nexora capability matrix.` };
   }
 
-  if (!envFlagEnabled(capability.environmentFlag, capability.defaultEnabled)) {
+  const allowedByUserRequestedOrDelegatedOrigin = isAllowedUserRequestedOrDelegatedCoreTool(toolName, executionOrigin);
+
+  if (!allowedByUserRequestedOrDelegatedOrigin && !envFlagEnabled(capability.environmentFlag, capability.defaultEnabled)) {
     return {
       allowed: false,
       capability,
@@ -160,7 +219,7 @@ export function evaluateNexoraCapabilityForStep(toolName: string, approvalStatus
     };
   }
 
-  if (capability.approvalRequirement !== 'none' && approvalStatus !== 'approved') {
+  if (!allowedByUserRequestedOrDelegatedOrigin && capability.approvalRequirement !== 'none' && approvalStatus !== 'approved') {
     return { allowed: false, capability, reason: 'approval_required', message: `Nexora capability ${capability.id} requires approval before running ${toolName}.` };
   }
 

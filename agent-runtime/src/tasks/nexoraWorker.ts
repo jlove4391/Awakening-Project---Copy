@@ -1,4 +1,5 @@
 import type { RegisteredToolDefinition } from '../tools/registry.js';
+import { runtimeConfig } from '../config.js';
 import { evaluateNexoraCapabilityForStep, findNexoraCapabilityForTool } from '../workflows/nexora/capabilities.js';
 import type { RuntimeContext } from '../types.js';
 import { appendExecutionPlanStep, cancelDelegatedTask, getDelegatedTask, updateDelegatedTask, updateExecutionPlanStep } from './store.js';
@@ -335,7 +336,7 @@ function executionModeForTask(task: DelegatedTask): RuntimeContext['executionMod
 }
 
 function isUserAuthorizedTask(task: DelegatedTask) {
-  return task.authorizationSource === 'user_requested' || task.authorizationSource === 'user_delegated';
+  return runtimeConfig.coreTestingMode && (task.authorizationSource === 'user_requested' || task.authorizationSource === 'user_delegated');
 }
 
 function createTaskRuntimeContext(task: DelegatedTask): RuntimeContext {

@@ -11,6 +11,7 @@ export const runtimeConfig = {
   openaiBaseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
   dataDir: process.env.AGENT_RUNTIME_DATA_DIR || path.join(runtimeRoot, '.runtime-data'),
   sessionBackend: process.env.AGENT_RUNTIME_SESSION_BACKEND || 'auto',
+  coreTestingMode: process.env.AGENT_RUNTIME_CORE_TESTING_MODE === 'true' || process.env.AGENT_RUNTIME_PROFILE === 'core_testing',
   corsOrigin: process.env.AGENT_RUNTIME_CORS_ORIGIN || 'http://localhost:3000',
   codeWorkspaceRoot: process.env.NEXORA_WORKSPACE_ROOT || process.env.CODE_WORKSPACE_ROOT || repoRoot,
   codeCommandTimeoutMs: Number(process.env.NEXORA_CODE_COMMAND_TIMEOUT_MS || process.env.CODE_COMMAND_TIMEOUT_MS || 120000),

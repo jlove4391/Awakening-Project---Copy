@@ -152,7 +152,7 @@ function appendBoundedTaskLog(task: DelegatedTask, log: string) {
 }
 
 function authorizedByUser(source: DelegatedTaskAuthorizationSource | undefined) {
-  return source === 'user_requested' || source === 'user_delegated';
+  return runtimeConfig.coreTestingMode && (source === 'user_requested' || source === 'user_delegated');
 }
 
 function approvalBypassedReason(source: DelegatedTaskAuthorizationSource) {

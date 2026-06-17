@@ -332,7 +332,7 @@ async function blockForCapabilityPolicy(
 }
 
 function executionModeForTask(task: DelegatedTask): RuntimeContext['executionMode'] {
-  return task.authorizationSource === 'autonomous' ? 'autonomous' : 'delegated';
+  return task.executionOrigin;
 }
 
 function isUserAuthorizedTask(task: DelegatedTask) {

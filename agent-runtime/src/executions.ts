@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { runtimeConfig } from './config.js';
 import type { ToolRiskLevel } from './tools/registry.js';
 import type { ApprovalScope } from './tasks/types.js';
+import type { ExecutionMode } from './types.js';
 import { redactProviderReceiptPayload, safeReceiptSummary } from './workflows/nexora/secretsPolicy.js';
 
 export type ExecutionKind = 'tool_call' | 'delegated_task' | 'runtime_action';
@@ -47,12 +48,16 @@ export interface ExecutionRecord {
     toolCallId?: string;
     voiceSessionId?: string;
     executionMode?: string;
+    executionOrigin?: ExecutionMode;
+    rootTaskId?: string;
+    parentTaskId?: string;
   };
   status: ExecutionStatus;
   receipt: {
     summary: string;
     status: ExecutionStatus;
     issuedAt: string;
+    executionOrigin?: ExecutionMode;
   };
 }
 
@@ -108,6 +113,7 @@ export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'times
 }): ExecutionRecord {
   const requestedAt = input.requestedAt || now();
   const status = input.status || 'requested';
+  const executionOrigin = input.linkedIds.executionOrigin || (input.linkedIds.executionMode === 'reactive' || input.linkedIds.executionMode === 'delegated' || input.linkedIds.executionMode === 'autonomous' ? input.linkedIds.executionMode : undefined);
   return {
     id: randomUUID(),
     kind: input.kind,
@@ -132,6 +138,7 @@ export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'times
       summary: input.receiptSummary || `${input.action} ${status}`,
       status,
       issuedAt: now(),
+      executionOrigin,
     },
   };
 }
@@ -166,6 +173,7 @@ export function completeExecutionRecord(
       summary: patch.receiptSummary || `${record.action} ${patch.status}`,
       status: patch.status,
       issuedAt: completedAt,
+      executionOrigin: record.receipt.executionOrigin,
     },
   };
 }

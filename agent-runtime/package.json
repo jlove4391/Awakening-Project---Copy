@@ -32,7 +32,8 @@
     "smoke:databank-status": "tsx scripts/smoke-databank-status.ts",
     "smoke:web-tools": "tsx scripts/smoke-web-tools.ts",
     "smoke:delegated-approval-routing": "tsx scripts/smoke-delegated-approval-routing.ts",
-    "smoke:user-requested-delegated-no-approval": "tsx scripts/smoke-user-requested-delegated-no-approval.ts"
+    "smoke:user-requested-delegated-no-approval": "tsx scripts/smoke-user-requested-delegated-no-approval.ts",
+    "smoke:execution-origin-metadata": "tsx scripts/smoke-execution-origin-metadata.ts"
   },
   "dependencies": {
     "@openai/agents": "latest",

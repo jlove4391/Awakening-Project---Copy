@@ -49,6 +49,7 @@ export interface ExecutionRecord {
     voiceSessionId?: string;
     executionMode?: string;
     executionOrigin?: ExecutionMode;
+    autonomyLevel?: number;
     rootTaskId?: string;
     parentTaskId?: string;
   };
@@ -58,6 +59,7 @@ export interface ExecutionRecord {
     status: ExecutionStatus;
     issuedAt: string;
     executionOrigin?: ExecutionMode;
+    autonomyLevel?: number;
   };
 }
 
@@ -139,6 +141,7 @@ export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'times
       status,
       issuedAt: now(),
       executionOrigin,
+      autonomyLevel: input.linkedIds.autonomyLevel,
     },
   };
 }
@@ -174,6 +177,7 @@ export function completeExecutionRecord(
       status: patch.status,
       issuedAt: completedAt,
       executionOrigin: record.receipt.executionOrigin,
+      autonomyLevel: record.receipt.autonomyLevel,
     },
   };
 }

@@ -1,8 +1,29 @@
 import path from 'node:path';
 import type { RegisteredToolDefinition } from '../tools/registry.js';
+import { runtimeConfig, type AutonomyLevel } from '../config.js';
 import type { ExecutionMode } from '../types.js';
 
 export type AutonomyProfileName = 'dev_autonomy' | 'proactive_observation';
+
+export const autonomyLevelDefinitions = {
+  0: { label: 'reactive_only', description: 'Reactive only; ELORA/CORE acts only in direct response to user requests.' },
+  1: { label: 'proactive_read_only_observation', description: 'Proactive read-only observation; no stored recommendations or writes.' },
+  2: { label: 'ranked_recommendations', description: 'Read-only observation plus ranked internal recommendations.' },
+  3: { label: 'draft_patch_proposals', description: 'Ranked recommendations plus draft patch proposals requiring approval before application.' },
+} as const satisfies Record<AutonomyLevel, { label: string; description: string }>;
+
+export function isKnownAutonomyLevel(value: unknown): value is AutonomyLevel {
+  return value === 0 || value === 1 || value === 2 || value === 3;
+}
+
+export function normalizeAutonomyLevel(value: unknown, fallback: AutonomyLevel = runtimeConfig.autonomy.level): AutonomyLevel {
+  return value === 0 || value === 1 || value === 2 || value === 3 ? value : fallback;
+}
+
+export function activeAutonomyLevel(context?: { autonomyLevel?: AutonomyLevel }): AutonomyLevel {
+  return normalizeAutonomyLevel(context?.autonomyLevel);
+}
+
 
 const AUTONOMOUS_MUTATION_SCOPES = new Set([
   'repo.write',
@@ -57,9 +78,28 @@ export function devAutonomyAllowsWithoutApproval(definition: RegisteredToolDefin
   return false;
 }
 
-export function proactiveObservationAllows(definition: RegisteredToolDefinition) {
-  if (definition.name === 'observation.recommend') return true;
-  return definition.riskLevel === 'read';
+export function isDraftPatchProposalInput(input: Record<string, unknown>) {
+  return Boolean(input.draftPatchProposal || input.draftPatch || input.proposedPatch);
+}
+
+export function autonomyLevelAllows(
+  level: AutonomyLevel,
+  definition: RegisteredToolDefinition,
+  input: Record<string, unknown> = {},
+  executionMode?: ExecutionMode,
+) {
+  const mode = normalizeExecutionMode(executionMode, level === 0 ? 'reactive' : 'observation');
+  if (level === 0) return mode === 'reactive' && definition.name !== 'observation.recommend';
+  if (definition.riskLevel === 'read') return true;
+  if (definition.name !== 'observation.recommend') return false;
+  if (level === 1) return false;
+  if (level === 2) return !isDraftPatchProposalInput(input);
+  if (level === 3) return true;
+  return false;
+}
+
+export function proactiveObservationAllows(definition: RegisteredToolDefinition, level: AutonomyLevel = runtimeConfig.autonomy.level, input: Record<string, unknown> = {}) {
+  return autonomyLevelAllows(level, definition, input, 'observation');
 }
 
 export function requiresApprovalForAutonomyProfile(
@@ -67,7 +107,7 @@ export function requiresApprovalForAutonomyProfile(
   definition: RegisteredToolDefinition,
   input: Record<string, unknown>,
 ) {
-  if (profile === 'proactive_observation') return !proactiveObservationAllows(definition);
+  if (profile === 'proactive_observation') return !proactiveObservationAllows(definition, runtimeConfig.autonomy.level, input);
   if (profile !== 'dev_autonomy') return definition.humanApprovalRequired;
   return !devAutonomyAllowsWithoutApproval(definition, input);
 }
@@ -84,7 +124,7 @@ export function requiresApprovalForExecutionMode(
   approvalScope?: string,
 ) {
   const mode = normalizeExecutionMode(executionMode, profile ? 'autonomous' : 'reactive');
-  if (mode === 'observation' || profile === 'proactive_observation') return !proactiveObservationAllows(definition);
+  if (mode === 'observation' || profile === 'proactive_observation') return !proactiveObservationAllows(definition, runtimeConfig.autonomy.level, input);
   if (mode !== 'autonomous') return false;
   if (definition.riskLevel === 'read') return false;
   if (profile === 'dev_autonomy') return requiresApprovalForAutonomyProfile(profile, definition, input);

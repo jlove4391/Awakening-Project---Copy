@@ -100,7 +100,7 @@ import { executeDelegatedCode } from '../workers/nexora/bridge.js';
 import { getDelegatedTask as getStoredDelegatedTask } from '../tasks/store.js';
 import { redactForLogs, redactProviderReceiptPayload } from '../workflows/nexora/secretsPolicy.js';
 import { webCrawlSite, webFetchUrl } from './webTools.js';
-import { normalizeExecutionMode, proactiveObservationAllows, requiresApprovalForExecutionMode } from '../governance/autonomyProfiles.js';
+import { activeAutonomyLevel, autonomyLevelAllows, normalizeExecutionMode, proactiveObservationAllows, requiresApprovalForExecutionMode } from '../governance/autonomyProfiles.js';
 import { createObservationRecommendation } from '../governance/recommendations.js';
 
 export type ToolCategory =
@@ -2726,7 +2726,9 @@ export const toolRegistry: RegisteredToolDefinition[] = [
             required: ['type', 'id'],
           },
         },
+        rank: numberSchema('Optional recommendation rank; lower numbers are reviewed first.', { minimum: 1, maximum: 100 }),
         draft: stringSchema('Optional internal draft content; never sent externally.'),
+        draftPatchProposal: stringSchema('Optional patch proposal text. Level 3 may draft this only; applying it requires a separate approval-gated code tool.'),
       },
       ['title', 'summary', 'rationale', 'recommendedAction'],
     ),
@@ -2736,7 +2738,9 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       rationale: z.string().min(1),
       recommendedAction: z.string().min(1),
       links: z.array(z.object({ type: z.enum(['file', 'task', 'receipt', 'memory', 'other']), id: z.string().min(1), label: z.string().optional() })).default([]),
+      rank: z.number().int().min(1).max(100).optional(),
       draft: z.string().optional(),
+      draftPatchProposal: z.string().optional(),
     }),
     scopes: ['runtime.observation.recommend'],
     riskLevel: 'write',
@@ -2746,7 +2750,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       action: 'recommend',
       resourceType: 'observation_recommendation',
       resourceIdField: 'title',
-      sensitiveFields: ['summary', 'rationale', 'recommendedAction', 'draft'],
+      sensitiveFields: ['summary', 'rationale', 'recommendedAction', 'draft', 'draftPatchProposal'],
       logEvents: ['tool.observation.recommend.requested', 'tool.observation.recommend.completed'],
     },
     executor: createObservationRecommendation,
@@ -3439,6 +3443,7 @@ function approvalBlockedResult(definition: RegisteredToolDefinition, context: Ru
       sessionId: context.sessionId,
       channel: context.channel || 'text',
       voiceSessionId: context.voiceSessionId,
+      autonomyLevel: activeAutonomyLevel(context),
     },
     approval: {
       executionId,
@@ -3538,7 +3543,11 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   const normalizedInput = normalizeToolInput(input);
   const parsedInput = definition.parameters.parse(normalizedInput) as Record<string, unknown>;
   const executionMode = normalizeExecutionMode(context.executionMode, context.autonomyProfile === 'proactive_observation' ? 'observation' : context.autonomyProfile ? 'autonomous' : 'reactive');
-  if ((executionMode === 'observation' || context.autonomyProfile === 'proactive_observation') && !proactiveObservationAllows(definition)) {
+  const autonomyLevel = activeAutonomyLevel(context);
+  if (!autonomyLevelAllows(autonomyLevel, definition, parsedInput, executionMode)) {
+    return approvalBlockedResult(definition, context, `autonomy_level_${autonomyLevel}_policy`, undefined, sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []));
+  }
+  if ((executionMode === 'observation' || context.autonomyProfile === 'proactive_observation') && !proactiveObservationAllows(definition, autonomyLevel, parsedInput)) {
     return approvalBlockedResult(definition, context, 'observation_mode_read_only_policy', undefined, sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []));
   }
   if (executionMode !== 'autonomous' && definition.humanApprovalRequired && parsedInput.confirmedByUser !== true) {
@@ -3563,6 +3572,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       voiceSessionId: context.voiceSessionId,
       executionMode,
       executionOrigin: executionMode,
+      autonomyLevel,
       ...(context.approvedDelegatedTaskId ? { taskIds: [context.approvedDelegatedTaskId], parentTaskId: context.approvedDelegatedTaskId, rootTaskId: context.approvedDelegatedTaskId } : {}),
     },
     status: 'running',
@@ -3578,6 +3588,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
     humanApprovalRequired: definition.humanApprovalRequired,
     approved,
     executionMode,
+    autonomyLevel,
     workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
     input: sanitizedInput,
   });
@@ -3609,6 +3620,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       humanApprovalRequired: definition.humanApprovalRequired,
       approved: false,
       executionMode,
+      autonomyLevel,
       workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
       input: sanitizedInput,
       resultStatus: 'approval_required',
@@ -3634,6 +3646,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       humanApprovalRequired: definition.humanApprovalRequired,
       approved,
       executionMode,
+      autonomyLevel,
       workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
       input: sanitizedInput,
       resultStatus: 'completed',
@@ -3657,6 +3670,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       humanApprovalRequired: definition.humanApprovalRequired,
       approved,
       executionMode,
+      autonomyLevel,
       workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
       input: sanitizedInput,
       resultStatus: 'failed',

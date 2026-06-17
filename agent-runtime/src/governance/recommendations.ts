@@ -22,7 +22,9 @@ export interface ObservationRecommendation {
   rationale: string;
   recommendedAction: string;
   links: ObservationRecommendationLink[];
+  rank?: number;
   draft?: string;
+  draftPatchProposal?: string;
   status: 'open';
   mode: 'observation';
 }
@@ -48,7 +50,9 @@ function sanitizeLinks(links: ObservationRecommendationLink[]) {
 export async function createObservationRecommendation(
   input: Pick<ObservationRecommendation, 'title' | 'summary' | 'rationale' | 'recommendedAction'> & {
     links?: ObservationRecommendationLink[];
+    rank?: number;
     draft?: string;
+    draftPatchProposal?: string;
   },
   context: RuntimeContext,
 ) {
@@ -62,7 +66,9 @@ export async function createObservationRecommendation(
     rationale: input.rationale,
     recommendedAction: input.recommendedAction,
     links: sanitizeLinks(input.links || []),
+    ...(input.rank ? { rank: input.rank } : {}),
     ...(input.draft ? { draft: input.draft } : {}),
+    ...(input.draftPatchProposal ? { draftPatchProposal: input.draftPatchProposal } : {}),
     status: 'open',
     mode: 'observation',
   };

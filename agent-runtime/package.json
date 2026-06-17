@@ -34,7 +34,8 @@
     "smoke:delegated-approval-routing": "tsx scripts/smoke-delegated-approval-routing.ts",
     "smoke:user-requested-delegated-no-approval": "tsx scripts/smoke-user-requested-delegated-no-approval.ts",
     "smoke:execution-origin-metadata": "tsx scripts/smoke-execution-origin-metadata.ts",
-    "assert:proactive-observation": "tsx scripts/assert-proactive-observation-profile.ts"
+    "assert:proactive-observation": "tsx scripts/assert-proactive-observation-profile.ts",
+    "assert:autonomy-levels": "tsx scripts/assert-autonomy-levels.ts"
   },
   "dependencies": {
     "@openai/agents": "latest",

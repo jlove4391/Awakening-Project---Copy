@@ -5,6 +5,7 @@ import { kalyra } from './agents/kalyra.js';
 import { kaz } from './agents/kaz.js';
 import { nexora } from './agents/nexora.js';
 import { getRuntimeContext, listMemories, persistRuntimeContext } from './memory/index.js';
+import { normalizeAutonomyLevel } from './governance/autonomyProfiles.js';
 import type { AgentMessageEvent, AgentMessageRequest, RuntimeAgentName, RuntimeContext } from './types.js';
 
 export function extractTextDelta(event: any) {
@@ -59,6 +60,7 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
   context.voiceApproval = request.voiceApproval;
   context.agent = selectedAgent;
   context.autonomyProfile = request.autonomyProfile;
+  context.autonomyLevel = normalizeAutonomyLevel(request.autonomyLevel);
   context.executionMode = request.executionMode || (request.autonomyProfile ? 'autonomous' : 'reactive');
 
   await sink?.({
@@ -71,6 +73,7 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
       voiceSessionId: context.voiceSessionId,
       agent: selectedAgent,
       executionMode: context.executionMode,
+      autonomyLevel: context.autonomyLevel,
     },
   });
   await sink?.({ event: 'memory', data: { references: await listMemories(context.sessionId, 5) } });

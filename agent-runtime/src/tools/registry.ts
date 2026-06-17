@@ -100,7 +100,8 @@ import { executeDelegatedCode } from '../workers/nexora/bridge.js';
 import { getDelegatedTask as getStoredDelegatedTask } from '../tasks/store.js';
 import { redactForLogs, redactProviderReceiptPayload } from '../workflows/nexora/secretsPolicy.js';
 import { webCrawlSite, webFetchUrl } from './webTools.js';
-import { normalizeExecutionMode, requiresApprovalForExecutionMode } from '../governance/autonomyProfiles.js';
+import { normalizeExecutionMode, proactiveObservationAllows, requiresApprovalForExecutionMode } from '../governance/autonomyProfiles.js';
+import { createObservationRecommendation } from '../governance/recommendations.js';
 
 export type ToolCategory =
   | 'calendar'
@@ -126,7 +127,8 @@ export type ToolCategory =
   | 'nexora'
   | 'code'
   | 'vscode'
-  | 'web';
+  | 'web'
+  | 'observation';
 
 export type ToolRiskLevel = 'read' | 'write' | 'external_send' | 'purchase_or_commit' | 'code_execution';
 
@@ -2704,6 +2706,51 @@ export const toolRegistry: RegisteredToolDefinition[] = [
     executor: async (input, context) => summarizeMemories({ sessionId: context.sessionId, query: input.query, limit: input.limit, scopes: input.scopes }),
   },
 
+
+  {
+    name: 'observation.recommend',
+    description: 'Store an auditable proactive-observation recommendation linked to relevant files, tasks, receipts, memories, or other internal evidence. This creates an internal draft/recommendation only and must not edit repo files, send externally, or write providers.',
+    inputSchema: objectSchema(
+      {
+        title: stringSchema('Short recommendation title.'),
+        summary: stringSchema('Concise finding summary.'),
+        rationale: stringSchema('Why ELORA/CORE recommends this action, grounded in inspected evidence.'),
+        recommendedAction: stringSchema('Recommended next step for a human or later approved execution.'),
+        links: {
+          type: 'array',
+          description: 'Auditable links to relevant files, tasks, receipts, memories, or other evidence.',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: { type: stringSchema('file, task, receipt, memory, or other.'), id: stringSchema('Linked item path or identifier.'), label: stringSchema('Optional display label.') },
+            required: ['type', 'id'],
+          },
+        },
+        draft: stringSchema('Optional internal draft content; never sent externally.'),
+      },
+      ['title', 'summary', 'rationale', 'recommendedAction'],
+    ),
+    parameters: z.object({
+      title: z.string().min(1),
+      summary: z.string().min(1),
+      rationale: z.string().min(1),
+      recommendedAction: z.string().min(1),
+      links: z.array(z.object({ type: z.enum(['file', 'task', 'receipt', 'memory', 'other']), id: z.string().min(1), label: z.string().optional() })).default([]),
+      draft: z.string().optional(),
+    }),
+    scopes: ['runtime.observation.recommend'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'observation',
+      action: 'recommend',
+      resourceType: 'observation_recommendation',
+      resourceIdField: 'title',
+      sensitiveFields: ['summary', 'rationale', 'recommendedAction', 'draft'],
+      logEvents: ['tool.observation.recommend.requested', 'tool.observation.recommend.completed'],
+    },
+    executor: createObservationRecommendation,
+  },
   {
     name: 'code.read',
     description: 'Read a UTF-8 text file from the sandboxed Nexora workspace root. Rejects absolute paths, parent traversal, and symlink escapes.',
@@ -3490,7 +3537,10 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
 
   const normalizedInput = normalizeToolInput(input);
   const parsedInput = definition.parameters.parse(normalizedInput) as Record<string, unknown>;
-  const executionMode = normalizeExecutionMode(context.executionMode, context.autonomyProfile ? 'autonomous' : 'reactive');
+  const executionMode = normalizeExecutionMode(context.executionMode, context.autonomyProfile === 'proactive_observation' ? 'observation' : context.autonomyProfile ? 'autonomous' : 'reactive');
+  if ((executionMode === 'observation' || context.autonomyProfile === 'proactive_observation') && !proactiveObservationAllows(definition)) {
+    return approvalBlockedResult(definition, context, 'observation_mode_read_only_policy', undefined, sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []));
+  }
   if (executionMode !== 'autonomous' && definition.humanApprovalRequired && parsedInput.confirmedByUser !== true) {
     parsedInput.confirmedByUser = true;
     parsedInput.approvalNote ||= `Authorized by ${executionMode} user-requested execution mode.`;

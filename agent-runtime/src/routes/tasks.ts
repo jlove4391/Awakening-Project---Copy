@@ -1,8 +1,9 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { durableTaskQueue } from '../tasks/queue.js';
 import { cancelActiveNexoraCommand } from '../workers/nexora/localWorker.js';
 import {
   appendDelegatedTaskEvent,
+  approveDelegatedTask,
   approveExecutionPlanStep,
   createDelegatedTask,
   getDelegatedTask,
@@ -169,6 +170,27 @@ tasksRouter.post('/:taskId/events', async (req, res, next) => {
     next(error);
   }
 });
+
+const approveTask: RequestHandler<{ taskId: string }> = async (req, res, next) => {
+  try {
+    if (req.body?.confirmedByUser !== true) {
+      res.status(400).json({ error: 'confirmedByUser=true is required to approve a pending task' });
+      return;
+    }
+    const task = await approveDelegatedTask(req.params.taskId, String(req.body?.approver || 'user'), String(req.body?.note || ''));
+    if (!task) {
+      res.status(404).json({ error: 'task not found' });
+      return;
+    }
+    if (task.status === 'queued') durableTaskQueue.enqueue(task);
+    res.json(taskResponse(task));
+  } catch (error) {
+    next(error);
+  }
+};
+
+tasksRouter.post('/:taskId/approve', approveTask);
+tasksRouter.post('/:taskId/approval', approveTask);
 
 tasksRouter.post('/:taskId/steps/:stepId/approve', async (req, res, next) => {
   try {

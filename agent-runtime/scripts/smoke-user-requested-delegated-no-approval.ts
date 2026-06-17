@@ -21,7 +21,7 @@ process.env.NEXORA_WORKSPACE_ROOT = workspaceRoot;
 
 await mkdir(path.join(workspaceRoot, '.runtime-smoke'), { recursive: true });
 
-const { createDelegatedTask, getDelegatedTask } = await import('../src/tasks/store.js');
+const { approveDelegatedTask, createDelegatedTask, getDelegatedTask } = await import('../src/tasks/store.js');
 await import('../src/tasks/queue.js');
 
 const { evaluateNexoraCapabilityForStep, requiresHardApprovalGate } = await import('../src/workflows/nexora/capabilities.js');
@@ -86,17 +86,23 @@ const autonomousTask = await createDelegatedTask({
   approvalRequirements: ['Autonomous write must still wait for approval.'],
   executionPlan: [
     {
-      id: 'autonomous-create-file',
-      targetTool: 'code.create_file',
-      arguments: { path: '.runtime-smoke/autonomous-no-bypass.txt', content: 'blocked' },
+      id: 'autonomous-patch-proposal',
+      targetTool: 'code.patch_file',
+      arguments: { path: '.runtime-smoke/autonomous-proposal.txt', search: 'before', replace: 'after' },
       approvalStatus: 'pending',
-      approval: { required: true, status: 'pending', reason: 'autonomous_write_requires_approval' },
+      approval: { required: true, status: 'pending', reason: 'autonomous_patch_proposal_requires_approval' },
     },
   ],
 });
 assert.equal(autonomousTask.status, 'pending_approval');
 assert.equal(autonomousTask.approvalRequirements[0]?.status, 'pending');
-assert.ok(autonomousTask.events.some((event) => event.eventType === 'task.approval_needed'), 'autonomous task should still create a pending approval item');
+assert.equal(autonomousTask.executionPlan?.[0]?.approvalStatus, 'pending');
+assert.ok(autonomousTask.events.some((event) => event.eventType === 'task.approval_needed'), 'autonomous patch proposal should create a pending approval item');
+
+const approvedAutonomousTask = await approveDelegatedTask(autonomousTask.id, 'smoke', 'Approve autonomous patch proposal through the canonical task approval route.');
+assert.equal(approvedAutonomousTask?.status, 'queued');
+assert.equal(approvedAutonomousTask?.approvalRequirements[0]?.status, 'approved');
+assert.equal(approvedAutonomousTask?.executionPlan?.[0]?.approvalStatus, 'approved');
 
 const directUserTask = await createDelegatedTask({
   sessionId,
@@ -124,16 +130,14 @@ const hardGateTask = await createDelegatedTask({
     },
   ],
 });
-assert.equal(hardGateTask.status, 'queued', 'task can queue, but the commit step itself must not be pre-approved');
+assert.equal(hardGateTask.status, 'pending_approval', 'high-risk user-delegated commit must wait for canonical task approval');
 assert.equal(hardGateTask.executionPlan?.[0]?.approvalStatus, 'pending');
 assert.equal(hardGateTask.executionPlan?.[0]?.approval?.status, 'pending');
+assert.ok(hardGateTask.events.some((event) => event.eventType === 'task.approval_needed'), 'hard-gated commit should emit approval-needed prompt');
 
-const blockedHardGateTask = await waitForTask(hardGateTask.id, (candidate) => ['blocked', 'failed', 'completed'].includes(candidate.status));
-assert.equal(blockedHardGateTask.status, 'blocked');
-assert.equal(blockedHardGateTask.blockedReason, 'step_approval_required');
-assert.equal(blockedHardGateTask.pendingToolAction?.toolName, 'code.commit');
-assert.equal(blockedHardGateTask.pendingToolAction?.approvalScope, 'repo.commit');
-assert.ok(blockedHardGateTask.events.some((event) => event.eventType === 'task.approval_needed'), 'hard-gated commit should emit approval-needed prompt');
+const approvedHardGateTask = await approveDelegatedTask(hardGateTask.id, 'smoke', 'Approve high-risk delegated commit through the canonical task approval route.');
+assert.equal(approvedHardGateTask?.status, 'queued');
+assert.equal(approvedHardGateTask?.executionPlan?.[0]?.approvalStatus, 'approved');
 
 const finalTask = await waitForTask(task.id, (candidate) => ['completed', 'failed', 'blocked'].includes(candidate.status));
 assert.equal(finalTask.status, 'completed', `task should complete without an approval block, got ${finalTask.status}: ${finalTask.blockedReason || finalTask.result?.summary}`);

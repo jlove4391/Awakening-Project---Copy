@@ -246,6 +246,10 @@ function hasPendingExecutionPlanApproval(task: DelegatedTask) {
   return Boolean(task.executionPlan?.some((step) => step.approval?.required && step.approvalStatus === 'pending'));
 }
 
+function hasPendingTaskApprovalGate(task: DelegatedTask) {
+  return needsApproval(task.approvalRequirements) || hasPendingExecutionPlanApproval(task);
+}
+
 
 function taskApprovalStatus(task: DelegatedTask) {
   const requirementStatuses = task.approvalRequirements.filter((requirement) => requirement.required).map((requirement) => requirement.status);
@@ -382,7 +386,6 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
     const delegationChain = parentTask ? [...parentTask.delegationChain, taskId] : [taskId];
     const originContext = { executionOrigin, rootTaskId, parentTaskId: input.parentTaskId, delegationChain };
     const approvalRequirements = normalizeApprovalRequirements(input.approvalRequirements, authorizationSource);
-    const status: DelegatedTaskStatus = needsApproval(approvalRequirements) ? 'pending_approval' : 'queued';
     const task: DelegatedTask = {
       id: taskId,
       sessionId: input.sessionId,
@@ -400,7 +403,7 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       ...(input.executionPlan?.length
         ? { executionPlan: input.executionPlan.map((step, index) => normalizeExecutionPlanStep(step, index + 1, authorizationSource, originContext)) }
         : {}),
-      status,
+      status: 'queued',
       logs: input.initialLog ? [input.initialLog] : [],
       events: [],
       auditTrail: [],
@@ -408,6 +411,8 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
       updatedAt: now(),
     };
+    const status: DelegatedTaskStatus = hasPendingTaskApprovalGate(task) ? 'pending_approval' : 'queued';
+    task.status = status;
 
     const created = createAuditEntry(task.id, 'task.created', 'elora', `Elora delegated task to Nexora: ${task.objective}`, {
       sessionId: task.sessionId,
@@ -725,7 +730,23 @@ export async function approveDelegatedTask(taskId: string, approver = 'user', no
         ? { ...requirement, status: 'approved', approver, approvedAt, note: note || requirement.note }
         : requirement,
     );
-    const status: DelegatedTaskStatus = needsApproval(task.approvalRequirements) ? 'pending_approval' : 'queued';
+    task.executionPlan = task.executionPlan?.map((step) =>
+      step.approval?.required && step.approvalStatus === 'pending'
+        ? {
+            ...step,
+            approvalStatus: 'approved',
+            approval: {
+              ...step.approval,
+              status: 'approved',
+              approver,
+              approvedAt,
+              note: note || step.approval.note,
+            },
+            updatedAt: approvedAt,
+          }
+        : step,
+    );
+    const status: DelegatedTaskStatus = hasPendingTaskApprovalGate(task) ? 'pending_approval' : 'queued';
     applyStatusTimestamps(task, status);
     const event = createAuditEntry(task.id, 'task.approved', 'user', `Approval recorded by ${approver}.`, { note });
     task.events.push(event);

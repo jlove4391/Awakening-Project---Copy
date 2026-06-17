@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { runAgentMessage } from '../agentEndpoint.js';
 import { setupSse, sendEvent } from '../lib/sse.js';
 import type { ChatRequestBody } from '../types.js';
+import { isKnownAutonomyProfile } from '../governance/autonomyProfiles.js';
 
 const allowedAgents = new Set(['elora', 'nexora', 'kaz', 'jynx', 'kalyra']);
 const allowedAgentList = Array.from(allowedAgents).join(', ');
@@ -10,7 +11,7 @@ const allowedAgentList = Array.from(allowedAgents).join(', ');
 export const chatRouter = Router();
 
 chatRouter.post('/', async (req, res, next) => {
-  const { message, sessionId, agent = 'elora' } = req.body as ChatRequestBody;
+  const { message, sessionId, agent = 'elora', autonomyProfile } = req.body as ChatRequestBody;
 
   if (!message?.trim()) {
     res.status(400).json({ error: 'message is required' });
@@ -22,10 +23,15 @@ chatRouter.post('/', async (req, res, next) => {
     return;
   }
 
+  if (autonomyProfile !== undefined && !isKnownAutonomyProfile(autonomyProfile)) {
+    res.status(400).json({ error: 'autonomyProfile must be dev_autonomy when provided' });
+    return;
+  }
+
   setupSse(res);
 
   try {
-    await runAgentMessage({ message, sessionId, agent }, async (runtimeEvent) => {
+    await runAgentMessage({ message, sessionId, agent, autonomyProfile }, async (runtimeEvent) => {
       sendEvent(res, runtimeEvent.event, runtimeEvent.data);
     });
 

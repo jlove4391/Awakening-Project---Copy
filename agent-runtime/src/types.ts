@@ -68,6 +68,7 @@ export interface RuntimeContext {
   approvedExecutionId?: string;
   approvedDelegatedTaskId?: string;
   approvedDelegatedStepId?: string;
+  autonomyProfile?: 'dev_autonomy';
 }
 
 export interface AgentMessageRequest {
@@ -78,6 +79,7 @@ export interface AgentMessageRequest {
   voiceApproval?: VoiceApprovalPolicy;
   agent?: RuntimeAgentName;
   approvedExecutionId?: string;
+  autonomyProfile?: 'dev_autonomy';
 }
 
 export interface AgentMessageEvent {
@@ -90,4 +92,5 @@ export interface ChatRequestBody {
   sessionId?: string;
   agent?: RuntimeAgentName;
   approvedExecutionId?: string;
+  autonomyProfile?: 'dev_autonomy';
 }

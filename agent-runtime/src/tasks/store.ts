@@ -15,6 +15,7 @@ import type {
   DelegatedTaskResult,
   DelegatedTaskStatus,
   DelegatedTaskUiState,
+  ExecutionOrigin,
   TaskAuditEntry,
   TaskReceipt,
   UpdateExecutionPlanStepInput,
@@ -155,6 +156,16 @@ function authorizedByUser(source: DelegatedTaskAuthorizationSource | undefined) 
   return runtimeConfig.coreTestingMode && (source === 'user_requested' || source === 'user_delegated');
 }
 
+function originForAuthorizationSource(source: DelegatedTaskAuthorizationSource): ExecutionOrigin {
+  if (source === 'user_requested') return 'reactive';
+  if (source === 'user_delegated') return 'delegated';
+  return 'autonomous';
+}
+
+function normalizeExecutionOrigin(input: ExecutionOrigin | undefined, authorizationSource: DelegatedTaskAuthorizationSource): ExecutionOrigin {
+  return input || originForAuthorizationSource(authorizationSource);
+}
+
 function approvalBypassedReason(source: DelegatedTaskAuthorizationSource) {
   return source === 'user_requested'
     ? 'Direct user request authorizes this delegated task without an additional approval prompt.'
@@ -180,7 +191,12 @@ function normalizeApprovalRequirements(input?: Array<Partial<ApprovalRequirement
   });
 }
 
-function normalizeExecutionPlanStep(input: AppendExecutionPlanStepInput, order: number, authorizationSource: DelegatedTaskAuthorizationSource = 'autonomous') {
+function normalizeExecutionPlanStep(
+  input: AppendExecutionPlanStepInput,
+  order: number,
+  authorizationSource: DelegatedTaskAuthorizationSource = 'autonomous',
+  originContext?: { executionOrigin: ExecutionOrigin; rootTaskId?: string; parentTaskId?: string; delegationChain?: string[] },
+) {
   const timestamp = now();
   const userAuthorized = authorizedByUser(authorizationSource);
   const requestedApprovalStatus = input.approval?.status || input.approvalStatus || 'not_required';
@@ -205,6 +221,10 @@ function normalizeExecutionPlanStep(input: AppendExecutionPlanStepInput, order: 
       scope: input.approval?.scope,
     },
     status: input.status || 'queued',
+    executionOrigin: input.executionOrigin || originContext?.executionOrigin || originForAuthorizationSource(authorizationSource),
+    ...(input.parentTaskId || originContext?.parentTaskId ? { parentTaskId: input.parentTaskId || originContext?.parentTaskId } : {}),
+    ...(input.rootTaskId || originContext?.rootTaskId ? { rootTaskId: input.rootTaskId || originContext?.rootTaskId } : {}),
+    delegationChain: originContext?.delegationChain || [],
     ...(input.resultSummary !== undefined ? { resultSummary: input.resultSummary } : {}),
     ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
     createdAt: timestamp,
@@ -300,6 +320,7 @@ function createAuditEntry(
   actor: TaskAuditEntry['actor'],
   summary: string,
   details?: Record<string, unknown>,
+  originContext?: { executionOrigin?: ExecutionOrigin; rootTaskId?: string; parentTaskId?: string },
 ): DelegatedTaskEvent {
   return {
     id: randomUUID(),
@@ -309,6 +330,9 @@ function createAuditEntry(
     occurredAt: now(),
     summary,
     ...(details ? { details } : {}),
+    ...(originContext?.executionOrigin ? { executionOrigin: originContext.executionOrigin } : {}),
+    ...(originContext?.rootTaskId ? { rootTaskId: originContext.rootTaskId } : {}),
+    ...(originContext?.parentTaskId ? { parentTaskId: originContext.parentTaskId } : {}),
   };
 }
 
@@ -324,6 +348,10 @@ function createReceipt(task: DelegatedTask): TaskReceipt {
     parentAgent: task.parentAgent,
     assignedAgent: task.assignedAgent,
     status: task.status,
+    executionOrigin: task.executionOrigin,
+    rootTaskId: task.rootTaskId,
+    ...(task.parentTaskId ? { parentTaskId: task.parentTaskId } : {}),
+    delegationChain: task.delegationChain,
     createdAt: task.createdAt,
     finishedAt: task.finishedAt,
     summary: `Delegated task ${task.id} finished with status ${task.status}: ${task.objective}`,
@@ -345,10 +373,16 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
   return serializedWrite(async () => {
     const tasks = await loadTasks();
     const authorizationSource = input.authorizationSource || 'autonomous';
+    const taskId = randomUUID();
+    const executionOrigin = normalizeExecutionOrigin(input.executionOrigin, authorizationSource);
+    const parentTask = input.parentTaskId ? tasks.find((candidate) => candidate.id === input.parentTaskId) : undefined;
+    const rootTaskId = input.rootTaskId || parentTask?.rootTaskId || input.parentTaskId || taskId;
+    const delegationChain = parentTask ? [...parentTask.delegationChain, taskId] : [taskId];
+    const originContext = { executionOrigin, rootTaskId, parentTaskId: input.parentTaskId, delegationChain };
     const approvalRequirements = normalizeApprovalRequirements(input.approvalRequirements, authorizationSource);
     const status: DelegatedTaskStatus = needsApproval(approvalRequirements) ? 'pending_approval' : 'queued';
     const task: DelegatedTask = {
-      id: randomUUID(),
+      id: taskId,
       sessionId: input.sessionId,
       parentAgent: 'elora',
       assignedAgent: 'nexora',
@@ -357,8 +391,12 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       requiredTools: input.requiredTools || [],
       approvalRequirements,
       authorizationSource,
+      executionOrigin,
+      rootTaskId,
+      ...(input.parentTaskId ? { parentTaskId: input.parentTaskId } : {}),
+      delegationChain,
       ...(input.executionPlan?.length
-        ? { executionPlan: input.executionPlan.map((step, index) => normalizeExecutionPlanStep(step, index + 1, authorizationSource)) }
+        ? { executionPlan: input.executionPlan.map((step, index) => normalizeExecutionPlanStep(step, index + 1, authorizationSource, originContext)) }
         : {}),
       status,
       logs: input.initialLog ? [input.initialLog] : [],
@@ -375,20 +413,24 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       assignedAgent: task.assignedAgent,
       requiredTools: task.requiredTools,
       authorizationSource: task.authorizationSource,
-    });
+      executionOrigin: task.executionOrigin,
+      rootTaskId: task.rootTaskId,
+      parentTaskId: task.parentTaskId,
+      delegationChain: task.delegationChain,
+    }, originContext);
     task.events.push(created);
     task.auditTrail.push(created);
     if (status === 'pending_approval') {
       const approval = createAuditEntry(task.id, 'task.approval_requested', 'system', 'Task is waiting for required approval before queueing.', {
         approvalRequirements,
-      });
+      }, originContext);
       const approvalNeeded = createAuditEntry(task.id, 'task.approval_needed', 'system', 'Task needs approval before queueing.', {
         approvalRequirements,
-      });
+      }, originContext);
       task.events.push(approval, approvalNeeded);
       task.auditTrail.push(approval, approvalNeeded);
     } else {
-      const queued = createAuditEntry(task.id, 'task.queued', 'system', 'Task was added to the durable Nexora queue.', { authorizationSource: task.authorizationSource });
+      const queued = createAuditEntry(task.id, 'task.queued', 'system', 'Task was added to the durable Nexora queue.', { authorizationSource: task.authorizationSource, executionOrigin: task.executionOrigin }, originContext);
       task.events.push(queued);
       task.auditTrail.push(queued);
     }
@@ -438,7 +480,7 @@ export async function appendExecutionPlanStep(taskId: string, input: AppendExecu
     if (!task) return undefined;
     task.executionPlan ||= [];
     const nextOrder = task.executionPlan.length ? Math.max(...task.executionPlan.map((step) => step.order)) + 1 : 1;
-    const step = normalizeExecutionPlanStep(input, nextOrder, task.authorizationSource);
+    const step = normalizeExecutionPlanStep(input, nextOrder, task.authorizationSource, task);
     task.executionPlan.push(step);
     sortExecutionPlan(task);
 
@@ -450,6 +492,7 @@ export async function appendExecutionPlanStep(taskId: string, input: AppendExecu
       {
         executionPlanStep: step,
       },
+      task,
     );
     task.events.push(event);
     task.auditTrail.push(event);
@@ -630,7 +673,11 @@ export async function updateDelegatedTask(taskId: string, input: UpdateDelegated
       }
       const receiptEvent = createAuditEntry(task.id, 'task.completion_receipt', 'system', `Receipt ${task.receipt.id} created for task ${task.id}.`, {
         receiptId: task.receipt.id,
-      });
+        executionOrigin: task.executionOrigin,
+        rootTaskId: task.rootTaskId,
+        parentTaskId: task.parentTaskId,
+        delegationChain: task.delegationChain,
+      }, task);
       task.events.push(receiptEvent);
       task.auditTrail.push(receiptEvent);
       newEvents.push(receiptEvent);

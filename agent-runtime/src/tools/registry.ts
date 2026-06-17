@@ -3512,6 +3512,8 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       sessionId: context.sessionId,
       voiceSessionId: context.voiceSessionId,
       executionMode,
+      executionOrigin: executionMode,
+      ...(context.approvedDelegatedTaskId ? { taskIds: [context.approvedDelegatedTaskId], parentTaskId: context.approvedDelegatedTaskId, rootTaskId: context.approvedDelegatedTaskId } : {}),
     },
     status: 'running',
     startedAt: new Date().toISOString(),

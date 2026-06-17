@@ -121,6 +121,9 @@ tasksRouter.post('/', async (req, res, next) => {
       executionPlan,
       timeoutMs,
       authorizationSource,
+      executionOrigin,
+      parentTaskId,
+      rootTaskId,
     } = req.body || {};
     const taskObjective = String(objective || title || '').trim();
     if (!taskObjective) {
@@ -138,6 +141,9 @@ tasksRouter.post('/', async (req, res, next) => {
       executionPlan: Array.isArray(executionPlan) ? executionPlan : undefined,
       timeoutMs: Number.isFinite(Number(timeoutMs)) ? Number(timeoutMs) : undefined,
       authorizationSource: authorizationSource === 'autonomous' || authorizationSource === 'user_delegated' ? authorizationSource : 'user_requested',
+      executionOrigin: executionOrigin === 'autonomous' || executionOrigin === 'delegated' || executionOrigin === 'reactive' ? executionOrigin : undefined,
+      parentTaskId: typeof parentTaskId === 'string' && parentTaskId.trim() ? parentTaskId.trim() : undefined,
+      rootTaskId: typeof rootTaskId === 'string' && rootTaskId.trim() ? rootTaskId.trim() : undefined,
     });
 
     res.status(201).json(taskResponse(task));

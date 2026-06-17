@@ -30,6 +30,7 @@ export type DelegatedTaskEventType =
 export type ApprovalRequirementStatus = 'not_required' | 'pending' | 'approved' | 'rejected';
 
 export type DelegatedTaskAuthorizationSource = 'autonomous' | 'user_requested' | 'user_delegated';
+export type ExecutionOrigin = 'reactive' | 'delegated' | 'autonomous';
 
 export type ApprovalScope =
   | 'repo.write'
@@ -52,7 +53,11 @@ export interface ApprovalRequirement {
   reason?: string;
   scope?: ApprovalScope;
   authorizationSource?: DelegatedTaskAuthorizationSource;
+  executionOrigin?: ExecutionOrigin;
+  parentTaskId?: string;
+  rootTaskId?: string;
 }
+
 
 export interface TaskAuditEntry {
   id: string;
@@ -62,6 +67,9 @@ export interface TaskAuditEntry {
   occurredAt: string;
   summary: string;
   details?: Record<string, unknown>;
+  executionOrigin?: ExecutionOrigin;
+  rootTaskId?: string;
+  parentTaskId?: string;
 }
 
 export interface DelegatedTaskLogReference {
@@ -86,6 +94,10 @@ export interface TaskReceipt {
   parentAgent: RuntimeAgentName;
   assignedAgent: RuntimeAgentName;
   status: DelegatedTaskStatus;
+  executionOrigin: ExecutionOrigin;
+  rootTaskId: string;
+  parentTaskId?: string;
+  delegationChain: string[];
   createdAt: string;
   finishedAt?: string;
   summary: string;
@@ -140,6 +152,10 @@ export interface ExecutionPlanStep {
   approvalStatus: ExecutionPlanStepApprovalStatus;
   approval?: ExecutionPlanStepApproval;
   status: ExecutionPlanStepStatus;
+  executionOrigin: ExecutionOrigin;
+  parentTaskId?: string;
+  rootTaskId?: string;
+  delegationChain: string[];
   resultSummary?: string;
   timeoutMs?: number;
   startedAt?: string;
@@ -181,6 +197,10 @@ export interface DelegatedTask {
   requiredTools: string[];
   approvalRequirements: ApprovalRequirement[];
   authorizationSource: DelegatedTaskAuthorizationSource;
+  executionOrigin: ExecutionOrigin;
+  rootTaskId: string;
+  parentTaskId?: string;
+  delegationChain: string[];
   executionPlan?: ExecutionPlanStep[];
   status: DelegatedTaskStatus;
   blockedReason?: DelegatedTaskBlockedReason;
@@ -209,6 +229,9 @@ export interface CreateDelegatedTaskInput {
   initialLog?: string;
   timeoutMs?: number;
   authorizationSource?: DelegatedTaskAuthorizationSource;
+  executionOrigin?: ExecutionOrigin;
+  parentTaskId?: string;
+  rootTaskId?: string;
 }
 
 
@@ -223,7 +246,11 @@ export interface AppendExecutionPlanStepInput {
   status?: ExecutionPlanStepStatus;
   resultSummary?: string;
   timeoutMs?: number;
+  executionOrigin?: ExecutionOrigin;
+  parentTaskId?: string;
+  rootTaskId?: string;
 }
+
 
 export interface UpdateExecutionPlanStepInput {
   order?: number;
@@ -235,7 +262,11 @@ export interface UpdateExecutionPlanStepInput {
   status?: ExecutionPlanStepStatus;
   resultSummary?: string;
   timeoutMs?: number;
+  executionOrigin?: ExecutionOrigin;
+  parentTaskId?: string;
+  rootTaskId?: string;
 }
+
 
 export interface UpdateDelegatedTaskInput {
   status?: DelegatedTaskStatus;

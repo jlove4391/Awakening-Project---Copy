@@ -21,6 +21,7 @@ export async function createDelegationTask(
     initialLog?: string;
     executionPlan?: any[];
     timeoutMs?: number;
+    authorizationSource?: 'user_requested' | 'user_delegated' | 'autonomous';
   },
   context: RuntimeContext,
 ) {
@@ -33,6 +34,7 @@ export async function createDelegationTask(
     initialLog: input.initialLog,
     executionPlan: input.executionPlan,
     timeoutMs: input.timeoutMs,
+    authorizationSource: input.authorizationSource || 'user_delegated',
   });
   if (task.status === 'queued') durableTaskQueue.enqueue(task);
   return task;

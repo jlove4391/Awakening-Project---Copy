@@ -120,6 +120,7 @@ tasksRouter.post('/', async (req, res, next) => {
       notes,
       executionPlan,
       timeoutMs,
+      authorizationSource,
     } = req.body || {};
     const taskObjective = String(objective || title || '').trim();
     if (!taskObjective) {
@@ -136,6 +137,7 @@ tasksRouter.post('/', async (req, res, next) => {
       initialLog: String(initialLog || notes || '').trim() || undefined,
       executionPlan: Array.isArray(executionPlan) ? executionPlan : undefined,
       timeoutMs: Number.isFinite(Number(timeoutMs)) ? Number(timeoutMs) : undefined,
+      authorizationSource: authorizationSource === 'autonomous' || authorizationSource === 'user_delegated' ? authorizationSource : 'user_requested',
     });
 
     res.status(201).json(taskResponse(task));

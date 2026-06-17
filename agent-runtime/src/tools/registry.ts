@@ -3438,7 +3438,9 @@ async function hasExactApprovalScope(definition: RegisteredToolDefinition, input
   if (!taskId || !stepId) return false;
   const task = await getStoredDelegatedTask(taskId);
   const step = task?.executionPlan?.find((candidate) => candidate.id === stepId);
-  return step?.targetTool === definition.name && step.approval?.scope === scope;
+  if (step?.targetTool !== definition.name) return false;
+  if (step.approval?.scope === scope) return true;
+  return (task?.authorizationSource === 'user_requested' || task?.authorizationSource === 'user_delegated') && step.approvalStatus === 'approved';
 }
 
 async function enforceApprovalLimits(definition: RegisteredToolDefinition, input: Record<string, unknown>, context: RuntimeContext, approvedThroughUi: boolean, executionId?: string, sanitizedInput?: Record<string, unknown>, approvalRequired = definition.humanApprovalRequired) {

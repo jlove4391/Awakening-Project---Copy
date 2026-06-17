@@ -27,6 +27,7 @@
     "smoke:nexora-commit-approval": "tsx scripts/smoke-nexora-commit-approval.ts",
     "smoke:delegated-file-create": "tsx scripts/smoke-delegated-file-create.ts",
     "smoke:delegated-resume": "tsx scripts/smoke-delegated-resume.ts",
+    "smoke:approvals": "tsx scripts/smoke-delegated-resume.ts",
     "smoke:digitalocean-status": "tsx scripts/smoke-digitalocean-status.ts",
     "smoke:databank-status": "tsx scripts/smoke-databank-status.ts"
   },

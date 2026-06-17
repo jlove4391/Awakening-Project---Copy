@@ -76,8 +76,9 @@ assert.equal(task.status, 'pending_approval', 'task should start pending delegat
 console.log(`✓ Created delegated task ${task.id}.`);
 
 const approvedTask = await approveDelegatedTask(task.id, 'smoke', 'Approve delegated resume smoke task.');
-assert.equal(approvedTask?.status, 'queued', 'task should queue after delegated-task approval');
-console.log('✓ Approved delegated task.');
+assert.equal(approvedTask?.id, task.id, 'task approval must queue the same delegated task ID');
+assert.equal(approvedTask?.status, 'queued', 'task approval should queue the same task after delegated-task approval');
+console.log('✓ Approved delegated task and queued the same task.');
 
 await dispatchOnce(task.id);
 const blocked = await getRequiredTask(task.id);
@@ -98,8 +99,11 @@ assert.equal(stillBlocked.pendingToolAction?.stepId, stepId, 'wrong-task approva
 console.log('✓ Step approval lookup stayed scoped to the original task ID.');
 
 const stepApproved = await approveExecutionPlanStep(task.id, stepId, 'smoke', 'Approve code.create_file so resume can continue from this blocked step.');
-assert.equal(stepApproved?.status, 'queued', 'task should be queued after step approval');
-assert.equal(stepApproved?.executionPlan?.find((step) => step.id === stepId)?.approvalStatus, 'approved');
+assert.equal(stepApproved?.id, task.id, 'step approval must resume the same delegated task ID');
+assert.equal(stepApproved?.status, 'queued', 'step approval should queue/resume the same task after approving the step');
+const approvedStep = stepApproved?.executionPlan?.find((step) => step.id === stepId);
+assert.equal(approvedStep?.id, stepId, 'step approval must update the same execution-plan step ID');
+assert.equal(approvedStep?.approvalStatus, 'approved');
 const stepApprovalEvent = [...(stepApproved?.events || [])].reverse().find((event) => event.eventType === 'task.approved' && event.details?.stepId === stepId);
 assert.equal(stepApprovalEvent?.taskId, task.id, 'step approval event must be recorded on the original task');
 assert.equal(stepApprovalEvent?.details?.taskId, task.id, 'step approval event details must include the original task ID');
@@ -132,6 +136,7 @@ assert.match(finalStep?.resultSummary || '', /code\.create_file/, 'completed ste
 assert.ok(existsSync(path.join(workspaceRoot, targetPath)), `expected ${targetPath} to exist after resume`);
 assert.equal(await readFile(path.join(workspaceRoot, targetPath), 'utf8'), targetContent);
 assert.ok(finalTask.receipt?.id, 'completed task should include a receipt ID');
+assert.ok(finalTask.events.some((event) => event.eventType === 'task.completion_receipt' && event.details?.receiptId === finalTask.receipt?.id), 'completion must produce a task.completion_receipt event for the receipt');
 assert.ok(JSON.stringify(finalTask.result).includes(stepId), 'completed result should include the resumed step ID as execution proof');
 console.log(`✓ Worker continued from blocked step ${stepId}, completed the task, and created receipt ${finalTask.receipt?.id}.`);
 console.log('Delegated resume smoke passed. Output intentionally remains under .runtime-data/smoke/.');

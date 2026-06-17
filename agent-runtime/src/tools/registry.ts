@@ -99,6 +99,7 @@ import {
 import { executeDelegatedCode } from '../workers/nexora/bridge.js';
 import { getDelegatedTask as getStoredDelegatedTask } from '../tasks/store.js';
 import { redactForLogs, redactProviderReceiptPayload } from '../workflows/nexora/secretsPolicy.js';
+import { webCrawlSite, webFetchUrl } from './webTools.js';
 
 export type ToolCategory =
   | 'calendar'
@@ -123,7 +124,8 @@ export type ToolCategory =
   | 'delegation'
   | 'nexora'
   | 'code'
-  | 'vscode';
+  | 'vscode'
+  | 'web';
 
 export type ToolRiskLevel = 'read' | 'write' | 'external_send' | 'purchase_or_commit' | 'code_execution';
 
@@ -1027,6 +1029,42 @@ function createClientProject(input: Record<string, unknown>) {
 }
 
 export const toolRegistry: RegisteredToolDefinition[] = [
+  {
+    name: 'web.fetch_url',
+    description: 'Fetch a single HTTP(S) URL as a general CORE web tool. Enforces configured byte and timeout limits, follows redirects, and returns text plus receipt-friendly metadata.',
+    inputSchema: objectSchema({ url: stringSchema('HTTP(S) URL to fetch.'), timeoutMs: numberSchema('Optional timeout in milliseconds; capped by WEB_FETCH_TIMEOUT_MS.', { minimum: 250 }), maxBytes: numberSchema('Optional response byte cap; capped by WEB_FETCH_MAX_BYTES.', { minimum: 1 }) }, ['url']),
+    parameters: z.object({ url: z.string().url(), timeoutMs: z.number().int().min(250).optional(), maxBytes: z.number().int().min(1).optional() }),
+    scopes: ['web.fetch.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'web',
+      action: 'fetch_url',
+      resourceType: 'web_url',
+      resourceIdField: 'url',
+      sensitiveFields: ['url'],
+      logEvents: ['tool.web.fetch_url.requested', 'tool.web.fetch_url.completed'],
+    },
+    executor: async (input) => webFetchUrl(input as any),
+  },
+  {
+    name: 'web.crawl_site',
+    description: 'Crawl same-origin HTTP(S) pages starting from a URL as a general CORE web tool. Enforces configured page, depth, byte, and timeout limits.',
+    inputSchema: objectSchema({ url: stringSchema('HTTP(S) URL to start from.'), maxPages: numberSchema('Optional page cap; capped by WEB_CRAWL_MAX_PAGES.', { minimum: 1 }), maxDepth: numberSchema('Optional depth cap; capped by WEB_CRAWL_MAX_DEPTH.', { minimum: 0 }), timeoutMs: numberSchema('Optional per-request timeout in milliseconds; capped by WEB_FETCH_TIMEOUT_MS.', { minimum: 250 }), maxBytes: numberSchema('Optional per-page response byte cap; capped by WEB_FETCH_MAX_BYTES.', { minimum: 1 }) }, ['url']),
+    parameters: z.object({ url: z.string().url(), maxPages: z.number().int().min(1).optional(), maxDepth: z.number().int().min(0).optional(), timeoutMs: z.number().int().min(250).optional(), maxBytes: z.number().int().min(1).optional() }),
+    scopes: ['web.crawl.read'],
+    riskLevel: 'read',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'web',
+      action: 'crawl_site',
+      resourceType: 'web_site',
+      resourceIdField: 'url',
+      sensitiveFields: ['url'],
+      logEvents: ['tool.web.crawl_site.requested', 'tool.web.crawl_site.completed'],
+    },
+    executor: async (input) => webCrawlSite(input as any),
+  },
   {
     name: 'digitalocean.status',
     description: 'Report whether the DigitalOcean provider is configured from environment variables without returning provider tokens.',
@@ -3591,7 +3629,7 @@ export function runtimeToolsForRiskLevels(riskLevels: ToolRiskLevel[]) {
   return toolRegistry.filter((definition) => desired.has(definition.riskLevel)).map(toRuntimeTool);
 }
 
-export const sharedRuntimeToolCategories: ToolCategory[] = ['calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'outreach', 'objection', 'intake', 'qualification', 'proposal', 'voice', 'memory', 'delegation'];
+export const sharedRuntimeToolCategories: ToolCategory[] = ['web', 'calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'outreach', 'objection', 'intake', 'qualification', 'proposal', 'voice', 'memory', 'delegation'];
 export const nexoraRuntimeToolCategories: ToolCategory[] = [...sharedRuntimeToolCategories, 'nexora', 'code', 'vscode'];
 
 export const runtimeTools = runtimeToolsForCategories(sharedRuntimeToolCategories);

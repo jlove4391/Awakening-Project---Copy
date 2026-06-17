@@ -14,6 +14,10 @@ export const runtimeConfig = {
   corsOrigin: process.env.AGENT_RUNTIME_CORS_ORIGIN || 'http://localhost:3000',
   codeWorkspaceRoot: process.env.NEXORA_WORKSPACE_ROOT || process.env.CODE_WORKSPACE_ROOT || repoRoot,
   codeCommandTimeoutMs: Number(process.env.NEXORA_CODE_COMMAND_TIMEOUT_MS || process.env.CODE_COMMAND_TIMEOUT_MS || 120000),
+  webFetchMaxBytes: Number(process.env.WEB_FETCH_MAX_BYTES || 500000),
+  webFetchTimeoutMs: Number(process.env.WEB_FETCH_TIMEOUT_MS || 15000),
+  webCrawlMaxPages: Number(process.env.WEB_CRAWL_MAX_PAGES || 10),
+  webCrawlMaxDepth: Number(process.env.WEB_CRAWL_MAX_DEPTH || 2),
 
   publicBaseUrl: process.env.AGENT_RUNTIME_PUBLIC_BASE_URL || '',
   voiceTranscriptionModel: process.env.OPENAI_TRANSCRIPTION_MODEL || process.env.VOICE_TRANSCRIPTION_MODEL || 'gpt-4o-transcribe',

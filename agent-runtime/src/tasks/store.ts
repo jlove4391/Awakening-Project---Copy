@@ -769,6 +769,7 @@ export async function approveExecutionPlanStep(taskId: string, stepId: string, a
     const task = await getDelegatedTask(taskId);
     const step = task?.executionPlan?.find((candidate) => candidate.id === stepId);
     if (!task || !step) return undefined;
+    const originalPendingToolAction = task.pendingToolAction;
     const approvedAt = now();
     step.approvalStatus = 'approved';
     step.approval = { ...(step.approval || { required: true, status: 'approved' as const }), status: 'approved', approver, approvedAt, note: note || step.approval?.note };
@@ -777,7 +778,19 @@ export async function approveExecutionPlanStep(taskId: string, stepId: string, a
     task.blockedReason = undefined;
     task.pendingToolAction = undefined;
     applyStatusTimestamps(task, 'queued');
-    const event = createAuditEntry(task.id, 'task.approved', 'user', `Step ${step.id} approval recorded by ${approver}.`, { stepId, pendingToolAction: { toolName: step.targetTool, arguments: step.arguments, argumentTemplate: step.argumentTemplate }, note });
+    const event = createAuditEntry(task.id, 'task.approved', 'user', `Step ${step.id} approval recorded by ${approver}.`, {
+      taskId: task.id,
+      stepId,
+      pendingToolAction: {
+        stepId,
+        toolName: step.targetTool,
+        arguments: step.arguments,
+        argumentTemplate: step.argumentTemplate,
+        approvalScope: originalPendingToolAction?.approvalScope ?? step.approval?.scope,
+        reason: originalPendingToolAction?.reason,
+      },
+      note,
+    });
     const queued = createAuditEntry(task.id, 'task.queued', 'system', 'Approved blocked step; task re-entered the durable Nexora queue.', { stepId });
     task.events.push(event, queued);
     task.auditTrail.push(event, queued);

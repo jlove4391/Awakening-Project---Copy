@@ -54,6 +54,24 @@ const task = await createDelegatedTask({
   initialLog: 'Smoke task for delegated resume from a blocked local file-write step.',
 });
 
+const unrelatedTask = await createDelegatedTask({
+  sessionId,
+  objective: 'Unrelated delegated resume smoke task used to verify step approval lookup isolation.',
+  constraints: ['Must never be resumed by the primary task step approval.'],
+  requiredTools: ['code.create_file'],
+  approvalRequirements: ['Approve this unrelated task separately.'],
+  executionPlan: [
+    {
+      id: 'unrelated-step',
+      targetTool: 'code.create_file',
+      arguments: { path: '.runtime-smoke/unrelated.txt', content: 'unrelated\n' },
+      approvalStatus: 'pending',
+      approval: { required: true, status: 'pending', reason: 'unrelated_step_must_not_match_primary_step' },
+    },
+  ],
+  initialLog: 'Unrelated smoke task for step approval lookup isolation.',
+});
+
 assert.equal(task.status, 'pending_approval', 'task should start pending delegated-task approval');
 console.log(`✓ Created delegated task ${task.id}.`);
 
@@ -72,15 +90,37 @@ assert.ok(stepId, 'blocked task should expose the pending code.create_file step 
 assert.equal(blocked.executionPlan?.find((step) => step.id === stepId)?.status, 'blocked');
 console.log(`✓ Worker blocked at file-write step ${stepId}.`);
 
+const wrongTaskApproval = await approveExecutionPlanStep(unrelatedTask.id, stepId, 'smoke', 'This must not approve a step on the wrong task.');
+assert.equal(wrongTaskApproval, undefined, 'step approval must look up the step within the original task ID only');
+const stillBlocked = await getRequiredTask(task.id);
+assert.equal(stillBlocked.status, 'blocked', 'wrong-task step approval attempt must not resume the original blocked task');
+assert.equal(stillBlocked.pendingToolAction?.stepId, stepId, 'wrong-task approval attempt must not alter the original pending step payload');
+console.log('✓ Step approval lookup stayed scoped to the original task ID.');
+
 const stepApproved = await approveExecutionPlanStep(task.id, stepId, 'smoke', 'Approve code.create_file so resume can continue from this blocked step.');
 assert.equal(stepApproved?.status, 'queued', 'task should be queued after step approval');
 assert.equal(stepApproved?.executionPlan?.find((step) => step.id === stepId)?.approvalStatus, 'approved');
+const stepApprovalEvent = [...(stepApproved?.events || [])].reverse().find((event) => event.eventType === 'task.approved' && event.details?.stepId === stepId);
+assert.equal(stepApprovalEvent?.taskId, task.id, 'step approval event must be recorded on the original task');
+assert.equal(stepApprovalEvent?.details?.taskId, task.id, 'step approval event details must include the original task ID');
+assert.equal(stepApprovalEvent?.details?.stepId, stepId, 'step approval event details must include the original step ID');
+assert.deepEqual(stepApprovalEvent?.details?.pendingToolAction, {
+  stepId,
+  toolName: 'code.create_file',
+  arguments: { path: targetPath, content: targetContent },
+  argumentTemplate: undefined,
+  approvalScope: 'repo.write',
+  reason: 'step_approval_required',
+});
 console.log('✓ Approved the blocked file-write step.');
 
 const resumed = await resumeDelegatedTask(task.id, 'system', 'Smoke resume after local file-write step approval.');
 assert.equal(resumed?.status, 'queued', 'resumed task should be queued for worker pickup');
 assert.ok(resumed?.events.some((event) => event.eventType === 'task.resumed'), 'resume should record a task.resumed event');
 assert.equal(resumed?.executionPlan?.find((step) => step.id === stepId)?.status, 'queued', 'approved blocked step should remain queued for continuation');
+const resumeEvent = [...(resumed?.events || [])].reverse().find((event) => event.eventType === 'task.resumed');
+assert.equal(resumeEvent?.taskId, task.id, 'resume event must stay on the original task');
+assert.ok((resumeEvent?.details?.executionPlanState as Array<{ id: string }> | undefined)?.some((step) => step.id === stepId), 'resume event must include the original step in execution-plan state');
 console.log('✓ Resumed the task after step approval.');
 
 await dispatchOnce(task.id);

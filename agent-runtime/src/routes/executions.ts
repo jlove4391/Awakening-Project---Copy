@@ -66,6 +66,7 @@ executionsRouter.post('/:id/approval', async (req, res, next) => {
     context.agent = resolveRuntimeAgentName(record.chosenByAgent);
     context.voiceSessionId = record.linkedIds.voiceSessionId;
     context.approvedExecutionId = record.id;
+    context.executionMode = record.linkedIds.executionMode === 'autonomous' || record.linkedIds.executionMode === 'delegated' || record.linkedIds.executionMode === 'reactive' ? record.linkedIds.executionMode : 'autonomous';
 
     const replayInput = {
       ...record.approvalRequest.originalInput,

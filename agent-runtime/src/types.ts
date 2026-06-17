@@ -45,6 +45,7 @@ export interface SessionRecord {
 }
 
 export type RuntimeChannel = 'text' | 'voice';
+export type ExecutionMode = 'reactive' | 'delegated' | 'autonomous';
 
 export interface VoiceApprovalPolicy {
   allowHighRiskActions: boolean;
@@ -69,6 +70,7 @@ export interface RuntimeContext {
   approvedDelegatedTaskId?: string;
   approvedDelegatedStepId?: string;
   autonomyProfile?: 'dev_autonomy';
+  executionMode?: ExecutionMode;
 }
 
 export interface AgentMessageRequest {
@@ -80,6 +82,7 @@ export interface AgentMessageRequest {
   agent?: RuntimeAgentName;
   approvedExecutionId?: string;
   autonomyProfile?: 'dev_autonomy';
+  executionMode?: ExecutionMode;
 }
 
 export interface AgentMessageEvent {
@@ -93,4 +96,5 @@ export interface ChatRequestBody {
   agent?: RuntimeAgentName;
   approvedExecutionId?: string;
   autonomyProfile?: 'dev_autonomy';
+  executionMode?: ExecutionMode;
 }

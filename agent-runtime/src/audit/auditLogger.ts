@@ -10,6 +10,7 @@ export interface ToolAuditLogEntry {
   riskLevel: string;
   humanApprovalRequired: boolean;
   approved: boolean;
+  executionMode?: string;
   workspaceRoot?: string;
   input?: Record<string, unknown>;
   resultStatus?: string;

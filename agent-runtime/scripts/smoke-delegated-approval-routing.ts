@@ -48,6 +48,7 @@ try {
     sessionId: 'approval-routing-smoke',
     objective: 'Verify delegated approval routing aliases.',
     approvalRequirements: ['Approve task before queueing.'],
+    authorizationSource: 'autonomous',
     executionPlan: [
       {
         id: 'step-file-write',

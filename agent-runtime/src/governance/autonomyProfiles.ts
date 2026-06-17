@@ -1,7 +1,20 @@
 import path from 'node:path';
 import type { RegisteredToolDefinition } from '../tools/registry.js';
+import type { ExecutionMode } from '../types.js';
 
 export type AutonomyProfileName = 'dev_autonomy';
+
+const AUTONOMOUS_MUTATION_SCOPES = new Set([
+  'repo.write',
+  'repo.delete',
+  'repo.command',
+  'repo.commit',
+  'provider.create',
+  'provider.update',
+  'provider.delete',
+  'database.migrate',
+  'external.send',
+]);
 
 const DEV_AUTONOMY_SANDBOX_ROOTS = ['.runtime-data/dev-autonomy', 'sandbox/dev-autonomy'];
 const DEV_AUTONOMY_WEB_TOOLS = new Set(['web.fetch_url', 'web.crawl_site']);
@@ -51,6 +64,24 @@ export function requiresApprovalForAutonomyProfile(
 ) {
   if (profile !== 'dev_autonomy') return definition.humanApprovalRequired;
   return !devAutonomyAllowsWithoutApproval(definition, input);
+}
+
+export function normalizeExecutionMode(value: unknown, fallback: ExecutionMode = 'reactive'): ExecutionMode {
+  return value === 'reactive' || value === 'delegated' || value === 'autonomous' ? value : fallback;
+}
+
+export function requiresApprovalForExecutionMode(
+  executionMode: ExecutionMode | undefined,
+  profile: AutonomyProfileName | undefined,
+  definition: RegisteredToolDefinition,
+  input: Record<string, unknown>,
+  approvalScope?: string,
+) {
+  const mode = normalizeExecutionMode(executionMode, profile ? 'autonomous' : 'reactive');
+  if (mode !== 'autonomous') return false;
+  if (definition.riskLevel === 'read') return false;
+  if (profile === 'dev_autonomy') return requiresApprovalForAutonomyProfile(profile, definition, input);
+  return definition.humanApprovalRequired || (approvalScope ? AUTONOMOUS_MUTATION_SCOPES.has(approvalScope) : true);
 }
 
 export const devAutonomyProfile = {

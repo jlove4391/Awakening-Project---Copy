@@ -100,7 +100,7 @@ import { executeDelegatedCode } from '../workers/nexora/bridge.js';
 import { getDelegatedTask as getStoredDelegatedTask } from '../tasks/store.js';
 import { redactForLogs, redactProviderReceiptPayload } from '../workflows/nexora/secretsPolicy.js';
 import { webCrawlSite, webFetchUrl } from './webTools.js';
-import { requiresApprovalForAutonomyProfile } from '../governance/autonomyProfiles.js';
+import { normalizeExecutionMode, requiresApprovalForExecutionMode } from '../governance/autonomyProfiles.js';
 
 export type ToolCategory =
   | 'calendar'
@@ -3490,13 +3490,18 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
 
   const normalizedInput = normalizeToolInput(input);
   const parsedInput = definition.parameters.parse(normalizedInput) as Record<string, unknown>;
+  const executionMode = normalizeExecutionMode(context.executionMode, context.autonomyProfile ? 'autonomous' : 'reactive');
+  if (executionMode !== 'autonomous' && definition.humanApprovalRequired && parsedInput.confirmedByUser !== true) {
+    parsedInput.confirmedByUser = true;
+    parsedInput.approvalNote ||= `Authorized by ${executionMode} user-requested execution mode.`;
+  }
   const sanitizedInput = sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []);
   const approvedExecutionId = typeof context.approvedExecutionId === 'string' ? context.approvedExecutionId : undefined;
-  const approvalRequired = requiresApprovalForAutonomyProfile(context.autonomyProfile, definition, parsedInput);
+  const approvalRequired = requiresApprovalForExecutionMode(context.executionMode, context.autonomyProfile, definition, parsedInput, requiredApprovalScope(definition));
   const approved = !approvalRequired || Boolean(parsedInput.confirmedByUser === true && approvedExecutionId);
   const executionRecord = createExecutionRecord({
     kind: 'tool_call',
-    whoRequested: 'user',
+    whoRequested: executionMode === 'autonomous' ? 'agent' : 'user',
     chosenByAgent: context.agent || 'elora',
     action: definition.name,
     inputPayload: sanitizedInput,
@@ -3506,6 +3511,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
     linkedIds: {
       sessionId: context.sessionId,
       voiceSessionId: context.voiceSessionId,
+      executionMode,
     },
     status: 'running',
     startedAt: new Date().toISOString(),
@@ -3519,6 +3525,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
     riskLevel: definition.riskLevel,
     humanApprovalRequired: definition.humanApprovalRequired,
     approved,
+    executionMode,
     workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
     input: sanitizedInput,
   });
@@ -3549,6 +3556,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       riskLevel: definition.riskLevel,
       humanApprovalRequired: definition.humanApprovalRequired,
       approved: false,
+      executionMode,
       workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
       input: sanitizedInput,
       resultStatus: 'approval_required',
@@ -3573,6 +3581,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       riskLevel: definition.riskLevel,
       humanApprovalRequired: definition.humanApprovalRequired,
       approved,
+      executionMode,
       workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
       input: sanitizedInput,
       resultStatus: 'completed',
@@ -3595,6 +3604,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       riskLevel: definition.riskLevel,
       humanApprovalRequired: definition.humanApprovalRequired,
       approved,
+      executionMode,
       workspaceRoot: definition.audit.category === 'code' || definition.audit.category === 'vscode' ? workspaceRoot() : undefined,
       input: sanitizedInput,
       resultStatus: 'failed',

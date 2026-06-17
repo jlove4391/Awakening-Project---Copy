@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const runtimeBaseUrl =
   process.env.REACT_APP_AGENT_RUNTIME_URL || "http://localhost:4317";
@@ -33,6 +33,11 @@ const taskApprovalStatus = (task) => {
   if (requirements.some((item) => item.status === "pending" || !item.status)) return "pending";
   return requirements.length ? "approved" : "not_required";
 };
+
+const hasPendingTaskApproval = (task) =>
+  (task.approvalRequirements || []).some(
+    (item) => item.required !== false && (item.status === "pending" || !item.status),
+  );
 
 const latestApprovedRequirement = (task) =>
   [...(task.approvalRequirements || [])]
@@ -145,6 +150,8 @@ const ExecutionReceiptsPanel = ({
   const [delegatedTasks, setDelegatedTasks] = useState([]);
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
+  const [approvalActions, setApprovalActions] = useState({});
+  const isMountedRef = useRef(false);
 
   const query = useMemo(() => {
     const params = new URLSearchParams({ limit: String(limit) });
@@ -152,11 +159,10 @@ const ExecutionReceiptsPanel = ({
     return params.toString();
   }, [limit, sessionId]);
 
-  useEffect(() => {
-    let mounted = true;
-    const loadExecutions = async () => {
+  const loadExecutions = useCallback(
+    async ({ showLoading = true } = {}) => {
       try {
-        setStatus("loading");
+        if (showLoading) setStatus("loading");
         const taskParams = new URLSearchParams();
         if (sessionId) taskParams.set("sessionId", sessionId);
         else taskParams.set("includeAllSessions", "true");
@@ -172,13 +178,13 @@ const ExecutionReceiptsPanel = ({
           response.json(),
           taskResponse.json(),
         ]);
-        if (!mounted) return;
+        if (!isMountedRef.current) return;
         setExecutions(payload.executions || []);
         setDelegatedTasks(taskPayload.tasks || []);
         setStatus("ready");
         setError("");
       } catch (loadError) {
-        if (!mounted) return;
+        if (!isMountedRef.current) return;
         setStatus("error");
         setError(
           loadError instanceof Error
@@ -186,15 +192,58 @@ const ExecutionReceiptsPanel = ({
             : "Unable to load execution receipts",
         );
       }
-    };
+    },
+    [query, sessionId],
+  );
 
+  useEffect(() => {
+    isMountedRef.current = true;
     loadExecutions();
-    const interval = window.setInterval(loadExecutions, 7000);
+    const interval = window.setInterval(
+      () => loadExecutions({ showLoading: false }),
+      7000,
+    );
     return () => {
-      mounted = false;
+      isMountedRef.current = false;
       window.clearInterval(interval);
     };
-  }, [query, refreshNonce, sessionId]);
+  }, [loadExecutions, refreshNonce]);
+
+  const handleApproveTask = async (task) => {
+    setApprovalActions((prev) => ({ ...prev, [task.id]: "approving" }));
+    try {
+      const response = await fetch(`${runtimeBaseUrl}/api/tasks/${task.id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirmedByUser: true,
+          approver: "user",
+          note: "Approved from execution receipts panel.",
+        }),
+      });
+      if (!response.ok)
+        throw new Error(`task approval returned ${response.status}`);
+      const payload = await response.json();
+      if (payload.task) {
+        setDelegatedTasks((prev) =>
+          prev.map((item) => (item.id === payload.task.id ? payload.task : item)),
+        );
+      }
+      await loadExecutions({ showLoading: false });
+    } catch (approvalError) {
+      setError(
+        approvalError instanceof Error
+          ? approvalError.message
+          : "Unable to approve delegated task",
+      );
+    } finally {
+      setApprovalActions((prev) => {
+        const next = { ...prev };
+        delete next[task.id];
+        return next;
+      });
+    }
+  };
 
   return (
     <section
@@ -229,6 +278,10 @@ const ExecutionReceiptsPanel = ({
           const workerCopy = taskWorkerStateCopy(task);
           const approval = latestApprovedRequirement(task);
           const approvalState = taskApprovalStatus(task);
+          const needsTaskApproval =
+            task.status === "pending_approval" &&
+            approvalState === "pending" &&
+            hasPendingTaskApproval(task);
 
           return (
             <article
@@ -253,6 +306,23 @@ const ExecutionReceiptsPanel = ({
                   Approval recorded{approval?.approver ? ` by ${approval.approver}` : ""}
                   {approval?.approvedAt ? ` at ${formatDateTime(approval.approvedAt)}` : ""}.
                 </p>
+              )}
+
+              {needsTaskApproval && (
+                <div className="execution-approval-summary">
+                  <p>Task approval is pending before Nexora can start.</p>
+                  <div className="approval-actions">
+                    <button
+                      type="button"
+                      onClick={() => handleApproveTask(task)}
+                      disabled={Boolean(approvalActions[task.id])}
+                    >
+                      {approvalActions[task.id] === "approving"
+                        ? "Approving…"
+                        : "Approve task"}
+                    </button>
+                  </div>
+                </div>
               )}
 
               <div className="worker-state-panel">

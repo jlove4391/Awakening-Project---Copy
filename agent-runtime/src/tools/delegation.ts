@@ -1,6 +1,5 @@
 import { durableTaskQueue } from '../tasks/queue.js';
 import {
-  approveDelegatedTask,
   approveExecutionPlanStep,
   cancelDelegatedTask,
   completeDelegatedTask,
@@ -11,6 +10,7 @@ import {
   createAutonomousImprovementProposal,
 } from '../tasks/store.js';
 import { cancelActiveNexoraCommand } from '../workers/nexora/localWorker.js';
+import { resolveExplicitTaskApproval } from '../approvals/taskApprovalResolver.js';
 import type { RuntimeContext } from '../types.js';
 
 export async function createDelegationTask(
@@ -78,9 +78,8 @@ export async function createAutonomousProposal(input: {
 }
 
 export async function approveDelegationTask(input: { taskId: string; approver?: string; note?: string }) {
-  const task = await approveDelegatedTask(input.taskId, input.approver || 'user', input.note || '');
-  if (task?.status === 'queued') durableTaskQueue.enqueueById(task.id);
-  return task || { ok: false, status: 'not_found', taskId: input.taskId };
+  const approval = await resolveExplicitTaskApproval(input.taskId, { approver: input.approver || 'user', note: input.note || '' });
+  return approval.task || { ok: false, status: 'not_found', taskId: input.taskId };
 }
 
 export async function recordDelegationTaskResult(input: { taskId: string; ok: boolean; summary: string; data?: unknown; errorMessage?: string }) {

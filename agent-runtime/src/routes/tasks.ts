@@ -15,6 +15,7 @@ import {
   updateDelegatedTask,
 } from '../tasks/store.js';
 import { planApplyVerify, type NexoraPlanApplyVerifyChange } from '../workflows/nexora/planApplyVerify.js';
+import { resolveExplicitTaskApproval } from '../approvals/taskApprovalResolver.js';
 import type { ApprovalRequirement, DelegatedTask, DelegatedTaskEventType, DelegatedTaskStatus, TaskAuditEntry } from '../tasks/types.js';
 
 export const tasksRouter = Router();
@@ -261,13 +262,12 @@ const approveTask: RequestHandler<{ taskId: string }> = async (req, res, next) =
       res.json(taskResponse(task));
       return;
     }
-    const task = await approveDelegatedTask(req.params.taskId, approver, note);
-    if (!task) {
+    const approval = await resolveExplicitTaskApproval(req.params.taskId, { approver, note });
+    if (!approval.task) {
       res.status(404).json({ error: 'task not found' });
       return;
     }
-    if (task.status === 'queued') durableTaskQueue.enqueue(task);
-    res.json(taskResponse(task));
+    res.json({ ...taskResponse(approval.task), approval: approval.pendingApproval, approvalReceipt: approval.receipt });
   } catch (error) {
     next(error);
   }

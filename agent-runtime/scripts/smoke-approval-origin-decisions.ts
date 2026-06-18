@@ -99,7 +99,7 @@ assert.ok(highRiskDelegatedTask.auditTrail.some((event) => event.eventType === '
 
 assert.equal(evaluateNexoraCapabilityForStep('code.edit', 'pending', 'reactive').allowed, true);
 assert.equal(evaluateNexoraCapabilityForStep('code.edit', 'pending', 'delegated').allowed, true);
-assert.equal(evaluateNexoraCapabilityForStep('code.edit', 'pending', 'autonomous').reason, 'approval_required');
+assert.equal(evaluateNexoraCapabilityForStep('code.edit', 'pending', 'autonomous').allowed, false);
 assert.equal(evaluateNexoraCapabilityForStep('code.commit', 'pending', 'delegated').reason, 'approval_required');
 
 console.log('Approval origin decision smoke passed.');

@@ -95,6 +95,7 @@ function approvalRequirementArray(value: unknown): Array<Partial<ApprovalRequire
         rejectedAt: typeof requirement.rejectedAt === 'string' ? requirement.rejectedAt : undefined,
         note: typeof requirement.note === 'string' ? requirement.note : undefined,
         reason: typeof requirement.reason === 'string' ? requirement.reason : undefined,
+        scope: typeof requirement.scope === 'string' ? (requirement.scope as ApprovalRequirement['scope']) : undefined,
       } satisfies Partial<ApprovalRequirement>;
     })
     .filter((item) => (typeof item === 'string' ? Boolean(item) : Boolean(item.reason || item.note || item.approver || item.status)));

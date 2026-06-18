@@ -6,6 +6,7 @@ import { kaz } from './agents/kaz.js';
 import { nexora } from './agents/nexora.js';
 import { getRuntimeContext, listMemories, persistRuntimeContext } from './memory/index.js';
 import { normalizeAutonomyLevel } from './governance/autonomyProfiles.js';
+import { isConversationalApprovalIntent, resolveConversationalApproval } from './approvals/conversationalApproval.js';
 import type { AgentMessageEvent, AgentMessageRequest, RuntimeAgentName, RuntimeContext } from './types.js';
 
 export function extractTextDelta(event: any) {
@@ -77,6 +78,36 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
     },
   });
   await sink?.({ event: 'memory', data: { references: await listMemories(context.sessionId, 5) } });
+
+  if (isConversationalApprovalIntent(trimmed)) {
+    const approval = await resolveConversationalApproval(context.sessionId);
+    await persistRuntimeContext(context);
+    const memories = await listMemories(context.sessionId, 5);
+    await sink?.({ event: 'delta', data: { text: approval.message } });
+    await sink?.({
+      event: 'runtime_event',
+      data: {
+        type: 'conversational_approval_resolution',
+        sessionId: context.sessionId,
+        taskId: approval.resolvedApproval?.taskId,
+        stepId: approval.resolvedApproval?.stepId,
+        scope: approval.resolvedApproval?.scope,
+        task: approval.task,
+      },
+    });
+    await sink?.({
+      event: 'completed',
+      data: {
+        sessionId: context.sessionId,
+        finalOutput: approval.message,
+        memories,
+        channel: context.channel,
+        voiceSessionId: context.voiceSessionId,
+        agent: selectedAgent,
+      },
+    });
+    return { sessionId: context.sessionId, context, text: approval.message, finalOutput: approval.message, memories, runtimeEvents: [] };
+  }
 
   const stream = await run(agent, trimmed, {
     stream: true,

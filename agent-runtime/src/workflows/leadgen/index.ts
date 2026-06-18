@@ -9,6 +9,7 @@ export { approveCampaign } from './approveCampaign.js';
 export { exportSequence, type ExportSequenceInput } from './exportSequence.js';
 export { scheduleFollowUp } from './followUp.js';
 export { reviewLeadQueue, type LeadReviewQueueOptions } from './reviewQueue.js';
+export { runLeadgenProofWorkflow, type LeadgenProofWorkflowInput, type LeadgenProofWorkflowResult } from './proofWorkflow.js';
 
 function memoryText(lead: LeadRecord) {
   return `Lead ${lead.fullName} (${lead.title}) at ${lead.company} for ${lead.market}; status=${lead.status}; score=${lead.score ?? 'n/a'}; signals=${lead.signals.join(', ')}`;

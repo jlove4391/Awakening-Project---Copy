@@ -22,6 +22,9 @@ export interface ObservationRecommendation {
   rationale: string;
   recommendedAction: string;
   links: ObservationRecommendationLink[];
+  affectedPaths: string[];
+  confidence: number;
+  risk: 'low' | 'medium' | 'high';
   rank?: number;
   draft?: string;
   draftPatchProposal?: string;
@@ -39,6 +42,15 @@ function recommendationPath(id: string) {
   return path.join(recommendationsDir, `${id}.json`);
 }
 
+function sanitizeAffectedPaths(paths: string[]) {
+  return [...new Set(paths.map((item) => item.trim()).filter(Boolean))];
+}
+
+function sanitizeConfidence(value: number | undefined) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return 0.5;
+  return Math.min(1, Math.max(0, value));
+}
+
 function sanitizeLinks(links: ObservationRecommendationLink[]) {
   return links.map((link) => ({
     type: link.type,
@@ -50,6 +62,9 @@ function sanitizeLinks(links: ObservationRecommendationLink[]) {
 export async function createObservationRecommendation(
   input: Pick<ObservationRecommendation, 'title' | 'summary' | 'rationale' | 'recommendedAction'> & {
     links?: ObservationRecommendationLink[];
+    affectedPaths?: string[];
+    confidence?: number;
+    risk?: 'low' | 'medium' | 'high';
     rank?: number;
     draft?: string;
     draftPatchProposal?: string;
@@ -66,6 +81,9 @@ export async function createObservationRecommendation(
     rationale: input.rationale,
     recommendedAction: input.recommendedAction,
     links: sanitizeLinks(input.links || []),
+    affectedPaths: sanitizeAffectedPaths(input.affectedPaths || []),
+    confidence: sanitizeConfidence(input.confidence),
+    risk: input.risk || 'medium',
     ...(input.rank ? { rank: input.rank } : {}),
     ...(input.draft ? { draft: input.draft } : {}),
     ...(input.draftPatchProposal ? { draftPatchProposal: input.draftPatchProposal } : {}),

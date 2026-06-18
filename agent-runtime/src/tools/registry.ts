@@ -2716,6 +2716,9 @@ export const toolRegistry: RegisteredToolDefinition[] = [
         summary: stringSchema('Concise finding summary.'),
         rationale: stringSchema('Why ELORA/CORE recommends this action, grounded in inspected evidence.'),
         recommendedAction: stringSchema('Recommended next step for a human or later approved execution.'),
+        affectedPaths: stringArraySchema('Workspace paths affected by the recommendation; these are evidence/review targets only and are never modified by observation mode.'),
+        confidence: numberSchema('Recommendation confidence from 0 to 1.', { minimum: 0, maximum: 1 }),
+        risk: stringSchema('Risk level for the recommended action: low, medium, or high.'),
         links: {
           type: 'array',
           description: 'Auditable links to relevant files, tasks, receipts, memories, or other evidence.',
@@ -2730,13 +2733,16 @@ export const toolRegistry: RegisteredToolDefinition[] = [
         draft: stringSchema('Optional internal draft content; never sent externally.'),
         draftPatchProposal: stringSchema('Optional patch proposal text. Level 3 may draft this only; applying it requires a separate approval-gated code tool.'),
       },
-      ['title', 'summary', 'rationale', 'recommendedAction'],
+      ['title', 'summary', 'rationale', 'recommendedAction', 'affectedPaths', 'confidence', 'risk'],
     ),
     parameters: z.object({
       title: z.string().min(1),
       summary: z.string().min(1),
       rationale: z.string().min(1),
       recommendedAction: z.string().min(1),
+      affectedPaths: z.array(z.string().min(1)).default([]),
+      confidence: z.number().min(0).max(1).default(0.5),
+      risk: z.enum(['low', 'medium', 'high']).default('medium'),
       links: z.array(z.object({ type: z.enum(['file', 'task', 'receipt', 'memory', 'other']), id: z.string().min(1), label: z.string().optional() })).default([]),
       rank: z.number().int().min(1).max(100).optional(),
       draft: z.string().optional(),
@@ -3544,11 +3550,11 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   const parsedInput = definition.parameters.parse(normalizedInput) as Record<string, unknown>;
   const executionMode = normalizeExecutionMode(context.executionMode, context.autonomyProfile === 'proactive_observation' ? 'observation' : context.autonomyProfile ? 'autonomous' : 'reactive');
   const autonomyLevel = activeAutonomyLevel(context);
-  if (!autonomyLevelAllows(autonomyLevel, definition, parsedInput, executionMode)) {
-    return approvalBlockedResult(definition, context, `autonomy_level_${autonomyLevel}_policy`, undefined, sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []));
-  }
   if ((executionMode === 'observation' || context.autonomyProfile === 'proactive_observation') && !proactiveObservationAllows(definition, autonomyLevel, parsedInput)) {
     return approvalBlockedResult(definition, context, 'observation_mode_read_only_policy', undefined, sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []));
+  }
+  if (!autonomyLevelAllows(autonomyLevel, definition, parsedInput, executionMode)) {
+    return approvalBlockedResult(definition, context, `autonomy_level_${autonomyLevel}_policy`, undefined, sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []));
   }
   if (executionMode !== 'autonomous' && definition.humanApprovalRequired && parsedInput.confirmedByUser !== true) {
     parsedInput.confirmedByUser = true;
@@ -3556,7 +3562,9 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   }
   const sanitizedInput = sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []);
   const approvedExecutionId = typeof context.approvedExecutionId === 'string' ? context.approvedExecutionId : undefined;
-  const approvalRequired = requiresApprovalForExecutionMode(context.executionMode, context.autonomyProfile, definition, parsedInput, requiredApprovalScope(definition));
+  const approvalRequired = (executionMode === 'observation' || context.autonomyProfile === 'proactive_observation')
+    ? !proactiveObservationAllows(definition, autonomyLevel, parsedInput)
+    : requiresApprovalForExecutionMode(context.executionMode, context.autonomyProfile, definition, parsedInput, requiredApprovalScope(definition));
   const approved = !approvalRequired || Boolean(parsedInput.confirmedByUser === true && approvedExecutionId);
   const executionRecord = createExecutionRecord({
     kind: 'tool_call',

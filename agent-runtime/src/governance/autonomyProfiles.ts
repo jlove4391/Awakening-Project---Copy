@@ -89,7 +89,7 @@ export function autonomyLevelAllows(
   executionMode?: ExecutionMode,
 ) {
   const mode = normalizeExecutionMode(executionMode, level === 0 ? 'reactive' : 'observation');
-  if (level === 0) return mode === 'reactive' && definition.name !== 'observation.recommend';
+  if (level === 0) return (mode === 'reactive' || mode === 'delegated') && definition.name !== 'observation.recommend';
   if (definition.riskLevel === 'read') return true;
   if (definition.name !== 'observation.recommend') return false;
   if (level === 1) return false;

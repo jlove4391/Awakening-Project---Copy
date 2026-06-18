@@ -126,7 +126,7 @@ export async function updateProactiveQueueStatus(id: string, status: ProactiveQu
     const item = (await loadItems()).find((candidate) => candidate.id === id);
     if (!item) return undefined;
     item.status = status; item.updatedAt = now();
-    item.receipts.push(receipt(status, note || `Queue item marked ${status}.`));
+    item.receipts.push(receipt(status === 'open' ? 'created' : status, note || `Queue item marked ${status}.`));
     await persistItems(); return item;
   });
 }

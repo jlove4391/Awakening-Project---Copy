@@ -21,7 +21,7 @@ import {
 } from '../providers/digitalocean/index.js';
 import { appendActivity, lookupCrmContact, updateLeadStatus, upsertCrmContact } from '../providers/crm/index.js';
 import { enrichPersonWithClay } from '../providers/clay/index.js';
-import { exportSequence, findLeadsWorkflow } from '../workflows/leadgen/index.js';
+import { exportSequence, findLeadsWorkflow, runLeadgenProofWorkflow } from '../workflows/leadgen/index.js';
 import { evaluateCampaignGuardrails } from '../workflows/campaigns/guardrails.js';
 import { classifyReply } from '../workflows/outreach/classifyReply.js';
 import { recordOptOut } from '../workflows/outreach/optOut.js';
@@ -1584,6 +1584,24 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       logEvents: ['tool.leadgen.find_leads.requested', 'tool.leadgen.find_leads.completed'],
     },
     executor: findLeadsWorkflow,
+  },
+
+  {
+    name: 'leadgen.live_proof_workflow',
+    description: 'Import one lead from the configured source, score it, place it in the lead inbox, draft one email, require Jordan to say I approve, send exactly one Gmail email, store a receipt, and update follow-up status.',
+    inputSchema: objectSchema({ market: stringSchema('Target market or ICP.'), titles: stringArraySchema('Target titles.'), geography: stringSchema('Target geography.'), buyingSignals: stringArraySchema('Optional buying signals to prioritize.'), sourceMode: stringSchema('Optional source mode: sheets, clay_sheets, clay_direct, manual, web_research, or synthetic.'), approvalMessage: stringSchema('Jordan approval phrase. Must be exactly I approve to send.'), approvalNote: approvalNoteSchema, followUpDays: numberSchema('Days until follow-up is due.', { minimum: 1, maximum: 60 }), assignedTo: stringSchema('Lead inbox assignee.') }, ['market']),
+    parameters: z.object({ market: z.string().min(1), titles: z.array(z.string()).default([]), geography: z.string().default(''), buyingSignals: z.array(z.string()).default([]), sourceMode: z.enum(['synthetic', 'sheets', 'clay_direct', 'clay_sheets', 'manual', 'web_research']).optional(), approvalMessage: z.string().default(''), approvalNote: z.string().default(''), followUpDays: z.number().int().min(1).max(60).default(3), assignedTo: z.string().default('Jordan') }),
+    scopes: ['leadgen.search.read', 'outreach.email.send', 'https://www.googleapis.com/auth/gmail.send'],
+    riskLevel: 'external_send',
+    humanApprovalRequired: true,
+    audit: {
+      category: 'leadgen',
+      action: 'live_proof_workflow',
+      resourceType: 'lead_proof_workflow',
+      sensitiveFields: ['market', 'titles', 'geography', 'buyingSignals', 'approvalMessage'],
+      logEvents: ['tool.leadgen.live_proof_workflow.approval_requested', 'tool.leadgen.live_proof_workflow.completed'],
+    },
+    executor: runLeadgenProofWorkflow,
   },
   {
     name: 'leadgen.export_sequence',

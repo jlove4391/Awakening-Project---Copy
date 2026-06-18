@@ -107,7 +107,7 @@ export function requiresApprovalForAutonomyProfile(
   definition: RegisteredToolDefinition,
   input: Record<string, unknown>,
 ) {
-  if (profile === 'proactive_observation') return !proactiveObservationAllows(definition, runtimeConfig.autonomy.level, input);
+  if (profile === 'proactive_observation') return !proactiveObservationAllows(definition, activeAutonomyLevel({ autonomyLevel: runtimeConfig.autonomy.level || 2 }), input);
   if (profile !== 'dev_autonomy') return definition.humanApprovalRequired;
   return !devAutonomyAllowsWithoutApproval(definition, input);
 }

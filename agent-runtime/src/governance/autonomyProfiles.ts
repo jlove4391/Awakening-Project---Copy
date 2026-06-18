@@ -25,6 +25,16 @@ export function activeAutonomyLevel(context?: { autonomyLevel?: AutonomyLevel })
 }
 
 
+const HARD_APPROVAL_SCOPES = new Set([
+  'repo.commit',
+  'repo.delete',
+  'provider.create',
+  'provider.update',
+  'provider.delete',
+  'database.migrate',
+  'external.send',
+]);
+
 const AUTONOMOUS_MUTATION_SCOPES = new Set([
   'repo.write',
   'repo.delete',
@@ -125,6 +135,7 @@ export function requiresApprovalForExecutionMode(
 ) {
   const mode = normalizeExecutionMode(executionMode, profile ? 'autonomous' : 'reactive');
   if (mode === 'observation' || profile === 'proactive_observation') return !proactiveObservationAllows(definition, runtimeConfig.autonomy.level, input);
+  if (approvalScope && HARD_APPROVAL_SCOPES.has(approvalScope)) return true;
   if (mode !== 'autonomous') return false;
   if (definition.riskLevel === 'read') return false;
   if (profile === 'dev_autonomy') return requiresApprovalForAutonomyProfile(profile, definition, input);

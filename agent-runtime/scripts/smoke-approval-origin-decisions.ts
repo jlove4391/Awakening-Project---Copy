@@ -7,10 +7,14 @@ import { tmpdir } from 'node:os';
 
 process.env.AGENT_RUNTIME_DATA_DIR = await mkdtemp(path.join(tmpdir(), 'approval-origin-decisions-'));
 
+const { runtimeConfig } = await import('../src/config.js');
+const { workspaceRoot } = await import('../src/tools/codeTools.js');
 const { createDelegatedTask } = await import('../src/tasks/store.js');
 const { evaluateNexoraCapabilityForStep } = await import('../src/workflows/nexora/capabilities.js');
 
 const sessionId = 'approval-origin-decisions-smoke';
+assert.equal(runtimeConfig.codeWorkspaceRoot.endsWith(path.join('agent-runtime', '.runtime-data', 'sandbox', 'default')), true, 'default Nexora workspace should be the sandbox/default lane');
+assert.equal(workspaceRoot().endsWith(path.join('agent-runtime', '.runtime-data', 'sandbox', 'default')), true, 'code tools should resolve the sandbox/default workspace lane');
 
 const reactiveTask = await createDelegatedTask({
   sessionId,

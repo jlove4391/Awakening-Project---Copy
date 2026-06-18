@@ -76,6 +76,7 @@ export function workspaceRoot() {
 }
 
 async function existingRootRealPath() {
+  await fs.mkdir(workspaceRoot(), { recursive: true });
   return fs.realpath(workspaceRoot());
 }
 

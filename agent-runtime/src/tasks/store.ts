@@ -174,21 +174,39 @@ function approvalBypassedReason(source: DelegatedTaskAuthorizationSource) {
     : 'Explicit user delegation chain authorizes this delegated task without an additional approval prompt.';
 }
 
-function normalizeApprovalRequirements(input?: Array<Partial<ApprovalRequirement> | string>, authorizationSource: DelegatedTaskAuthorizationSource = 'autonomous'): ApprovalRequirement[] {
-  const userAuthorized = authorizedByUser(authorizationSource);
+function isHighRiskApprovalScope(scope: ApprovalRequirement['scope'] | undefined) {
+  return scope === 'repo.commit'
+    || scope === 'repo.delete'
+    || scope === 'provider.create'
+    || scope === 'provider.update'
+    || scope === 'provider.delete'
+    || scope === 'database.migrate'
+    || scope === 'external.send';
+}
+
+function normalizeApprovalRequirements(
+  input?: Array<Partial<ApprovalRequirement> | string>,
+  authorizationSource: DelegatedTaskAuthorizationSource = 'autonomous',
+  executionOrigin?: ExecutionOrigin,
+): ApprovalRequirement[] {
+  const userAuthorized = authorizedByUser(authorizationSource) && executionOrigin !== 'autonomous';
   return (input || []).map((item) => {
     const base = typeof item === 'string' ? { reason: item } : item;
     const required = base.required ?? true;
-    const status = required ? (userAuthorized ? 'approved' : base.status || 'pending') : 'not_required';
+    const highRisk = isHighRiskApprovalScope(base.scope);
+    const autoApproved = required && userAuthorized && !highRisk;
+    const status = required ? (autoApproved ? 'approved' : base.status || 'pending') : 'not_required';
     return {
       required,
       status,
       approver: base.approver,
-      approvedAt: base.approvedAt || (required && userAuthorized ? now() : undefined),
+      approvedAt: base.approvedAt || (autoApproved ? now() : undefined),
       rejectedAt: base.rejectedAt,
-      note: base.note || (required && userAuthorized ? approvalBypassedReason(authorizationSource) : undefined),
+      note: base.note || (autoApproved ? approvalBypassedReason(authorizationSource) : undefined),
       reason: base.reason,
+      scope: base.scope,
       authorizationSource,
+      executionOrigin,
     } satisfies ApprovalRequirement;
   });
 }
@@ -201,7 +219,10 @@ function normalizeExecutionPlanStep(
 ) {
   const timestamp = now();
   const executionOrigin = input.executionOrigin || originContext?.executionOrigin || originForAuthorizationSource(authorizationSource);
-  const userAuthorized = authorizedByUser(authorizationSource) && isAllowedUserRequestedOrDelegatedCoreTool(input.targetTool, executionOrigin);
+  const userAuthorized = authorizedByUser(authorizationSource)
+    && executionOrigin !== 'autonomous'
+    && !isHighRiskApprovalScope(input.approval?.scope)
+    && isAllowedUserRequestedOrDelegatedCoreTool(input.targetTool, executionOrigin);
   const requestedApprovalStatus = input.approval?.status || input.approvalStatus || 'not_required';
   const approvalRequired = input.approval?.required ?? requestedApprovalStatus === 'pending';
   const approvalStatus = userAuthorized && approvalRequired ? 'approved' : (approvalRequired && requestedApprovalStatus === 'not_required' ? 'pending' : requestedApprovalStatus);
@@ -429,7 +450,7 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
     const rootTaskId = input.rootTaskId || parentTask?.rootTaskId || input.parentTaskId || taskId;
     const delegationChain = parentTask ? [...parentTask.delegationChain, taskId] : [taskId];
     const originContext = { executionOrigin, rootTaskId, parentTaskId: input.parentTaskId, delegationChain };
-    const approvalRequirements = normalizeApprovalRequirements(input.approvalRequirements, authorizationSource);
+    const approvalRequirements = normalizeApprovalRequirements(input.approvalRequirements, authorizationSource, executionOrigin);
     const task: DelegatedTask = {
       id: taskId,
       sessionId: input.sessionId,

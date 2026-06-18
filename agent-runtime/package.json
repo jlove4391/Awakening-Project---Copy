@@ -35,7 +35,8 @@
     "smoke:user-requested-delegated-no-approval": "tsx scripts/smoke-user-requested-delegated-no-approval.ts",
     "smoke:execution-origin-metadata": "tsx scripts/smoke-execution-origin-metadata.ts",
     "assert:proactive-observation": "tsx scripts/assert-proactive-observation-profile.ts",
-    "smoke:proactive-queue": "tsx scripts/smoke-proactive-queue.ts"
+    "smoke:proactive-queue": "tsx scripts/smoke-proactive-queue.ts",
+    "smoke:approval-origin-decisions": "tsx scripts/smoke-approval-origin-decisions.ts"
   },
   "dependencies": {
     "@openai/agents": "latest",

@@ -8,6 +8,7 @@ import {
   getDelegatedTask,
   listDelegatedTasks,
   updateDelegatedTask,
+  createAutonomousImprovementProposal,
 } from '../tasks/store.js';
 import { cancelActiveNexoraCommand } from '../workers/nexora/localWorker.js';
 import type { RuntimeContext } from '../types.js';
@@ -46,6 +47,33 @@ export async function listDelegationTasks(_input: { includeAllSessions?: boolean
 
 export async function getDelegationTask(input: { taskId: string }) {
   const task = await getDelegatedTask(input.taskId);
+  return task || { ok: false, status: 'not_found', taskId: input.taskId };
+}
+
+
+export async function createAutonomousProposal(input: {
+  taskId: string;
+  title: string;
+  summary: string;
+  rationale: string;
+  affectedFiles?: string[];
+  riskLevel?: 'low' | 'medium' | 'high';
+  proposedDiff?: string;
+  implementationNotes?: string;
+  changes?: unknown[];
+  proposedBy?: 'core' | 'elora' | 'nexora';
+}) {
+  const task = await createAutonomousImprovementProposal(input.taskId, {
+    title: input.title,
+    summary: input.summary,
+    rationale: input.rationale,
+    affectedFiles: input.affectedFiles || [],
+    riskLevel: input.riskLevel || 'medium',
+    proposedDiff: input.proposedDiff,
+    implementationNotes: input.implementationNotes,
+    changes: input.changes,
+    proposedBy: input.proposedBy || 'nexora',
+  });
   return task || { ok: false, status: 'not_found', taskId: input.taskId };
 }
 

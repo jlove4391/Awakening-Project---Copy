@@ -8,6 +8,7 @@ import { tasksRouter } from './routes/tasks.js';
 import { voiceRouter } from './routes/voice.js';
 import { executionsRouter } from './routes/executions.js';
 import { memoryRouter } from './routes/memory.js';
+import { proactiveQueueRouter } from './routes/proactiveQueue.js';
 import { enqueuePersistedQueuedTasks } from './tasks/queue.js';
 
 import { googleAuthRouter } from './providers/google/auth.js';
@@ -29,6 +30,7 @@ app.use('/api/tasks', tasksRouter);
 app.use('/api/executions', executionsRouter);
 app.use('/api/voice', voiceRouter);
 app.use('/api/memory', memoryRouter);
+app.use('/api/proactive-queue', proactiveQueueRouter);
 app.use('/api/auth/google', googleAuthRouter);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

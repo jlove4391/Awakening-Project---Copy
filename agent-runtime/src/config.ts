@@ -5,10 +5,18 @@ const runtimeRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const defaultSandboxWorkspaceRoot = path.join(runtimeRoot, '.runtime-data', 'sandbox', 'default');
 
 export type AutonomyLevel = 0 | 1 | 2 | 3;
+export const leadgenSourceModes = ['synthetic', 'sheets', 'clay_direct', 'clay_sheets', 'manual', 'web_research'] as const;
+export type LeadgenSourceMode = typeof leadgenSourceModes[number];
 
 function parseAutonomyLevel(value: string | undefined): AutonomyLevel {
   const parsed = Number(value ?? 0);
   return parsed === 0 || parsed === 1 || parsed === 2 || parsed === 3 ? parsed : 0;
+}
+
+export function parseLeadgenSourceMode(value: string | undefined): LeadgenSourceMode {
+  const mode = (value || 'synthetic').trim().toLowerCase();
+  if ((leadgenSourceModes as readonly string[]).includes(mode)) return mode as LeadgenSourceMode;
+  throw new Error(`Invalid LEADGEN_SOURCE_MODE "${value}". Expected one of: ${leadgenSourceModes.join(', ')}.`);
 }
 
 export const runtimeConfig = {
@@ -23,6 +31,7 @@ export const runtimeConfig = {
     supportedLevels: [0, 1, 2, 3] as AutonomyLevel[],
   },
   coreTestingMode: process.env.AGENT_RUNTIME_CORE_TESTING_MODE === 'true' || process.env.AGENT_RUNTIME_PROFILE === 'core_testing',
+  leadgenSourceMode: parseLeadgenSourceMode(process.env.LEADGEN_SOURCE_MODE),
   corsOrigin: process.env.AGENT_RUNTIME_CORS_ORIGIN || 'http://localhost:3000',
   codeWorkspaceRoot: process.env.NEXORA_WORKSPACE_ROOT || process.env.CODE_WORKSPACE_ROOT || defaultSandboxWorkspaceRoot,
   codeCommandTimeoutMs: Number(process.env.NEXORA_CODE_COMMAND_TIMEOUT_MS || process.env.CODE_COMMAND_TIMEOUT_MS || 120000),

@@ -1,9 +1,12 @@
+import type { LeadgenSourceMode } from '../../config.js';
 import type { RuntimeContext } from '../../types.js';
 
 export interface ApprovalGateInput {
   confirmedByUser?: boolean;
   approvalNote?: string;
 }
+
+export type { LeadgenSourceMode };
 
 export interface LeadgenIcpInput {
   market: string;

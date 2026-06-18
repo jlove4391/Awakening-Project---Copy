@@ -37,7 +37,8 @@
     "assert:proactive-observation": "tsx scripts/assert-proactive-observation-profile.ts",
     "smoke:proactive-queue": "tsx scripts/smoke-proactive-queue.ts",
     "smoke:approval-origin-decisions": "tsx scripts/smoke-approval-origin-decisions.ts",
-    "smoke:autonomous-proposal-approval": "tsx scripts/smoke-autonomous-proposal-approval.ts"
+    "smoke:autonomous-proposal-approval": "tsx scripts/smoke-autonomous-proposal-approval.ts",
+    "smoke:leadgen-source-mode": "tsx scripts/smoke-leadgen-source-mode.ts"
   },
   "dependencies": {
     "@openai/agents": "latest",

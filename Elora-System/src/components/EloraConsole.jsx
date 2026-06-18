@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ExecutionReceiptsPanel from "./ExecutionReceiptsPanel";
+import ProactiveQueuePanel from "./ProactiveQueuePanel";
 import "../styles/theme.css";
 import "../styles/EloraConsole.css";
 
@@ -713,6 +714,8 @@ const speakText = async (text) => {
           {isStreaming ? "Streaming…" : "Send"}
         </button>
       </form>
+
+      <ProactiveQueuePanel />
 
       <ExecutionReceiptsPanel
         sessionId={sessionId}

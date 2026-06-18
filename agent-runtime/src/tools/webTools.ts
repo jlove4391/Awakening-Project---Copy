@@ -45,7 +45,7 @@ async function fetchLimited(url: URL, input: WebFetchUrlInput) {
     const finalUrl = normalizeHttpUrl(response.url || url.toString());
     const reader = response.body?.getReader();
     if (!reader) {
-      return { response, finalUrl, contentType, body: '', bytesRead: 0, truncated: false, maxBytes };
+      return { response, finalUrl, contentType, body: '', bytesRead: 0, truncated: false, maxBytes, timeoutMs };
     }
 
     const chunks: Uint8Array[] = [];
@@ -67,7 +67,7 @@ async function fetchLimited(url: URL, input: WebFetchUrlInput) {
       bytesRead += value.byteLength;
     }
     const buffer = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), bytesRead);
-    return { response, finalUrl, contentType, body: buffer.toString('utf8'), bytesRead, truncated, maxBytes };
+    return { response, finalUrl, contentType, body: buffer.toString('utf8'), bytesRead, truncated, maxBytes, timeoutMs };
   } finally {
     clearTimeout(timeout);
   }
@@ -116,6 +116,7 @@ export async function webFetchUrl(input: WebFetchUrlInput) {
     contentType: fetched.contentType,
     bytesRead: fetched.bytesRead,
     maxBytes: fetched.maxBytes,
+    timeoutMs: fetched.timeoutMs,
     truncated: fetched.truncated,
     sha256: sha256(fetched.body),
     title: fetched.contentType.includes('text/html') ? titleFromHtml(fetched.body) : '',
@@ -130,6 +131,7 @@ export async function webCrawlSite(input: WebCrawlSiteInput) {
   const queue: Array<{ url: URL; depth: number }> = [{ url: startUrl, depth: 0 }];
   const seen = new Set<string>();
   const pages: unknown[] = [];
+  let totalBytesRead = 0;
 
   while (queue.length && pages.length < maxPages) {
     const current = queue.shift()!;
@@ -137,6 +139,7 @@ export async function webCrawlSite(input: WebCrawlSiteInput) {
     seen.add(current.url.toString());
     const fetched = await fetchLimited(current.url, input);
     const isHtml = fetched.contentType.includes('text/html');
+    totalBytesRead += fetched.bytesRead;
     const page = {
       ok: fetched.response.ok,
       status: fetched.response.status,
@@ -145,6 +148,8 @@ export async function webCrawlSite(input: WebCrawlSiteInput) {
       depth: current.depth,
       contentType: fetched.contentType,
       bytesRead: fetched.bytesRead,
+      maxBytes: fetched.maxBytes,
+      timeoutMs: fetched.timeoutMs,
       truncated: fetched.truncated,
       sha256: sha256(fetched.body),
       title: isHtml ? titleFromHtml(fetched.body) : '',
@@ -166,6 +171,8 @@ export async function webCrawlSite(input: WebCrawlSiteInput) {
     pagesFetched: pages.length,
     maxPages,
     maxDepth,
+    maxBytesPerPage: limitNumber(input.maxBytes, runtimeConfig.webFetchMaxBytes, runtimeConfig.webFetchMaxBytes),
+    totalBytesRead,
     pages,
   };
 }

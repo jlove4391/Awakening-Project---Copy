@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const runtimeRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const repoRoot = path.resolve(runtimeRoot, '..');
+const defaultSandboxWorkspaceRoot = path.join(runtimeRoot, '.runtime-data', 'sandbox', 'default');
 
 export type AutonomyLevel = 0 | 1 | 2 | 3;
 
@@ -24,7 +24,7 @@ export const runtimeConfig = {
   },
   coreTestingMode: process.env.AGENT_RUNTIME_CORE_TESTING_MODE === 'true' || process.env.AGENT_RUNTIME_PROFILE === 'core_testing',
   corsOrigin: process.env.AGENT_RUNTIME_CORS_ORIGIN || 'http://localhost:3000',
-  codeWorkspaceRoot: process.env.NEXORA_WORKSPACE_ROOT || process.env.CODE_WORKSPACE_ROOT || repoRoot,
+  codeWorkspaceRoot: process.env.NEXORA_WORKSPACE_ROOT || process.env.CODE_WORKSPACE_ROOT || defaultSandboxWorkspaceRoot,
   codeCommandTimeoutMs: Number(process.env.NEXORA_CODE_COMMAND_TIMEOUT_MS || process.env.CODE_COMMAND_TIMEOUT_MS || 120000),
   webFetchMaxBytes: Number(process.env.WEB_FETCH_MAX_BYTES || 500000),
   webFetchTimeoutMs: Number(process.env.WEB_FETCH_TIMEOUT_MS || 15000),

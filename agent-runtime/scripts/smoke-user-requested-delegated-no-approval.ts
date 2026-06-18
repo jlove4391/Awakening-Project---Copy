@@ -25,19 +25,31 @@ const { approveDelegatedTask, createDelegatedTask, getDelegatedTask } = await im
 await import('../src/tasks/queue.js');
 
 const { evaluateNexoraCapabilityForStep, requiresHardApprovalGate } = await import('../src/workflows/nexora/capabilities.js');
+const { requiresApprovalForExecutionMode } = await import('../src/governance/autonomyProfiles.js');
 const { getRegisteredTool } = await import('../src/tools/registry.js');
 const commitDefinition = getRegisteredTool('code.commit');
 const testDefinition = getRegisteredTool('code.test');
 const editDefinition = getRegisteredTool('code.edit');
 const driveWriteDefinition = getRegisteredTool('drive.create_text_file');
 const gmailSendDefinition = getRegisteredTool('gmail.send_email');
+const deleteDefinition = getRegisteredTool('code.delete_file');
+const providerCreateDefinition = getRegisteredTool('digitalocean.create_infrastructure');
 assert.equal(requiresHardApprovalGate(commitDefinition), true, 'commits must remain hard approval gates');
 assert.equal(requiresHardApprovalGate(driveWriteDefinition), true, 'provider/account writes must remain hard approval gates');
 assert.equal(requiresHardApprovalGate(gmailSendDefinition), true, 'external sends must remain hard approval gates');
+assert.equal(requiresHardApprovalGate(deleteDefinition), true, 'deletes must remain hard approval gates');
+assert.equal(requiresHardApprovalGate(providerCreateDefinition), true, 'deploy/provider writes must remain hard approval gates');
 assert.equal(requiresHardApprovalGate(testDefinition), false, 'ordinary local tests must not be hard approval gates');
 assert.equal(requiresHardApprovalGate(editDefinition), false, 'ordinary local file edits must not be hard approval gates');
 assert.equal(evaluateNexoraCapabilityForStep('code.commit', 'pending', 'delegated').reason, 'approval_required');
+assert.equal(evaluateNexoraCapabilityForStep('code.delete_file', 'pending', 'delegated').reason, 'approval_required');
+assert.equal(evaluateNexoraCapabilityForStep('drive.create_text_file', 'pending', 'delegated').reason, 'approval_required');
 assert.equal(evaluateNexoraCapabilityForStep('code.test', 'pending', 'delegated').allowed, true);
+assert.equal(requiresApprovalForExecutionMode('delegated', undefined, testDefinition!, {}, 'repo.command'), false, 'delegated local test commands are auto-executable');
+assert.equal(requiresApprovalForExecutionMode('delegated', undefined, commitDefinition!, {}, 'repo.commit'), true, 'delegated commits stay hard-gated');
+assert.equal(requiresApprovalForExecutionMode('delegated', undefined, deleteDefinition!, {}, 'repo.delete'), true, 'delegated deletes stay hard-gated');
+assert.equal(requiresApprovalForExecutionMode('delegated', undefined, providerCreateDefinition!, {}, 'provider.create'), true, 'delegated provider writes/deploys stay hard-gated');
+assert.equal(requiresApprovalForExecutionMode('delegated', undefined, gmailSendDefinition!, {}, 'external.send'), true, 'delegated external sends stay hard-gated');
 
 const task = await createDelegatedTask({
   sessionId,

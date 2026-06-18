@@ -77,6 +77,7 @@ export function requiresHardApprovalGate(definition: Pick<RegisteredToolDefiniti
   if (!definition) return true;
   if (definition.requiredApprovalScope) return true;
   if (definition.name === 'code.commit') return true;
+  if (definition.audit.action.includes('delete')) return true;
   if (definition.riskLevel === 'external_send' || definition.riskLevel === 'purchase_or_commit') return true;
 
   const action = definition.audit.action.toLowerCase();

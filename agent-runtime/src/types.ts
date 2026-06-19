@@ -70,6 +70,8 @@ export interface RuntimeContext {
   approvedExecutionId?: string;
   approvedDelegatedTaskId?: string;
   approvedDelegatedStepId?: string;
+  sdkApprovedToolCallIds?: string[];
+  sdkApprovedToolNames?: string[];
   autonomyProfile?: 'dev_autonomy' | 'proactive_observation';
   autonomyLevel?: AutonomyLevel;
   executionMode?: ExecutionMode;

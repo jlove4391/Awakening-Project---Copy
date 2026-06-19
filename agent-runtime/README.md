@@ -29,6 +29,20 @@ Set `OPENAI_API_KEY` to enable the SDK's `OpenAIConversationsSession`; otherwise
 
 The chat endpoint defaults to Elora. Pass `agent: "nexora"` in `POST /api/chat` to run the Nexora definition with the same session and memory store plus code/VS Code tools.
 
+## OpenAI Agents SDK Version
+
+The agent runtime pins `@openai/agents` to `0.11.7` instead of `latest`. This version is the tested SDK baseline for Elora/Nexora chat execution, SDK sessions, and the approval-gated tool flow. Keep `agent-runtime/package.json` and the root `package-lock.json` in sync when changing it.
+
+### SDK upgrade checklist
+
+Before bumping `@openai/agents`:
+
+- [ ] Replace the explicit version in `agent-runtime/package.json` and regenerate the root lockfile with `npm install --package-lock-only` in normal Code mode.
+- [ ] Run the agent-runtime typecheck with `npm --workspace @awakening/agent-runtime run typecheck`.
+- [ ] Run approval-flow smoke tests, at minimum `npm --workspace @awakening/agent-runtime run smoke:sdk-approvals`, `npm --workspace @awakening/agent-runtime run smoke:approval-origin-decisions`, and `npm --workspace @awakening/agent-runtime run smoke:nexora-commit-approval`.
+- [ ] Manually review any SDK release notes or migration notes that mention tool execution, handoffs, sessions, streaming events, or human approval behavior.
+- [ ] Update this section with the newly tested SDK version and record any approval-flow changes found during testing.
+
 ## Local Elora Text Loop Smoke Test
 
 Use the smoke-chat script to verify that the local Elora text loop can accept a chat request, stream the expected SSE lifecycle, and persist the session record. The script sends the default prompt `Hello Elora. Confirm the runtime loop is alive.` to `POST /api/chat` with `agent: "elora"`.

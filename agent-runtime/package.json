@@ -44,7 +44,7 @@
     "smoke:sdk-approvals": "tsx scripts/smoke-sdk-approvals.ts"
   },
   "dependencies": {
-    "@openai/agents": "latest",
+    "@openai/agents": "0.11.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",

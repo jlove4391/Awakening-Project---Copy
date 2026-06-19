@@ -27,7 +27,7 @@
     "smoke:nexora-commit-approval": "tsx scripts/smoke-nexora-commit-approval.ts",
     "smoke:delegated-file-create": "tsx scripts/smoke-delegated-file-create.ts",
     "smoke:delegated-resume": "tsx scripts/smoke-delegated-resume.ts",
-    "smoke:approvals": "tsx scripts/smoke-delegated-resume.ts",
+    "smoke:approvals": "tsx scripts/smoke-sdk-approvals.ts",
     "smoke:digitalocean-status": "tsx scripts/smoke-digitalocean-status.ts",
     "smoke:databank-status": "tsx scripts/smoke-databank-status.ts",
     "smoke:web-tools": "tsx scripts/smoke-web-tools.ts",
@@ -40,7 +40,8 @@
     "smoke:autonomous-proposal-approval": "tsx scripts/smoke-autonomous-proposal-approval.ts",
     "smoke:leadgen-source-mode": "tsx scripts/smoke-leadgen-source-mode.ts",
     "smoke:lead-workflow-orchestrator": "tsx scripts/smoke-lead-workflow-orchestrator.ts",
-    "smoke:leadgen-live-proof": "tsx scripts/smoke-leadgen-live-proof.ts"
+    "smoke:leadgen-live-proof": "tsx scripts/smoke-leadgen-live-proof.ts",
+    "smoke:sdk-approvals": "tsx scripts/smoke-sdk-approvals.ts"
   },
   "dependencies": {
     "@openai/agents": "latest",

@@ -1,14 +1,23 @@
 import type { RunToolApprovalItem } from '@openai/agents';
 
+export type SdkApprovalDecision = 'approve' | 'reject' | 'cancel';
+export type SdkApprovalRiskLevel = 'low' | 'medium' | 'high' | 'unknown';
+
+export interface PendingSdkApprovalRecord {
+  approvalId: string;
+  toolName: string;
+  argumentsSummary: string;
+  riskLevel: SdkApprovalRiskLevel;
+  sessionId: string;
+  allowedDecisions: SdkApprovalDecision[];
+  callId?: string;
+  itemId?: string;
+}
+
 export interface PendingSdkApproval {
   sessionId: string;
   runState: string;
-  approvalItems: Array<{
-    name?: string;
-    callId?: string;
-    itemId?: string;
-    arguments?: string;
-  }>;
+  approvals: PendingSdkApprovalRecord[];
   createdAt: string;
   updatedAt: string;
 }
@@ -20,12 +29,34 @@ function rawCallId(item: RunToolApprovalItem) {
   return raw.callId || raw.call_id || raw.id;
 }
 
-export function summarizeApprovalItem(item: RunToolApprovalItem): PendingSdkApproval['approvalItems'][number] {
+function rawRiskLevel(item: RunToolApprovalItem): SdkApprovalRiskLevel {
+  const raw = item.rawItem as { riskLevel?: unknown; risk_level?: unknown; risk?: unknown };
+  const candidate = raw.riskLevel || raw.risk_level || raw.risk;
+  return candidate === 'low' || candidate === 'medium' || candidate === 'high' ? candidate : 'unknown';
+}
+
+function summarizeArguments(argumentsJson: string | undefined) {
+  if (!argumentsJson?.trim()) return 'No arguments provided.';
+  const compact = argumentsJson.trim().replace(/\s+/g, ' ');
+  return compact.length > 500 ? `${compact.slice(0, 497)}...` : compact;
+}
+
+export function approvalIdForItem(item: RunToolApprovalItem, index: number) {
+  return rawCallId(item) || (item.rawItem as { id?: string }).id || `${item.name || item.toolName || 'tool'}-${index + 1}`;
+}
+
+export function summarizeApprovalItem(item: RunToolApprovalItem, sessionId: string, index: number): PendingSdkApprovalRecord {
+  const callId = rawCallId(item);
+  const itemId = (item.rawItem as { id?: string }).id;
   return {
-    name: item.name || item.toolName,
-    callId: rawCallId(item),
-    itemId: (item.rawItem as { id?: string }).id,
-    arguments: item.arguments,
+    approvalId: approvalIdForItem(item, index),
+    toolName: item.name || item.toolName || 'unknown_tool',
+    argumentsSummary: summarizeArguments(item.arguments),
+    riskLevel: rawRiskLevel(item),
+    sessionId,
+    allowedDecisions: ['approve', 'reject', 'cancel'],
+    ...(callId ? { callId } : {}),
+    ...(itemId ? { itemId } : {}),
   };
 }
 
@@ -35,7 +66,7 @@ export function savePendingSdkApproval(sessionId: string, runState: string, inte
   const record: PendingSdkApproval = {
     sessionId,
     runState,
-    approvalItems: interruptions.map(summarizeApprovalItem),
+    approvals: interruptions.map((item, index) => summarizeApprovalItem(item, sessionId, index)),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
@@ -57,15 +88,17 @@ export function isApprovalReply(message: string) {
 }
 
 export function formatApprovalPrompt(approval: PendingSdkApproval) {
-  const items = approval.approvalItems.length
-    ? approval.approvalItems
-        .map((item, index) => {
-          const label = item.name || item.callId || item.itemId || `approval ${index + 1}`;
-          const args = item.arguments ? ` with arguments ${item.arguments}` : '';
-          return `- ${label}${args}`;
+  const items = approval.approvals.length
+    ? approval.approvals
+        .map((item) => {
+          return `- approvalId: ${item.approvalId}; tool: ${item.toolName}; risk: ${item.riskLevel}; arguments: ${item.argumentsSummary}; decisions: ${item.allowedDecisions.join(', ')}`;
         })
         .join('\n')
     : '- A tool call requires approval.';
 
-  return `Approval required before I can continue. Please review the pending SDK tool call(s):\n${items}\n\nReply \"I approve\" to approve and resume this run.`;
+  const instruction = approval.approvals.length === 1
+    ? 'Reply with an explicit approval decision (approve/reject/cancel and approvalId), or reply "I approve" to approve this single pending item.'
+    : 'Multiple approvals are pending. Reply with an explicit approval decision and approvalId for each item; natural-language approval is ambiguous.';
+
+  return `Approval required before I can continue. Please review the pending SDK tool call(s):\n${items}\n\n${instruction}`;
 }

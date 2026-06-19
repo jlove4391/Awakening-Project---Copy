@@ -77,6 +77,14 @@ export interface RuntimeContext {
   executionMode?: ExecutionMode;
 }
 
+export type AgentApprovalDecision = 'approve' | 'reject' | 'cancel';
+
+export interface AgentApprovalAction {
+  decision: AgentApprovalDecision;
+  approvalId?: string;
+  reason?: string;
+}
+
 export interface AgentMessageRequest {
   message?: string;
   sessionId?: string;
@@ -88,6 +96,7 @@ export interface AgentMessageRequest {
   autonomyProfile?: 'dev_autonomy' | 'proactive_observation';
   autonomyLevel?: AutonomyLevel;
   executionMode?: ExecutionMode;
+  approval?: AgentApprovalAction;
 }
 
 export interface AgentMessageEvent {
@@ -103,4 +112,5 @@ export interface ChatRequestBody {
   autonomyProfile?: 'dev_autonomy' | 'proactive_observation';
   autonomyLevel?: AutonomyLevel;
   executionMode?: ExecutionMode;
+  approval?: AgentApprovalAction;
 }

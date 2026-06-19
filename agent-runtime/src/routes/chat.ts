@@ -11,10 +11,10 @@ const allowedAgentList = Array.from(allowedAgents).join(', ');
 export const chatRouter = Router();
 
 chatRouter.post('/', async (req, res, next) => {
-  const { message, sessionId, agent = 'elora', autonomyProfile, autonomyLevel, executionMode } = req.body as ChatRequestBody;
+  const { message, sessionId, agent = 'elora', autonomyProfile, autonomyLevel, executionMode, approval } = req.body as ChatRequestBody;
 
-  if (!message?.trim()) {
-    res.status(400).json({ error: 'message is required' });
+  if (!message?.trim() && !approval) {
+    res.status(400).json({ error: 'message or approval is required' });
     return;
   }
 
@@ -38,7 +38,7 @@ chatRouter.post('/', async (req, res, next) => {
   setupSse(res);
 
   try {
-    await runAgentMessage({ message, sessionId, agent, autonomyProfile, autonomyLevel: normalizedAutonomyLevel, executionMode }, async (runtimeEvent) => {
+    await runAgentMessage({ message, sessionId, agent, autonomyProfile, autonomyLevel: normalizedAutonomyLevel, executionMode, approval }, async (runtimeEvent) => {
       sendEvent(res, runtimeEvent.event, runtimeEvent.data);
     });
 

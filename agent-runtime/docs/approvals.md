@@ -1,96 +1,78 @@
-# SDK human-in-the-loop approval flow
+# Explicit Approval Boundary
 
-The runtime now uses the OpenAI Agents SDK human-in-the-loop (HITL) approval pause/resume path for direct SDK tool calls. Direct tool approvals are not replayed through `POST /api/executions/:id/approval`; that endpoint is legacy compatibility for existing execution records only. New direct SDK tool approvals resume the serialized SDK run state for the chat session.
+Approval is no longer the default governance mechanism for the CORE. The default path is relationship-informed execution with receipts. The runtime should execute ordinary productive work in the real local or configured workspace environment whenever capable, then leave durable receipts.
 
-## Scope
+The CORE's operating progression is:
 
-This document covers direct SDK tool approvals: high-risk or write-capable tools invoked by an agent during `POST /api/chat`. Durable delegated task approvals are separate queue state transitions and are documented in [`delegated-task-ui-contract.md`](./delegated-task-ui-contract.md).
-
-## Flow
-
-1. The agent selects a registered tool whose SDK `needsApproval` policy returns `true`.
-2. The Agents SDK interrupts the streaming run before executing that tool.
-3. The runtime serializes the SDK `RunState` and stores pending approval metadata keyed by `sessionId`.
-4. The chat stream emits:
-   - a `runtime_event` with `type: "sdk_approval_required"`, the `sessionId`, and one or more approval records;
-   - a final user-facing approval prompt listing each `approvalId`, tool name, risk level, argument summary, and allowed decisions.
-5. The UI submits the decision back to `POST /api/chat` with the same `sessionId` and an `approval` body.
-6. The runtime restores the serialized SDK state, applies `approve` or `reject` to the matching interruption, and resumes the SDK run.
-7. Approved execution produces a completed execution record and receipt. Rejected execution resumes the SDK run with the rejection applied and must not execute the rejected tool call.
-
-## Approval request body
-
-Send approval decisions to the chat endpoint, not to the execution replay endpoint:
-
-```http
-POST /api/chat
-Content-Type: application/json
-
-{
-  "agent": "elora",
-  "sessionId": "<same-session-id>",
-  "approval": {
-    "decision": "approve",
-    "approvalId": "<approval-id-from-sdk_approval_required>"
-  }
-}
+```text
+Memory → Identity → Relationship → Trust → Autonomy → Execution
 ```
 
-Supported decisions are:
+Autonomy expands through demonstrated reliability, not through a static permission switch. Approval exists only for explicit boundaries.
 
-| Decision | Behavior |
-| --- | --- |
-| `approve` | Approves the matching SDK interruption and resumes the run. The approved tool execution is recorded with a completed execution receipt. |
-| `reject` | Rejects the matching SDK interruption and resumes the run without approving the tool call. Include `reason` when available. |
-| `cancel` | Clears the pending approval without resuming the serialized SDK run. |
+## Ask Before Execution
 
-For a single pending approval, the chat message `I approve` may be accepted as a convenience. For multiple pending approvals, natural-language approval is intentionally ambiguous; the UI must send an explicit `approvalId`.
+The runtime must ask before execution only for RMT and personal-information-sensitive actions.
 
-## Pending approval payload
+### RMT
 
-The runtime emits summarized approval records rather than raw provider inputs:
+RMT means:
 
-```json
-{
-  "type": "sdk_approval_required",
-  "sessionId": "phase-1-sdk-approval",
-  "approvals": [
-    {
-      "approvalId": "call_123",
-      "toolName": "code.create_file",
-      "argumentsSummary": "{\"path\":\".runtime-smoke/sdk-approved.txt\"}",
-      "riskLevel": "medium",
-      "sessionId": "phase-1-sdk-approval",
-      "allowedDecisions": ["approve", "reject", "cancel"],
-      "callId": "call_123"
-    }
-  ]
-}
-```
+- purchases
+- money movement
+- bank activity
+- payments
+- transfers
+- subscriptions
+- contracts with financial/legal effect
+- irreversible or externally binding financial commitments
 
-## Receipts and audit records
+### Personal-information-sensitive actions
 
-Approval pause and approved execution are both auditable:
+Personal-information-sensitive actions include:
 
-- A paused SDK tool call stores pending approval metadata keyed by `sessionId` and emits `sdk_approval_required` before mutation. Legacy non-SDK approval shims may still write blocked execution records for compatibility.
-- An approved resumed tool call writes a completed execution record with `status: "completed"`, `providerResponseSummary`, and `receipt.summary`.
-- Tool audit entries are written under `${AGENT_RUNTIME_DATA_DIR:-agent-runtime/.runtime-data}/audit/tool-audit.jsonl`.
+- exposing, transmitting, deleting, altering, or sharing personal/private data
+- identity information
+- financial records
+- health/private family information
+- passwords/secrets/tokens
+- contact data
+- private correspondence
+- anything that could materially affect privacy or reputation if mishandled
 
-Use `GET /api/executions?sessionId=<sessionId>&limit=10` to verify completed approved tool records for a session; pending SDK approval state is emitted on the chat stream rather than treated as a replayable execution.
+## Execute + Receipt by Default
 
-## Smoke coverage
+Ordinary productive work should execute and receipt rather than pause for approval. Examples include:
 
-Run the SDK approval smoke from the repository root:
+- local file creation
+- local file editing
+- reversible local file deletion
+- local directory creation and organization
+- repository modifications
+- branch creation
+- patch application
+- command execution
+- build execution
+- test execution
+- validation execution
+- internal work-order creation and updates
+- non-sensitive memory writes
+- Drive document creation that does not expose private data
+- Calendar reminders/internal events that do not expose private data or create external commitments
+- Gmail drafting and non-destructive organization
 
-```bash
-npm --workspace @awakening/agent-runtime run smoke:approvals
-```
+Receipts should include actor, action, reason, resources changed, policy classification, trust domain, timestamp, result, validation output where applicable, and rollback hint where possible.
 
-The smoke covers:
+## Dynamic Trust
 
-- SDK tool pause before an unapproved write.
-- Pending approval metadata and prompt generation.
-- Approved SDK resume that executes the tool.
-- Rejection/cleared approval that does not execute the tool.
-- Multiple pending approval ambiguity messaging.
-- Completed execution receipt creation after approved execution.
+The runtime should track successful actions, failed actions, reversals, user corrections, receipt quality, and boundary accuracy. These events produce trust history by domain. Trust history should output trust score, trust domains, current autonomy envelope, and autonomy recommendations.
+
+Autonomy may expand after repeated successful execution and contract after repeated failures, reversals, corrections, or policy-boundary mistakes.
+
+## Setup-Needed State
+
+When credentials, integrations, or external systems are missing, the runtime should not fake or perform the action. It should produce a setup-needed receipt with concrete next setup steps.
+
+## Legacy SDK/HITL Compatibility
+
+Existing SDK human-in-the-loop approval pause/resume paths may remain as compatibility mechanisms for actions classified as ask-before-execution. They should not be used for ordinary file writes, ordinary repository work, ordinary command execution, internal work orders, or other productive actions inside the current trust envelope.

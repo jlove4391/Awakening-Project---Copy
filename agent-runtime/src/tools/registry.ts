@@ -1301,8 +1301,6 @@ export const toolRegistry: RegisteredToolDefinition[] = [
         start: stringSchema('ISO-8601 start time.'),
         end: stringSchema('ISO-8601 end time.'),
         attendees: stringArraySchema('Attendee email addresses.'),
-        confirmedByUser: approvalBooleanSchema,
-        approvalNote: approvalNoteSchema,
       },
       ['summary', 'start', 'end'],
     ),
@@ -1313,8 +1311,6 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       start: z.string().min(1),
       end: z.string().min(1),
       attendees: z.array(z.string().email()).default([]),
-      confirmedByUser: z.boolean().default(false),
-      approvalNote: z.string().default(''),
     }),
     scopes: ['https://www.googleapis.com/auth/calendar.events'],
     riskLevel: 'write',
@@ -1356,8 +1352,6 @@ export const toolRegistry: RegisteredToolDefinition[] = [
         bcc: stringArraySchema('BCC recipient email addresses.'),
         subject: stringSchema('Email subject.'),
         body: stringSchema('Plain-text email body.'),
-        confirmedByUser: approvalBooleanSchema,
-        approvalNote: approvalNoteSchema,
       },
       ['to', 'subject', 'body'],
     ),
@@ -1367,8 +1361,6 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       bcc: z.array(z.string().email()).default([]),
       subject: z.string().min(1),
       body: z.string().min(1),
-      confirmedByUser: z.boolean().default(false),
-      approvalNote: z.string().default(''),
     }),
     scopes: ['https://www.googleapis.com/auth/gmail.send'],
     riskLevel: 'external_send',
@@ -1404,7 +1396,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
     name: 'drive.create_text_file',
     description: 'Create a text file in the connected drive provider.',
     inputSchema: objectSchema(
-      { name: stringSchema('File name.'), parentId: stringSchema('Parent folder ID.'), content: stringSchema('Text content to write.'), mimeType: stringSchema('MIME type.'), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema },
+      { name: stringSchema('File name.'), parentId: stringSchema('Parent folder ID.'), content: stringSchema('Text content to write.'), mimeType: stringSchema('MIME type.') },
       ['name', 'content'],
     ),
     parameters: z.object({
@@ -1412,8 +1404,6 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       parentId: z.string().default(''),
       content: z.string().min(1),
       mimeType: z.string().default('text/plain'),
-      confirmedByUser: z.boolean().default(false),
-      approvalNote: z.string().default(''),
     }),
     scopes: ['https://www.googleapis.com/auth/drive.file'],
     riskLevel: 'write',
@@ -1450,10 +1440,10 @@ export const toolRegistry: RegisteredToolDefinition[] = [
     name: 'sheets.update_range',
     description: 'Update values in a spreadsheet range.',
     inputSchema: objectSchema(
-      { spreadsheetId: stringSchema('Spreadsheet ID.'), range: stringSchema('A1 notation range.'), values: { type: 'array', description: 'Two-dimensional row values.', items: { type: 'array', items: {} } }, confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema },
+      { spreadsheetId: stringSchema('Spreadsheet ID.'), range: stringSchema('A1 notation range.'), values: { type: 'array', description: 'Two-dimensional row values.', items: { type: 'array', items: {} } } },
       ['spreadsheetId', 'range', 'values'],
     ),
-    parameters: z.object({ spreadsheetId: z.string().min(1), range: z.string().min(1), values: z.array(z.array(z.unknown())), confirmedByUser: z.boolean().default(false), approvalNote: z.string().default('') }),
+    parameters: z.object({ spreadsheetId: z.string().min(1), range: z.string().min(1), values: z.array(z.array(z.unknown())) }),
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     riskLevel: 'write',
     humanApprovalRequired: true,
@@ -2424,7 +2414,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
         confirmedByUser: approvalBooleanSchema,
         approvalNote: approvalNoteSchema,
       },
-      ['summary', 'start', 'end', 'confirmedByUser'],
+      ['summary', 'start', 'end'],
     ),
     parameters: z.object({
       calendarId: z.string().default('primary'),
@@ -3558,6 +3548,8 @@ async function hasExactApprovalScope(definition: RegisteredToolDefinition, input
   const approvedRecord = await getExecutionRecord(executionId);
   if (approvedRecord) return approvedRecord.action === definition.name && approvedRecord.approvalRequest?.approvalScope === scope;
 
+  if (isDirectProviderWrite(definition)) return false;
+
   const taskId = typeof input.taskId === 'string' ? input.taskId : typeof context.approvedDelegatedTaskId === 'string' ? context.approvedDelegatedTaskId : undefined;
   const stepId = typeof input.stepId === 'string' ? input.stepId : typeof context.approvedDelegatedStepId === 'string' ? context.approvedDelegatedStepId : executionId;
   if (!taskId || !stepId) return false;
@@ -3608,7 +3600,30 @@ function normalizeToolInput(input: unknown): Record<string, unknown> {
   return { value: input };
 }
 
-export async function executeRegisteredTool(name: string, input: unknown, context: RuntimeContext) {
+
+function isDirectProviderWrite(definition: RegisteredToolDefinition) {
+  return definition.name === 'calendar.create_event'
+    || definition.name === 'drive.create_text_file'
+    || definition.name === 'gmail.send_email'
+    || definition.name === 'sheets.update_range';
+}
+
+function usesSdkApprovalGate(definition: RegisteredToolDefinition) {
+  // Durable delegation approval tools mutate the task queue's approval state rather than
+  // approving the current SDK tool call, so they keep the legacy queue approval shim.
+  return definition.humanApprovalRequired && definition.name !== 'delegation.approve_task' && definition.name !== 'delegation.approve_step';
+}
+
+function wasApprovedBySdkResume(definition: RegisteredToolDefinition, context: RuntimeContext, callId?: string) {
+  if (!usesSdkApprovalGate(definition)) return false;
+  const approvedCallIds = new Set(context.sdkApprovedToolCallIds || []);
+  if (callId && approvedCallIds.has(callId)) return true;
+  // Older serialized SDK states may not preserve a stable call id across versions; use
+  // tool name as a fallback only on the explicit resume path populated by agentEndpoint.
+  return new Set(context.sdkApprovedToolNames || []).has(definition.name);
+}
+
+export async function executeRegisteredTool(name: string, input: unknown, context: RuntimeContext, sdkToolCallId?: string) {
   const definition = getRegisteredTool(name);
   if (!definition) throw new Error(`Unknown registered tool: ${name}`);
   if (!context?.sessionId) throw new Error(`Runtime context is missing for ${definition.name}`);
@@ -3623,7 +3638,11 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   if (!autonomyLevelAllows(autonomyLevel, definition, parsedInput, executionMode)) {
     return approvalBlockedResult(definition, context, `autonomy_level_${autonomyLevel}_policy`, undefined, sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []));
   }
-  if (executionMode !== 'autonomous' && definition.humanApprovalRequired && parsedInput.confirmedByUser !== true) {
+  const sdkApproved = wasApprovedBySdkResume(definition, context, sdkToolCallId);
+  if (sdkApproved) {
+    parsedInput.confirmedByUser = true;
+    parsedInput.approvalNote ||= `Approved through OpenAI Agents SDK human-in-the-loop resume${sdkToolCallId ? ` for call ${sdkToolCallId}` : ''}.`;
+  } else if (!usesSdkApprovalGate(definition) && executionMode !== 'autonomous' && definition.humanApprovalRequired && parsedInput.confirmedByUser !== true) {
     parsedInput.confirmedByUser = true;
     parsedInput.approvalNote ||= `Authorized by ${executionMode} user-requested execution mode.`;
   }
@@ -3632,7 +3651,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   const approvalRequired = (executionMode === 'observation' || context.autonomyProfile === 'proactive_observation')
     ? !proactiveObservationAllows(definition, autonomyLevel, parsedInput)
     : requiresApprovalForExecutionMode(context.executionMode, context.autonomyProfile, definition, parsedInput, requiredApprovalScope(definition));
-  const approved = !approvalRequired || Boolean(parsedInput.confirmedByUser === true && approvedExecutionId);
+  const approved = !approvalRequired || sdkApproved || Boolean(parsedInput.confirmedByUser === true && approvedExecutionId);
   const executionRecord = createExecutionRecord({
     kind: 'tool_call',
     whoRequested: executionMode === 'autonomous' ? 'agent' : 'user',
@@ -3668,7 +3687,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
     input: sanitizedInput,
   });
 
-  const approvalBlock = await enforceApprovalLimits(definition, parsedInput, context, Boolean(approved), approvedExecutionId || executionRecord.id, sanitizedInput, approvalRequired);
+  const approvalBlock = await enforceApprovalLimits(definition, parsedInput, context, Boolean(approved), sdkApproved ? executionRecord.id : (approvedExecutionId || executionRecord.id), sanitizedInput, approvalRequired && !sdkApproved);
   if (approvalBlock) {
     const blockedRecord = completeExecutionRecord(executionRecord, {
       status: 'blocked',
@@ -3761,11 +3780,19 @@ function toRuntimeTool(definition: RegisteredToolDefinition) {
     description: definition.description,
     parameters: definition.inputSchema,
     strict: false,
-    needsApproval: false,
-    execute: async (input: any, runContext: any) => {
+    needsApproval: async (runContext: any, input: any) => {
+      const context = runContext?.context as RuntimeContext | undefined;
+      if (!context) return definition.humanApprovalRequired;
+      const executionMode = normalizeExecutionMode(context.executionMode, context.autonomyProfile === 'proactive_observation' ? 'observation' : context.autonomyProfile ? 'autonomous' : 'reactive');
+      const autonomyLevel = activeAutonomyLevel(context);
+      if (!usesSdkApprovalGate(definition)) return false;
+      if ((executionMode === 'observation' || context.autonomyProfile === 'proactive_observation') && !proactiveObservationAllows(definition, autonomyLevel, input)) return true;
+      return requiresApprovalForExecutionMode(context.executionMode, context.autonomyProfile, definition, input, requiredApprovalScope(definition));
+    },
+    execute: async (input: any, runContext: any, details: any) => {
       const context = runContext?.context as RuntimeContext | undefined;
       if (!context) throw new Error(`Runtime context is missing for ${definition.name}`);
-      return executeRegisteredTool(definition.name, input, context);
+      return executeRegisteredTool(definition.name, input, context, details?.toolCall?.callId);
     },
   } as any);
 }

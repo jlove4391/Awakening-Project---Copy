@@ -87,7 +87,18 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
     const restoredContext = new RunContext(context);
     const restoredState = await RunState.fromStringWithContext(agent as any, pendingApproval.runState, restoredContext, { contextStrategy: 'replace' });
     const interruptions = restoredState.getInterruptions();
-    for (const interruption of interruptions) restoredState.approve(interruption);
+    const approvedToolCallIds: string[] = [];
+    const approvedToolNames: string[] = [];
+    for (const interruption of interruptions) {
+      restoredState.approve(interruption);
+      const raw = interruption.rawItem as { callId?: string; call_id?: string; id?: string };
+      const callId = raw.callId || raw.call_id || raw.id;
+      if (callId) approvedToolCallIds.push(callId);
+      const name = interruption.name || interruption.toolName;
+      if (name) approvedToolNames.push(name);
+    }
+    context.sdkApprovedToolCallIds = approvedToolCallIds;
+    context.sdkApprovedToolNames = approvedToolNames;
     clearPendingSdkApproval(context.sessionId);
     streamInput = restoredState;
     await sink?.({

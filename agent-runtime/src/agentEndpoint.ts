@@ -1,4 +1,4 @@
-import { run } from '@openai/agents';
+import { RunContext, RunState, run } from '@openai/agents';
 import { elora } from './agents/elora.js';
 import { jynx } from './agents/jynx.js';
 import { kalyra } from './agents/kalyra.js';
@@ -6,7 +6,7 @@ import { kaz } from './agents/kaz.js';
 import { nexora } from './agents/nexora.js';
 import { getRuntimeContext, listMemories, persistRuntimeContext } from './memory/index.js';
 import { normalizeAutonomyLevel } from './governance/autonomyProfiles.js';
-import { isConversationalApprovalIntent, resolveConversationalApproval } from './approvals/conversationalApproval.js';
+import { clearPendingSdkApproval, formatApprovalPrompt, getPendingSdkApproval, isApprovalReply, savePendingSdkApproval } from './approvals/sdkApprovalStore.js';
 import type { AgentMessageEvent, AgentMessageRequest, RuntimeAgentName, RuntimeContext } from './types.js';
 
 export function extractTextDelta(event: any) {
@@ -79,37 +79,28 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
   });
   await sink?.({ event: 'memory', data: { references: await listMemories(context.sessionId, 5) } });
 
-  if (isConversationalApprovalIntent(trimmed)) {
-    const approval = await resolveConversationalApproval(context.sessionId);
-    await persistRuntimeContext(context);
-    const memories = await listMemories(context.sessionId, 5);
-    await sink?.({ event: 'delta', data: { text: approval.message } });
+  const pendingApproval = getPendingSdkApproval(context.sessionId);
+  const resumingApproval = Boolean(pendingApproval && isApprovalReply(trimmed));
+  let streamInput: string | RunState<any, any> = trimmed;
+
+  if (resumingApproval && pendingApproval) {
+    const restoredContext = new RunContext(context);
+    const restoredState = await RunState.fromStringWithContext(agent as any, pendingApproval.runState, restoredContext, { contextStrategy: 'replace' });
+    const interruptions = restoredState.getInterruptions();
+    for (const interruption of interruptions) restoredState.approve(interruption);
+    clearPendingSdkApproval(context.sessionId);
+    streamInput = restoredState;
     await sink?.({
       event: 'runtime_event',
       data: {
-        type: 'conversational_approval_resolution',
+        type: 'sdk_approval_resuming',
         sessionId: context.sessionId,
-        taskId: approval.resolvedApproval?.taskId,
-        stepId: approval.resolvedApproval?.stepId,
-        scope: approval.resolvedApproval?.scope,
-        task: approval.task,
+        approvals: pendingApproval.approvalItems,
       },
     });
-    await sink?.({
-      event: 'completed',
-      data: {
-        sessionId: context.sessionId,
-        finalOutput: approval.message,
-        memories,
-        channel: context.channel,
-        voiceSessionId: context.voiceSessionId,
-        agent: selectedAgent,
-      },
-    });
-    return { sessionId: context.sessionId, context, text: approval.message, finalOutput: approval.message, memories, runtimeEvents: [] };
   }
 
-  const stream = await run(agent, trimmed, {
+  const stream = await run(agent as any, streamInput, {
     stream: true,
     session: context.session,
     context,
@@ -132,6 +123,39 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
   }
 
   await stream.completed;
+
+  const interruptions = stream.interruptions;
+  if (interruptions.length) {
+    const pending = savePendingSdkApproval(context.sessionId, stream.state.toString(), interruptions);
+    const prompt = formatApprovalPrompt(pending);
+    text += prompt;
+    runtimeEvents.push({ type: 'sdk_approval_required', sessionId: context.sessionId, approvals: pending.approvalItems });
+    await persistRuntimeContext(context);
+    const memories = await listMemories(context.sessionId, 5);
+    await sink?.({ event: 'delta', data: { text: prompt } });
+    await sink?.({
+      event: 'runtime_event',
+      data: {
+        type: 'sdk_approval_required',
+        sessionId: context.sessionId,
+        approvals: pending.approvalItems,
+      },
+    });
+    await sink?.({
+      event: 'completed',
+      data: {
+        sessionId: context.sessionId,
+        finalOutput: prompt,
+        memories,
+        channel: context.channel,
+        voiceSessionId: context.voiceSessionId,
+        agent: selectedAgent,
+      },
+    });
+    return { sessionId: context.sessionId, context, text, finalOutput: prompt, memories, runtimeEvents };
+  }
+
+  if (resumingApproval) clearPendingSdkApproval(context.sessionId);
   await persistRuntimeContext(context);
 
   const memories = await listMemories(context.sessionId, 5);

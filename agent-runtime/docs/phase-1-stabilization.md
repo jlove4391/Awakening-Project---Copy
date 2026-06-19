@@ -181,65 +181,56 @@ npm --workspace @awakening/agent-runtime run smoke:google-calendar
   - The response contains `google.linked: true`.
   - The response does not expose access or refresh tokens.
 
-### 6. Calendar write action requests approval before execution
+### 6. Direct SDK tool write pauses for approval before execution
 
-- Exact chat endpoint used to request the write: [`POST /api/chat`](../src/routes/chat.ts).
-- Exact execution listing endpoint used to discover the pending write: [`GET /api/executions?sessionId=<sessionId>`](../src/routes/executions.ts).
-- Ask ELORA to create a safe test Calendar event:
-
-  ```bash
-  curl -N http://localhost:4317/api/chat \
-    -H 'Accept: text/event-stream' \
-    -H 'Content-Type: application/json' \
-    -d '{"agent":"elora","sessionId":"phase-1-calendar-approval","message":"Create a Google Calendar event titled Phase 1 Approval Smoke Test tomorrow from 9:00 AM to 9:15 AM on my primary calendar."}'
-  ```
-
-- Retrieve pending executions:
-
-  ```bash
-  curl 'http://localhost:4317/api/executions?sessionId=phase-1-calendar-approval'
-  ```
-
-- Passing criteria:
-  - The write does not execute immediately.
-  - The execution record contains `approvalStatus: "pending"`.
-  - The execution record contains an `approvalRequest`.
-  - The requested action is `calendar.create_event`.
-
-### 7. Approved action replays successfully
-
-- Exact approval endpoint: [`POST /api/executions/:id/approval`](../src/routes/executions.ts).
-- Approve the pending execution from the previous check:
-
-  ```bash
-  curl -X POST 'http://localhost:4317/api/executions/<executionId>/approval' \
-    -H 'Content-Type: application/json' \
-    -d '{"decision":"approve","approvalNote":"Approved Phase 1 replay smoke test."}'
-  ```
-
-- Passing criteria:
-  - The response includes `execution.approvalStatus: "approved"`.
-  - The response includes `execution.status: "completed"`.
-  - The response includes `execution.executionResult.status: "approval_replayed"`.
-  - The response includes a `replayResult` from the Calendar provider path.
-  - The event appears in the target Google Calendar with the requested title and time.
-
-### 8. Execution receipt is logged and retrievable
-
-- Exact retrieval endpoint: [`GET /api/executions?sessionId=<sessionId>&limit=5`](../src/routes/executions.ts).
 - Exact command:
 
   ```bash
-  curl 'http://localhost:4317/api/executions?sessionId=phase-1-calendar-approval&limit=5'
+  npm --workspace @awakening/agent-runtime run smoke:approvals
+  ```
+
+- Exact runtime surface covered: SDK `needsApproval` interruptions from [`executeRegisteredTool`](../src/tools/registry.ts) and pending approval storage in [`sdkApprovalStore`](../src/approvals/sdkApprovalStore.ts).
+- Passing criteria:
+  - An unapproved SDK-gated write pauses before mutation.
+  - The chat stream emits `sdk_approval_required` before mutation and stores pending approval metadata for the session.
+  - The pending SDK approval prompt includes approval IDs and rejects ambiguous natural-language approval when multiple approvals are pending.
+
+### 7. Approved SDK action resumes and creates a receipt
+
+- Exact approval surface: [`POST /api/chat`](../src/routes/chat.ts) with the same `sessionId` and an `approval` decision body.
+- Example approval body:
+
+  ```json
+  {
+    "agent": "elora",
+    "sessionId": "<sessionId-from-original-chat>",
+    "approval": {
+      "decision": "approve",
+      "approvalId": "<approvalId-from-sdk_approval_required>"
+    }
+  }
   ```
 
 - Passing criteria:
-  - The approved `calendar.create_event` execution is returned.
-  - The execution contains `providerResponseSummary`.
-  - The execution contains a `receipt.summary`, for example `calendar.create_event approved and replayed`.
-  - The execution can be correlated with the session ID used for the approval flow.
-  - The matching tool audit entry is present in `${AGENT_RUNTIME_DATA_DIR:-agent-runtime/.runtime-data}/audit/tool-audit.jsonl`.
+  - The runtime restores and resumes the serialized SDK run state.
+  - The approved tool call executes only after the SDK approval is applied.
+  - `GET /api/executions?sessionId=<sessionId>&limit=10` returns a completed execution with `status: "completed"`, `providerResponseSummary`, and `receipt.summary`.
+  - A rejected SDK approval does not execute the rejected tool call.
+
+### 8. Execution receipt is logged and retrievable
+
+- Exact retrieval endpoint: [`GET /api/executions?sessionId=<sessionId>&limit=10`](../src/routes/executions.ts).
+- Exact command shape:
+
+  ```bash
+  curl 'http://localhost:4317/api/executions?sessionId=<sessionId>&limit=10'
+  ```
+
+- Passing criteria:
+  - The SDK approval prompt and approved completed execution can be correlated with the same session ID.
+  - The completed execution contains a receipt summary and provider response summary.
+  - The matching tool audit entries are present in `${AGENT_RUNTIME_DATA_DIR:-agent-runtime/.runtime-data}/audit/tool-audit.jsonl`.
 
 ## Phase 1 pass definition
 
-Phase 1 stabilization passes only when all required checks above pass against the same local runtime configuration, with Google OAuth connected for Google-dependent checks and a saved `sessionId` used for restart and approval-replay verification.
+Phase 1 stabilization passes only when all required checks above pass against the same local runtime configuration, with Google OAuth connected for Google-dependent checks and a saved `sessionId` used for restart and SDK approval verification.

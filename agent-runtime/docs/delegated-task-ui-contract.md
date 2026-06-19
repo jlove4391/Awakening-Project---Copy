@@ -26,6 +26,21 @@ This contract describes the shape the React UI should consume for Elora → Nexo
 
 Terminal statuses are `completed`, `failed`, and `cancelled`; the store creates a `receipt` the first time a task enters a terminal status.
 
+
+## Durable delegated approvals vs direct SDK tool approvals
+
+This contract is for durable delegated task approvals: approvals stored on task records and execution-plan steps that control the Nexora task queue. These approvals are long-lived queue state, survive polling cycles, and are surfaced through `/api/tasks`.
+
+Direct SDK tool approvals are different:
+
+- They happen inside an active `POST /api/chat` run when the OpenAI Agents SDK pauses on a tool whose `needsApproval` policy returns `true`.
+- They are keyed by chat `sessionId` and an SDK `approvalId`, not by `taskId` or `stepId`.
+- They are resumed by posting an `approval` decision back to `/api/chat` with the same `sessionId`.
+- They should not be displayed as durable Nexora task approvals unless the tool call is also represented by a delegated task execution-plan step.
+- Their audit trail appears in `/api/executions` as pending/approved direct tool execution records and tool audit log entries.
+
+UI rule of thumb: use `/api/tasks` approval CTAs for durable delegated task gates (`task.approvalRequirements[]` and `task.executionPlan[].approval`). Use the chat approval payload for SDK HITL prompts emitted as `runtime_event.type === "sdk_approval_required"`.
+
 ## Approval statuses
 
 Task UI should read aggregate approval state from `task.uiState.approvalStatus` or the sibling top-level `taskState.approvalStatus` returned by task routes.

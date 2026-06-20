@@ -107,6 +107,7 @@ import { decideToolPolicy, policyRequiresApproval } from '../governance/policyDe
 import { getTrustScore, recordTrustEventFromPolicyDecision } from '../governance/trustService.js';
 import { getRelationshipContext } from '../relationship/relationshipService.js';
 
+
 export type ToolCategory =
   | 'calendar'
   | 'gmail'
@@ -3698,12 +3699,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   const sanitizedInput = sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []);
   const approvedExecutionId = typeof context.approvedExecutionId === 'string' ? context.approvedExecutionId : undefined;
   const approvalScope = requiredApprovalScope(definition);
-  const policyDecision = decideToolPolicy(definition, parsedInput, approvalScope);
-  const trustScore = await getTrustScore(policyDecision.trustDomain);
-  policyDecision.autonomyEnvelope = trustScore.autonomyEnvelope;
-  const approvalRequired = (executionMode === 'observation' || context.autonomyProfile === 'proactive_observation')
-    ? !proactiveObservationAllows(definition, autonomyLevel, parsedInput)
-    : policyRequiresApproval(policyDecision);
+
   const approved = !approvalRequired || sdkApproved || Boolean(parsedInput.confirmedByUser === true && approvedExecutionId);
   const executionRecord = createExecutionRecord({
     kind: 'tool_call',
@@ -3714,11 +3710,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
     riskLevel: definition.riskLevel,
     approvalStatus: approvalRequired ? (approved ? 'approved' : 'pending') : 'not_required',
     approvalScope,
-    trustDomain: policyDecision.trustDomain,
-    policyAction: policyDecision.action,
-    policyClassification: policyDecision.policyClassification,
-    policyBoundary: policyDecision.action === 'ask_before_execution' ? policyDecision.boundary : undefined,
-    autonomyEnvelope: trustScore.autonomyEnvelope,
+
     linkedIds: {
       sessionId: context.sessionId,
       voiceSessionId: context.voiceSessionId,
@@ -3770,7 +3762,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       actor: context.agent || 'elora',
       action: definition.name,
       executionId: blockedRecord.id,
-      metadata: { approvalRequired, executionMode, autonomyLevel, autonomyEnvelope: trustScore.autonomyEnvelope },
+
     });
     await writeToolAuditLog({
       event: `${definition.name}.approval_required`,
@@ -3806,7 +3798,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       executionId: completedRecord.id,
       receiptComplete: Boolean(completedRecord.receipt.summary),
       validationPassed: true,
-      metadata: { approvalRequired, executionMode, autonomyLevel, autonomyEnvelope: trustScore.autonomyEnvelope },
+
     });
     await writeToolAuditLog({
       event: definition.audit.logEvents[1] || `${definition.name}.completed`,
@@ -3839,7 +3831,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       action: definition.name,
       executionId: failedRecord.id,
       validationPassed: false,
-      metadata: { approvalRequired, executionMode, autonomyLevel, autonomyEnvelope: trustScore.autonomyEnvelope, error: message },
+
     });
     await writeToolAuditLog({
       event: `${definition.name}.failed`,

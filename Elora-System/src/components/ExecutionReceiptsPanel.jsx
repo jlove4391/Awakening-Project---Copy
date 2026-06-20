@@ -26,6 +26,61 @@ const humanizeStatus = (value) =>
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
+const explicitApprovalBoundaries = new Set([
+  "rmt",
+  "personal_information_sensitive",
+  "private_data_sensitive",
+  "destructive_irreversible",
+  "external_commitment",
+]);
+
+const inferApprovalBoundary = (item = {}) => {
+  const request = item.approvalRequest || item.pendingToolAction || item.approval || {};
+  const rawBoundary =
+    item.policyBoundary ||
+    request.boundary ||
+    request.policyBoundary ||
+    request.approvalBoundary ||
+    item.boundary;
+  if (rawBoundary) return String(rawBoundary);
+
+  const combined = [
+    item.approvalScope,
+    request.approvalScope,
+    item.riskLevel,
+    request.reason,
+    item.blockedReason,
+    item.uiState?.blockedReason,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (/rmt|purchase|payment|pay|financial|contract|subscription|commit/.test(combined)) return "rmt";
+  if (/private[_ -]?data|personal[_ -]?information|personal[_ -]?info|sensitive|secret|token/.test(combined)) return "personal_information_sensitive";
+  if (/destructive|irreversible|permanent|destroy|delete/.test(combined)) return "destructive_irreversible";
+  if (/external[._ -]?send|external[._ -]?commitment|send|share|publish|expose/.test(combined)) return "external_commitment";
+  return undefined;
+};
+
+const isExplicitApprovalBoundary = (item) => explicitApprovalBoundaries.has(inferApprovalBoundary(item));
+
+const trustDomainLabel = (item = {}) =>
+  item.trustDomain ||
+  item.policyDecision?.trustDomain ||
+  (String(item.approvalScope || "").startsWith("repo.") ? "repository" : undefined) ||
+  item.audit?.category ||
+  item.category ||
+  "runtime";
+
+const executionOutcomeLabel = (execution) => {
+  if (execution.policyAction === "setup_needed") return "Setup-needed receipt";
+  if (execution.status === "running") return "Active execution";
+  if (execution.status === "completed") return "Completed receipt";
+  if (execution.status === "blocked" && !isExplicitApprovalBoundary(execution)) return "Setup or policy receipt";
+  return humanizeStatus(execution.status);
+};
+
 const taskApprovalStatus = (task) => {
   if (task.uiState?.approvalStatus) return task.uiState.approvalStatus;
   const requirements = task.approvalRequirements || [];
@@ -45,13 +100,14 @@ const latestApprovedRequirement = (task) =>
     .sort((a, b) => String(b.approvedAt || "").localeCompare(String(a.approvedAt || "")))[0];
 
 const pendingStepAction = (task) => {
-  if (task.pendingToolAction?.approvalStatus === "pending") {
+  if (task.pendingToolAction?.approvalStatus === "pending" && isExplicitApprovalBoundary(task.pendingToolAction)) {
     return task.pendingToolAction;
   }
   return (task.executionPlan || []).find(
     (step) =>
       step.approval?.required &&
-      (step.approvalStatus === "pending" || step.approval?.status === "pending"),
+      (step.approvalStatus === "pending" || step.approval?.status === "pending") &&
+      isExplicitApprovalBoundary(step),
   );
 };
 
@@ -339,7 +395,8 @@ const ExecutionReceiptsPanel = ({
           const needsTaskApproval =
             task.status === "pending_approval" &&
             approvalState === "pending" &&
-            hasPendingTaskApproval(task);
+            hasPendingTaskApproval(task) &&
+            isExplicitApprovalBoundary(task);
           const stepAction = pendingStepAction(task);
           const stepActionKey = stepAction
             ? `${task.id}:${stepAction.stepId || stepAction.id}`
@@ -420,6 +477,7 @@ const ExecutionReceiptsPanel = ({
               <div className="worker-state-panel">
                 <p className="execution-receipt-summary">{workerCopy.primary}</p>
                 <p className="execution-provider-summary">{workerCopy.secondary}</p>
+                <p className="execution-provider-summary">Trust domain: {trustDomainLabel(task)} · Outcome: {executionOutcomeLabel(task)}</p>
                 {task.status === "blocked" && (
                   <dl className="execution-blocked-detail">
                     <div>
@@ -488,11 +546,12 @@ const ExecutionReceiptsPanel = ({
               <div className="execution-record-meta">
                 <span>{execution.kind}</span>
                 <span>status: {execution.status}</span>
-                <span>approval: {execution.approvalStatus}</span>
+                <span>approval: {isExplicitApprovalBoundary(execution) ? execution.approvalStatus : "receipt_only"}</span>
+                <span>trust: {trustDomainLabel(execution)}</span>
               </div>
 
               <p className="execution-receipt-summary">
-                {executionSummary(execution)}
+                {executionOutcomeLabel(execution)}: {executionSummary(execution)}
               </p>
 
               <dl className="execution-detail-grid">
@@ -509,10 +568,11 @@ const ExecutionReceiptsPanel = ({
                   <dd>{execution.linkedIds?.sessionId || "—"}</dd>
                 </div>
                 <div>
-                  <dt>Completed</dt>
+                  <dt>{execution.status === "running" ? "Started" : "Completed"}</dt>
                   <dd>
                     {formatDateTime(
                       execution.timestamps?.completedAt ||
+                        execution.timestamps?.startedAt ||
                         execution.timestamps?.requestedAt,
                     )}
                   </dd>

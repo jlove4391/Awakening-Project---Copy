@@ -2,6 +2,7 @@ import path from 'node:path';
 import type { RegisteredToolDefinition } from '../tools/registry.js';
 import { runtimeConfig, type AutonomyLevel } from '../config.js';
 import type { ExecutionMode } from '../types.js';
+import { decideToolPolicy, policyRequiresApproval } from './policyDecision.js';
 
 export type AutonomyProfileName = 'dev_autonomy' | 'proactive_observation';
 
@@ -99,6 +100,8 @@ export function autonomyLevelAllows(
   executionMode?: ExecutionMode,
 ) {
   const mode = normalizeExecutionMode(executionMode, level === 0 ? 'reactive' : 'observation');
+  const policyDecision = decideToolPolicy(definition, input);
+  if (mode !== 'observation' && definition.name !== 'observation.recommend' && !policyRequiresApproval(policyDecision)) return true;
   if (level === 0) return (mode === 'reactive' || mode === 'delegated') && definition.name !== 'observation.recommend';
   if (definition.riskLevel === 'read') return true;
   if (definition.name !== 'observation.recommend') return false;
@@ -135,11 +138,12 @@ export function requiresApprovalForExecutionMode(
 ) {
   const mode = normalizeExecutionMode(executionMode, profile ? 'autonomous' : 'reactive');
   if (mode === 'observation' || profile === 'proactive_observation') return !proactiveObservationAllows(definition, runtimeConfig.autonomy.level, input);
-  if (approvalScope && HARD_APPROVAL_SCOPES.has(approvalScope)) return true;
+  const policyDecision = decideToolPolicy(definition, input, approvalScope);
+  if (policyRequiresApproval(policyDecision)) return true;
   if (mode !== 'autonomous') return false;
   if (definition.riskLevel === 'read') return false;
   if (profile === 'dev_autonomy') return requiresApprovalForAutonomyProfile(profile, definition, input);
-  return definition.humanApprovalRequired || (approvalScope ? AUTONOMOUS_MUTATION_SCOPES.has(approvalScope) : true);
+  return definition.humanApprovalRequired && policyRequiresApproval(policyDecision);
 }
 
 export const devAutonomyProfile = {

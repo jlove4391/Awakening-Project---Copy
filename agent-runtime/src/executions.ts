@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { runtimeConfig } from './config.js';
 import type { ToolRiskLevel } from './tools/registry.js';
 import type { ApprovalScope } from './tasks/types.js';
+import type { PolicyAction, PolicyBoundary, PolicyDecision } from './governance/policyDecision.js';
 import type { ExecutionMode } from './types.js';
 import { redactProviderReceiptPayload, safeReceiptSummary } from './workflows/nexora/secretsPolicy.js';
 
@@ -32,6 +33,10 @@ export interface ExecutionRecord {
   riskLevel: ToolRiskLevel | 'unknown';
   approvalStatus: ExecutionApprovalStatus;
   approvalScope?: ApprovalScope;
+  trustDomain?: string;
+  policyAction?: PolicyAction;
+  policyClassification?: PolicyDecision['policyClassification'];
+  policyBoundary?: PolicyBoundary;
   approvalRequest?: ExecutionApprovalRequest;
   executionResult?: unknown;
   providerResponseSummary?: string;
@@ -126,6 +131,10 @@ export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'times
     riskLevel: input.riskLevel,
     approvalStatus: input.approvalStatus,
     approvalScope: input.approvalScope,
+    trustDomain: input.trustDomain,
+    policyAction: input.policyAction,
+    policyClassification: input.policyClassification,
+    policyBoundary: input.policyBoundary,
     approvalRequest: input.approvalRequest,
     executionResult: redactProviderReceiptPayload(input.executionResult),
     providerResponseSummary: input.providerResponseSummary ? redactProviderReceiptPayload(input.providerResponseSummary) : input.providerResponseSummary,
@@ -164,6 +173,10 @@ export function completeExecutionRecord(
     status: patch.status,
     approvalStatus: patch.approvalStatus || record.approvalStatus,
     approvalScope: record.approvalScope,
+    trustDomain: record.trustDomain,
+    policyAction: record.policyAction,
+    policyClassification: record.policyClassification,
+    policyBoundary: record.policyBoundary,
     approvalRequest: record.approvalRequest,
     executionResult: redactProviderReceiptPayload(patch.executionResult),
     providerResponseSummary: patch.providerResponseSummary ? redactProviderReceiptPayload(patch.providerResponseSummary) : summarizeProviderResponse(patch.executionResult),

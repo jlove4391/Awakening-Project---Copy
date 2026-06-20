@@ -78,7 +78,7 @@ export function requiresHardApprovalGate(definition: Pick<RegisteredToolDefiniti
   if (!definition) return true;
   const policyDecision = decideToolPolicy(definition);
   if (policyRequiresApproval(policyDecision)) return true;
-  if (policyDecision.action === 'execute') return false;
+
   if (definition.audit.action.includes('delete')) return true;
   if (definition.riskLevel === 'external_send' || definition.riskLevel === 'purchase_or_commit') return true;
 

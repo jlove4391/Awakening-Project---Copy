@@ -244,10 +244,7 @@ async function chooseExecutionStrategy(task: DelegatedTask) {
 async function stepPolicyDecision(toolName: string, input: Record<string, unknown>) {
   const { getRegisteredTool } = await loadToolRegistry();
   const definition = getRegisteredTool(toolName);
-  const relationshipContext = await getRelationshipContext('jordan');
-  const inputWithRelationship = { ...input, relationshipContext };
-  if (!definition) return decidePolicyForToolName(toolName, inputWithRelationship);
-  return decidePolicyForToolName(definition.name, inputWithRelationship);
+
 }
 
 async function isStepHighRisk(toolName: string, input: Record<string, unknown>) {

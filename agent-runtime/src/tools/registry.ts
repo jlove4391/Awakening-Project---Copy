@@ -103,6 +103,8 @@ import { redactForLogs, redactProviderReceiptPayload } from '../workflows/nexora
 import { webCrawlSite, webFetchUrl } from './webTools.js';
 import { activeAutonomyLevel, autonomyLevelAllows, normalizeExecutionMode, proactiveObservationAllows, requiresApprovalForExecutionMode } from '../governance/autonomyProfiles.js';
 import { createObservationRecommendation } from '../governance/recommendations.js';
+import { decideToolPolicy } from '../governance/policyDecision.js';
+import { recordTrustEventFromPolicyDecision } from '../governance/trustService.js';
 
 export type ToolCategory =
   | 'calendar'
@@ -3648,9 +3650,11 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   }
   const sanitizedInput = sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []);
   const approvedExecutionId = typeof context.approvedExecutionId === 'string' ? context.approvedExecutionId : undefined;
+  const approvalScope = requiredApprovalScope(definition);
+  const policyDecision = decideToolPolicy(definition, parsedInput, approvalScope);
   const approvalRequired = (executionMode === 'observation' || context.autonomyProfile === 'proactive_observation')
     ? !proactiveObservationAllows(definition, autonomyLevel, parsedInput)
-    : requiresApprovalForExecutionMode(context.executionMode, context.autonomyProfile, definition, parsedInput, requiredApprovalScope(definition));
+    : requiresApprovalForExecutionMode(context.executionMode, context.autonomyProfile, definition, parsedInput, approvalScope);
   const approved = !approvalRequired || sdkApproved || Boolean(parsedInput.confirmedByUser === true && approvedExecutionId);
   const executionRecord = createExecutionRecord({
     kind: 'tool_call',
@@ -3660,7 +3664,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
     inputPayload: sanitizedInput,
     riskLevel: definition.riskLevel,
     approvalStatus: approvalRequired ? (approved ? 'approved' : 'pending') : 'not_required',
-    approvalScope: requiredApprovalScope(definition),
+    approvalScope,
     linkedIds: {
       sessionId: context.sessionId,
       voiceSessionId: context.voiceSessionId,
@@ -3702,10 +3706,18 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       sanitizedInputSummary: summarizeApprovalInput(sanitizedInput),
       reason: approvalBlock.result.reason,
       originalInput: redactForLogs(parsedInput),
-      approvalScope: requiredApprovalScope(definition),
+      approvalScope,
       requestedAt: executionRecord.timestamps.requestedAt,
     };
     await writeExecutionRecord(blockedRecord);
+    await recordTrustEventFromPolicyDecision({
+      decision: policyDecision,
+      status: 'blocked',
+      actor: context.agent || 'elora',
+      action: definition.name,
+      executionId: blockedRecord.id,
+      metadata: { approvalRequired, executionMode, autonomyLevel },
+    });
     await writeToolAuditLog({
       event: `${definition.name}.approval_required`,
       tool: definition.name,
@@ -3732,6 +3744,16 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       receiptSummary: `${definition.name} completed`,
     });
     await writeExecutionRecord(completedRecord);
+    await recordTrustEventFromPolicyDecision({
+      decision: policyDecision,
+      status: 'completed',
+      actor: context.agent || 'elora',
+      action: definition.name,
+      executionId: completedRecord.id,
+      receiptComplete: Boolean(completedRecord.receipt.summary),
+      validationPassed: true,
+      metadata: { approvalRequired, executionMode, autonomyLevel },
+    });
     await writeToolAuditLog({
       event: definition.audit.logEvents[1] || `${definition.name}.completed`,
       tool: definition.name,
@@ -3756,6 +3778,15 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       receiptSummary: `${definition.name} failed: ${message}`,
     });
     await writeExecutionRecord(failedRecord);
+    await recordTrustEventFromPolicyDecision({
+      decision: policyDecision,
+      status: 'failed',
+      actor: context.agent || 'elora',
+      action: definition.name,
+      executionId: failedRecord.id,
+      validationPassed: false,
+      metadata: { approvalRequired, executionMode, autonomyLevel, error: message },
+    });
     await writeToolAuditLog({
       event: `${definition.name}.failed`,
       tool: definition.name,

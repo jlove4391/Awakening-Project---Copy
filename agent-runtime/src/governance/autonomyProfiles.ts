@@ -49,8 +49,7 @@ export function autonomyLevelAllows(
 ) {
   const mode = normalizeExecutionMode(executionMode, level === 0 ? 'reactive' : 'observation');
   const policyDecision = decideToolPolicy(definition, input);
-  if (mode !== 'observation') return !policyRequiresApproval(policyDecision);
-  if (definition.riskLevel === 'read' || definition.name === 'observation.recommend') return true;
+
   return false;
 }
 
@@ -81,7 +80,7 @@ export function requiresApprovalForExecutionMode(
   const mode = normalizeExecutionMode(executionMode, profile ? 'autonomous' : 'reactive');
   if (mode === 'observation' || profile === 'proactive_observation') return !proactiveObservationAllows(definition, runtimeConfig.autonomy.level, input);
   const policyDecision = decideToolPolicy(definition, input, approvalScope);
-  return policyRequiresApproval(policyDecision);
+
 }
 
 export const devAutonomyProfile = {

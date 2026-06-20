@@ -5,6 +5,7 @@ import type { RuntimeContext } from '../types.js';
 import { appendExecutionPlanStep, cancelDelegatedTask, getDelegatedTask, updateDelegatedTask, updateExecutionPlanStep } from './store.js';
 import type { DelegatedTask } from './types.js';
 import type { DelegatedTaskHandler } from './queue.js';
+import { getRelationshipContext } from '../relationship/relationshipService.js';
 import { redactForLogs } from '../workflows/nexora/secretsPolicy.js';
 
 type NexoraToolInputBuilder = (task: DelegatedTask) => Record<string, unknown>;
@@ -243,8 +244,7 @@ async function chooseExecutionStrategy(task: DelegatedTask) {
 async function stepPolicyDecision(toolName: string, input: Record<string, unknown>) {
   const { getRegisteredTool } = await loadToolRegistry();
   const definition = getRegisteredTool(toolName);
-  if (!definition) return decidePolicyForToolName(toolName, input);
-  return decidePolicyForToolName(definition.name, input);
+
 }
 
 async function isStepHighRisk(toolName: string, input: Record<string, unknown>) {
@@ -397,6 +397,7 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
 
   if (task.executionPlan?.length) {
     const context = createTaskRuntimeContext(task);
+    context.relationshipContext = await getRelationshipContext('jordan');
     const executedSteps: Array<{ stepId: string; tool: string; input: Record<string, unknown>; result: unknown }> = [];
 
     const taskDeadline = task.timeoutMs ? Date.now() + task.timeoutMs : undefined;

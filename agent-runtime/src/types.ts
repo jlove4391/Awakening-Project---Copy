@@ -1,5 +1,6 @@
 import type { Session } from '@openai/agents';
 import type { AutonomyLevel } from './config.js';
+import type { RelationshipContext } from './relationship/relationshipTypes.js';
 export type RuntimeAgentName = 'elora' | 'nexora' | 'kaz' | 'jynx' | 'kalyra';
 
 export type TaskStatus = 'queued' | 'running' | 'blocked' | 'completed' | 'failed';
@@ -75,6 +76,7 @@ export interface RuntimeContext {
   autonomyProfile?: 'dev_autonomy' | 'proactive_observation';
   autonomyLevel?: AutonomyLevel;
   executionMode?: ExecutionMode;
+  relationshipContext?: RelationshipContext;
 }
 
 export type AgentApprovalDecision = 'approve' | 'reject' | 'cancel';

@@ -3675,6 +3675,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   if (!definition) throw new Error(`Unknown registered tool: ${name}`);
   if (!context?.sessionId) throw new Error(`Runtime context is missing for ${definition.name}`);
 
+  context.relationshipContext ||= await getRelationshipContext('jordan');
   const normalizedInput = normalizeToolInput(input);
   const parsedInput = definition.parameters.parse(normalizedInput) as Record<string, unknown>;
   const executionMode = normalizeExecutionMode(context.executionMode, context.autonomyProfile === 'proactive_observation' ? 'observation' : context.autonomyProfile ? 'autonomous' : 'reactive');
@@ -3696,10 +3697,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   const sanitizedInput = sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []);
   const approvedExecutionId = typeof context.approvedExecutionId === 'string' ? context.approvedExecutionId : undefined;
   const approvalScope = requiredApprovalScope(definition);
-  const policyDecision = decideToolPolicy(definition, parsedInput, approvalScope);
-  const approvalRequired = (executionMode === 'observation' || context.autonomyProfile === 'proactive_observation')
-    ? !proactiveObservationAllows(definition, autonomyLevel, parsedInput)
-    : requiresApprovalForExecutionMode(context.executionMode, context.autonomyProfile, definition, parsedInput, approvalScope);
+
   const approved = !approvalRequired || sdkApproved || Boolean(parsedInput.confirmedByUser === true && approvedExecutionId);
   const executionRecord = createExecutionRecord({
     kind: 'tool_call',

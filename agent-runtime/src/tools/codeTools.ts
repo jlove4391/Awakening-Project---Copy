@@ -10,6 +10,7 @@ import {
   redactForLogs,
   type HighRiskSecretApproval,
 } from '../workflows/nexora/secretsPolicy.js';
+import { decidePolicy, policyRequiresApproval } from '../governance/policyDecision.js';
 
 const execFileAsync = promisify(execFile);
 const ignoredDirectoryNames = new Set(['.git', 'node_modules', 'dist', 'build', '.runtime-data', 'coverage']);
@@ -176,6 +177,32 @@ async function resolveWritableWorkspacePathWithExistingAncestor(relativePath: st
 
 function ensureConfirmed(input: ApprovalGateInput, toolName: string) {
   return isApprovalConfirmed(input) ? null : approvalRequired(toolName);
+}
+
+function ensurePolicyDeleteExecution(input: DeleteInput, toolName: string, action: string) {
+  if (isApprovalConfirmed(input)) return null;
+  const decision = decidePolicy({
+    toolName,
+    action,
+    category: 'code',
+    riskLevel: 'write',
+    approvalScope: input.permanent === true ? 'repo.delete' : 'repo.write',
+    input: input as unknown as Record<string, unknown>,
+  });
+  return policyRequiresApproval(decision) ? approvalRequired(toolName) : null;
+}
+
+function ensureOrdinaryWorkspaceExecution(input: ApprovalGateInput, toolName: string, action: string, riskLevel: 'write' | 'code_execution' = 'write') {
+  if (isApprovalConfirmed(input)) return null;
+  const decision = decidePolicy({
+    toolName,
+    action,
+    category: 'code',
+    riskLevel,
+    approvalScope: riskLevel === 'code_execution' ? 'repo.command' : 'repo.write',
+    input: input as unknown as Record<string, unknown>,
+  });
+  return policyRequiresApproval(decision) ? approvalRequired(toolName) : null;
 }
 
 
@@ -467,7 +494,7 @@ function outputSlice(buffer: Uint8Array, maxBytes: number) {
 }
 
 async function runWorkspaceShellCommand(input: RunCommandInput, toolName: string, options: { blockDangerous: boolean }) {
-  const approval = ensureConfirmed(input, toolName);
+  const approval = ensureOrdinaryWorkspaceExecution(input, toolName, 'run_command', 'code_execution');
   if (approval) return approval;
   if (!input.command?.trim()) throw new Error('command is required');
   if (!input.cwd?.trim()) throw new Error('cwd is required and must be workspace-relative');
@@ -575,7 +602,8 @@ export async function codeSearch(input: { query: string; path?: string; isRegex?
 }
 
 export async function codeEdit(input: { path: string; content: string; mode?: 'overwrite' | 'append'; expectedSha256?: string } & ApprovalGateInput) {
-  if (!isApprovalConfirmed(input)) return approvalRequired('code.edit');
+  const approval = ensureOrdinaryWorkspaceExecution(input, 'code.edit', 'edit');
+  if (approval) return approval;
   const { root, target, relativePath } = await resolveWritableWorkspacePath(input.path);
   const mode = input.mode || 'overwrite';
   let previousContent = '';
@@ -597,7 +625,7 @@ export async function codeEdit(input: { path: string; content: string; mode?: 'o
 
 
 export async function codeCreateFile(input: { path: string; content: string; expectedSha256?: string } & ApprovalGateInput) {
-  const approval = ensureConfirmed(input, 'code.create_file');
+  const approval = ensureOrdinaryWorkspaceExecution(input, 'code.create_file', 'create_file');
   if (approval) return approval;
   const { root, target, relativePath } = await resolveWritableWorkspacePath(input.path);
   const content = input.content ?? '';
@@ -610,7 +638,7 @@ export async function codeCreateFile(input: { path: string; content: string; exp
 }
 
 export async function codePatchFile(input: { path: string; search: string; replace: string; expectedSha256?: string; replaceAll?: boolean } & ApprovalGateInput) {
-  const approval = ensureConfirmed(input, 'code.patch_file');
+  const approval = ensureOrdinaryWorkspaceExecution(input, 'code.patch_file', 'patch_file');
   if (approval) return approval;
   if (!input.search) throw new Error('search is required');
   const { root, target, relativePath } = await resolveExistingWorkspacePath(input.path);
@@ -631,10 +659,10 @@ export async function codePatchFile(input: { path: string; search: string; repla
 }
 
 export async function codeDeleteFile(input: DeleteInput) {
-  const approval = ensureConfirmed(input, 'code.delete_file');
-  if (approval) return approval;
   const { root, target, relativePath } = await resolveExistingWorkspacePath(input.path);
   assertDeleteAllowed(input, relativePath);
+  const approval = ensurePolicyDeleteExecution(input, 'code.delete_file', input.permanent === true ? 'permanent_delete_file' : 'delete_file');
+  if (approval) return approval;
   const stats = await fs.lstat(target);
   if (stats.isSymbolicLink()) throw new Error('code.delete_file cannot delete symlinks.');
   if (!stats.isFile()) throw new Error('code.delete_file can only delete files. Use code.delete_path for explicit directory deletes.');
@@ -652,10 +680,10 @@ export async function codeDeleteFile(input: DeleteInput) {
 }
 
 export async function codeDeletePath(input: DeleteInput) {
-  const approval = ensureConfirmed(input, 'code.delete_path');
-  if (approval) return approval;
   const { root, target, relativePath } = await resolveExistingWorkspacePath(input.path);
   assertDeleteAllowed(input, relativePath);
+  const approval = ensurePolicyDeleteExecution(input, 'code.delete_path', input.permanent === true ? 'permanent_delete_path' : 'delete_path');
+  if (approval) return approval;
   const stats = await fs.lstat(target);
   if (stats.isSymbolicLink()) throw new Error('code.delete_path cannot delete symlinks.');
   if (!input.allowHighRiskDelete && stats.isDirectory() && await pathContainsProtectedDeleteTarget(root, target)) {
@@ -679,7 +707,7 @@ export async function codeDeletePath(input: DeleteInput) {
 }
 
 export async function codeMovePath(input: { fromPath: string; toPath: string; overwrite?: boolean } & ApprovalGateInput) {
-  const approval = ensureConfirmed(input, 'code.move_path');
+  const approval = ensureOrdinaryWorkspaceExecution(input, 'code.move_path', 'move_path');
   if (approval) return approval;
   const from = await resolveExistingWorkspacePath(input.fromPath);
   const to = await resolveWritableWorkspacePath(input.toPath);
@@ -694,7 +722,7 @@ export async function codeMovePath(input: { fromPath: string; toPath: string; ov
 }
 
 export async function codeCopyPath(input: { fromPath: string; toPath: string; overwrite?: boolean } & ApprovalGateInput) {
-  const approval = ensureConfirmed(input, 'code.copy_path');
+  const approval = ensureOrdinaryWorkspaceExecution(input, 'code.copy_path', 'copy_path');
   if (approval) return approval;
   const from = await resolveExistingWorkspacePath(input.fromPath);
   const to = await resolveWritableWorkspacePath(input.toPath);
@@ -709,7 +737,7 @@ export async function codeCopyPath(input: { fromPath: string; toPath: string; ov
 }
 
 export async function codeMkdir(input: { path: string } & ApprovalGateInput) {
-  const approval = ensureConfirmed(input, 'code.mkdir');
+  const approval = ensureOrdinaryWorkspaceExecution(input, 'code.mkdir', 'mkdir');
   if (approval) return approval;
   const { root, target, relativePath } = await resolveWritableWorkspacePathWithExistingAncestor(input.path);
   await fs.mkdir(target, { recursive: true });
@@ -717,7 +745,7 @@ export async function codeMkdir(input: { path: string } & ApprovalGateInput) {
 }
 
 export async function codeWriteJson(input: { path: string; data: unknown; expectedSha256?: string; space?: number } & ApprovalGateInput) {
-  const approval = ensureConfirmed(input, 'code.write_json');
+  const approval = ensureOrdinaryWorkspaceExecution(input, 'code.write_json', 'write_json');
   if (approval) return approval;
   const { root, target, relativePath } = await resolveWritableWorkspacePath(input.path);
   let previousSha256: string | undefined;
@@ -773,7 +801,8 @@ export async function codeGitLog(input: { maxCount?: number; path?: string } = {
 }
 
 export async function codeGitRestoreFile(input: { path: string } & ApprovalGateInput) {
-  if (!isApprovalConfirmed(input)) return approvalRequired('code.git_restore_file');
+  const approval = ensureOrdinaryWorkspaceExecution(input, 'code.git_restore_file', 'git_restore_file');
+  if (approval) return approval;
   const root = await existingRootRealPath();
   const resolved = await resolveExistingWorkspacePath(input.path).catch(async () => resolveWritableWorkspacePath(input.path));
   await execFileAsync('git', ['-C', root, 'restore', '--', resolved.relativePath], { cwd: root });
@@ -781,7 +810,8 @@ export async function codeGitRestoreFile(input: { path: string } & ApprovalGateI
 }
 
 export async function codeGitCreateBranch(input: { branch: string; startPoint?: string; checkout?: boolean } & ApprovalGateInput) {
-  if (!isApprovalConfirmed(input)) return approvalRequired('code.git_create_branch');
+  const approval = ensureOrdinaryWorkspaceExecution(input, 'code.git_create_branch', 'git_create_branch');
+  if (approval) return approval;
   const root = await existingRootRealPath();
   const branch = input.branch?.trim();
   if (!branch) throw new Error('branch is required');

@@ -1,4 +1,5 @@
-import { googleApiRequest, requireExplicitApproval, type ApprovalGateInput } from './auth.js';
+import { decidePolicy } from '../../governance/policyDecision.js';
+import { googleApiRequest, requirePolicyApproval, type ApprovalGateInput } from './auth.js';
 
 const CALENDAR_API_BASE = 'https://www.googleapis.com/calendar/v3';
 
@@ -54,8 +55,25 @@ export async function listCalendarEvents(input: ListEventsInput) {
   };
 }
 
+export function classifyCalendarEventPolicy(input: CreateEventInput) {
+  return decidePolicy({
+    category: 'calendar',
+    action: 'create_event',
+    riskLevel: 'write',
+    input: {
+      calendarId: input.calendarId,
+      summary: input.summary,
+      description: input.description,
+      start: input.start,
+      end: input.end,
+      attendees: input.attendees || [],
+    },
+  });
+}
+
 export async function createCalendarEvent(input: CreateEventInput) {
-  const approvalBlock = requireExplicitApproval(input, 'calendar.create_event');
+  const policyDecision = classifyCalendarEventPolicy(input);
+  const approvalBlock = requirePolicyApproval(input, 'calendar.create_event', policyDecision);
   if (approvalBlock) return approvalBlock;
 
   const calendarId = encodeURIComponent(input.calendarId || 'primary');

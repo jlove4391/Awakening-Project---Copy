@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { MemorySession, OpenAIConversationsSession, type Session } from '@openai/agents';
 import { runtimeConfig } from '../config.js';
+import { getRelationshipContext } from '../relationship/relationshipService.js';
 import type { AgentTask, MemoryReference, RuntimeContext, SessionRecord } from '../types.js';
 
 const records = new Map<string, SessionRecord>();
@@ -79,7 +80,7 @@ export async function getRuntimeContext(sessionId: string = randomUUID()): Promi
     await saveRecord(record);
   }
 
-  return { sessionId, session, record };
+  return { sessionId, session, record, relationshipContext: await getRelationshipContext('jordan') };
 }
 
 export async function persistRuntimeContext(context: RuntimeContext) {

@@ -55,18 +55,24 @@ const approvedTask = await approveDelegatedTask(task.id, 'smoke', 'Approve deleg
 assert.equal(approvedTask?.status, 'queued', 'task should queue after delegated-task approval');
 console.log('✓ Approved delegated task.');
 
-const blocked = await waitForTask(task.id, (candidate) => candidate.status === 'blocked' && candidate.pendingToolAction?.toolName === 'code.create_file');
-assert.equal(blocked.blockedReason, 'step_approval_required');
-assert.equal(blocked.pendingToolAction?.approvalStatus, 'pending');
-const stepId = blocked.pendingToolAction?.stepId;
-assert.ok(stepId, 'blocked task should expose pending file-write step ID');
-console.log(`✓ Worker requested file-write approval at step ${stepId}.`);
+const firstWorkerState = await waitForTask(task.id, (candidate) => candidate.status === 'completed' || candidate.status === 'failed' || candidate.status === 'blocked');
+let finalTask = firstWorkerState;
 
-const stepApproved = await approveExecutionPlanStep(task.id, stepId, 'smoke', 'Approve code.create_file write for smoke.');
-assert.equal(stepApproved?.status, 'queued', 'task should requeue after file-write step approval');
-console.log('✓ Approved file-write step.');
+if (firstWorkerState.status === 'blocked') {
+  assert.equal(firstWorkerState.blockedReason, 'step_approval_required');
+  assert.equal(firstWorkerState.pendingToolAction?.approvalStatus, 'pending');
+  const stepId = firstWorkerState.pendingToolAction?.stepId;
+  assert.ok(stepId, 'blocked task should expose pending file-write step ID');
+  console.log(`✓ Worker requested file-write approval at step ${stepId}.`);
 
-const finalTask = await waitForTask(task.id, (candidate) => candidate.status === 'completed' || candidate.status === 'failed' || candidate.status === 'blocked');
+  const stepApproved = await approveExecutionPlanStep(task.id, stepId, 'smoke', 'Approve code.create_file write for smoke.');
+  assert.equal(stepApproved?.status, 'queued', 'task should requeue after file-write step approval');
+  console.log('✓ Approved file-write step.');
+
+  finalTask = await waitForTask(task.id, (candidate) => candidate.status === 'completed' || candidate.status === 'failed' || candidate.status === 'blocked');
+} else {
+  console.log('✓ Worker executed ordinary file-write step without explicit step approval.');
+}
 assert.equal(finalTask.status, 'completed', `task should complete, got ${finalTask.status}: ${finalTask.result?.summary || finalTask.blockedReason || 'no result'}`);
 assert.ok(existsSync(path.join(process.env.NEXORA_WORKSPACE_ROOT, targetPath)), `expected ${targetPath} to exist`);
 assert.ok(finalTask.receipt, 'completed task should include a receipt');

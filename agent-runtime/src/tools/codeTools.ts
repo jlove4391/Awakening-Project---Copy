@@ -179,6 +179,32 @@ function ensureConfirmed(input: ApprovalGateInput, toolName: string) {
   return isApprovalConfirmed(input) ? null : approvalRequired(toolName);
 }
 
+function ensurePolicyDeleteExecution(input: DeleteInput, toolName: string, action: string) {
+  if (isApprovalConfirmed(input)) return null;
+  const decision = decidePolicy({
+    toolName,
+    action,
+    category: 'code',
+    riskLevel: 'write',
+    approvalScope: input.permanent === true ? 'repo.delete' : 'repo.write',
+    input: input as unknown as Record<string, unknown>,
+  });
+  return policyRequiresApproval(decision) ? approvalRequired(toolName) : null;
+}
+
+function ensureOrdinaryWorkspaceExecution(input: ApprovalGateInput, toolName: string, action: string, riskLevel: 'write' | 'code_execution' = 'write') {
+  if (isApprovalConfirmed(input)) return null;
+  const decision = decidePolicy({
+    toolName,
+    action,
+    category: 'code',
+    riskLevel,
+    approvalScope: riskLevel === 'code_execution' ? 'repo.command' : 'repo.write',
+    input: input as unknown as Record<string, unknown>,
+  });
+  return policyRequiresApproval(decision) ? approvalRequired(toolName) : null;
+}
+
 
 function ensureOrdinaryWorkspaceExecution(input: ApprovalGateInput, toolName: string, action: string, riskLevel: 'write' | 'code_execution' = 'write') {
   if (isApprovalConfirmed(input)) return null;

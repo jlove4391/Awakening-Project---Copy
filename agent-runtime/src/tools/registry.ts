@@ -103,6 +103,9 @@ import { redactForLogs, redactProviderReceiptPayload } from '../workflows/nexora
 import { webCrawlSite, webFetchUrl } from './webTools.js';
 import { activeAutonomyLevel, autonomyLevelAllows, normalizeExecutionMode, proactiveObservationAllows, requiresApprovalForExecutionMode } from '../governance/autonomyProfiles.js';
 import { createObservationRecommendation } from '../governance/recommendations.js';
+import { decideToolPolicy, policyRequiresApproval } from '../governance/policyDecision.js';
+import { getTrustScore, recordTrustEventFromPolicyDecision } from '../governance/trustService.js';
+import { getRelationshipContext } from '../relationship/relationshipService.js';
 
 
 export type ToolCategory =

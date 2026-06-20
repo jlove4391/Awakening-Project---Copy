@@ -1,11 +1,20 @@
 import { Buffer } from 'node:buffer';
-import { googleApiRequest, requireExplicitApproval, type ApprovalGateInput } from './auth.js';
+import { decidePolicy } from '../../governance/policyDecision.js';
+import { googleApiRequest, requirePolicyApproval, requireExplicitApproval, type ApprovalGateInput } from './auth.js';
 
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1';
 
 export interface SearchMessagesInput {
   query?: string;
   maxResults?: number;
+}
+
+export interface GmailDraftInput extends ApprovalGateInput {
+  to?: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  body: string;
 }
 
 export interface SendEmailInput extends ApprovalGateInput {
@@ -36,7 +45,7 @@ function encodeAddressHeader(label: string, values: string[] = []) {
   return values.length ? `${label}: ${values.join(', ')}\r\n` : '';
 }
 
-function encodeRawEmail(input: SendEmailInput) {
+function encodeRawEmail(input: SendEmailInput | GmailDraftInput) {
   const message =
     encodeAddressHeader('To', input.to) +
     encodeAddressHeader('Cc', input.cc) +
@@ -82,7 +91,43 @@ export async function searchGmailMessages(input: SearchMessagesInput) {
   return { ok: true, provider: 'gmail', messages };
 }
 
+export function classifyGmailDraftPolicy(input: GmailDraftInput) {
+  return decidePolicy({
+    category: 'gmail',
+    action: 'create_draft',
+    riskLevel: 'write',
+    input: { to: input.to || [], cc: input.cc || [], bcc: input.bcc || [], subject: input.subject, body: input.body },
+  });
+}
+
+export function classifyGmailSendPolicy(input: SendEmailInput) {
+  return decidePolicy({
+    category: 'gmail',
+    action: 'send_email',
+    riskLevel: 'external_send',
+    approvalScope: 'external.send',
+    input: { to: input.to, cc: input.cc || [], bcc: input.bcc || [], subject: input.subject, body: input.body },
+  });
+}
+
+export async function createGmailDraft(input: GmailDraftInput) {
+  const policyDecision = classifyGmailDraftPolicy(input);
+  const approvalBlock = requirePolicyApproval(input, 'gmail.create_draft', policyDecision);
+  if (approvalBlock) return approvalBlock;
+
+  const response = await googleApiRequest<{ id?: string; message?: { id?: string; threadId?: string } }>(`${GMAIL_API_BASE}/users/me/drafts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: { raw: encodeRawEmail(input) } }),
+  });
+
+  return { ok: true, provider: 'gmail', draft: { id: response.id, messageId: response.message?.id, threadId: response.message?.threadId } };
+}
+
 export async function sendGmailEmail(input: SendEmailInput) {
+  const policyDecision = classifyGmailSendPolicy(input);
+  const policyApprovalBlock = requirePolicyApproval(input, 'gmail.send_email', policyDecision);
+  if (policyApprovalBlock) return policyApprovalBlock;
   const approvalBlock = requireExplicitApproval(input, 'gmail.send_email');
   if (approvalBlock) return approvalBlock;
 

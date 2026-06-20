@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { runtimeConfig } from '../config.js';
+import { decidePolicyForToolName, policyRequiresApproval } from '../governance/policyDecision.js';
 import { isAllowedUserRequestedOrDelegatedCoreTool } from '../workflows/nexora/capabilities.js';
 import { attachNexoraCompletion } from '../workflows/nexora/completion.js';
 import { taskEvents } from './events.js';
@@ -18,6 +19,7 @@ import type {
   DelegatedTaskStatus,
   DelegatedTaskUiState,
   ExecutionOrigin,
+  ExecutionPlanStepApprovalStatus,
   TaskAuditEntry,
   TaskReceipt,
   UpdateExecutionPlanStepInput,
@@ -211,6 +213,12 @@ function normalizeApprovalRequirements(
   });
 }
 
+
+function stepInputForPolicy(input: Pick<AppendExecutionPlanStepInput, 'arguments' | 'argumentTemplate'>): Record<string, unknown> {
+  const value = input.arguments ?? input.argumentTemplate ?? {};
+  return value && typeof value === 'object' && !Array.isArray(value) ? { ...(value as Record<string, unknown>) } : { value };
+}
+
 function normalizeExecutionPlanStep(
   input: AppendExecutionPlanStepInput,
   order: number,
@@ -224,8 +232,11 @@ function normalizeExecutionPlanStep(
     && !isHighRiskApprovalScope(input.approval?.scope)
     && isAllowedUserRequestedOrDelegatedCoreTool(input.targetTool, executionOrigin);
   const requestedApprovalStatus = input.approval?.status || input.approvalStatus || 'not_required';
-  const approvalRequired = input.approval?.required ?? requestedApprovalStatus === 'pending';
-  const approvalStatus = userAuthorized && approvalRequired ? 'approved' : (approvalRequired && requestedApprovalStatus === 'not_required' ? 'pending' : requestedApprovalStatus);
+  const policyDecision = decidePolicyForToolName(input.targetTool, stepInputForPolicy(input));
+  const approvalRequired = policyRequiresApproval(policyDecision);
+  const approvalStatus: ExecutionPlanStepApprovalStatus = approvalRequired
+    ? (requestedApprovalStatus === 'approved' || requestedApprovalStatus === 'rejected' ? requestedApprovalStatus : 'pending')
+    : 'not_required';
   return {
     id: input.id || randomUUID(),
     order: input.order ?? order,
@@ -237,10 +248,10 @@ function normalizeExecutionPlanStep(
       required: approvalRequired,
       status: approvalStatus,
       approver: input.approval?.approver,
-      approvedAt: input.approval?.approvedAt || (approvalRequired && userAuthorized ? timestamp : undefined),
+      approvedAt: input.approval?.approvedAt,
       rejectedAt: input.approval?.rejectedAt,
-      note: input.approval?.note || (approvalRequired && userAuthorized ? approvalBypassedReason(authorizationSource) : undefined),
-      reason: input.approval?.reason,
+      note: input.approval?.note,
+      reason: approvalRequired ? input.approval?.reason || policyDecision.reason : undefined,
       authorizationSource,
       scope: input.approval?.scope,
     },
@@ -450,7 +461,12 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
     const rootTaskId = input.rootTaskId || parentTask?.rootTaskId || input.parentTaskId || taskId;
     const delegationChain = parentTask ? [...parentTask.delegationChain, taskId] : [taskId];
     const originContext = { executionOrigin, rootTaskId, parentTaskId: input.parentTaskId, delegationChain };
-    const approvalRequirements = normalizeApprovalRequirements(input.approvalRequirements, authorizationSource, executionOrigin);
+    const normalizedSteps = input.executionPlan?.length
+      ? input.executionPlan.map((step, index) => normalizeExecutionPlanStep(step, index + 1, authorizationSource, originContext))
+      : undefined;
+    const requiredToolNeedsPolicyApproval = !normalizedSteps?.length
+      && Boolean(input.requiredTools?.some((toolName) => policyRequiresApproval(decidePolicyForToolName(toolName))));
+    const approvalRequirements = requiredToolNeedsPolicyApproval ? normalizeApprovalRequirements(input.approvalRequirements, authorizationSource, executionOrigin) : [];
     const task: DelegatedTask = {
       id: taskId,
       sessionId: input.sessionId,
@@ -465,9 +481,7 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       rootTaskId,
       ...(input.parentTaskId ? { parentTaskId: input.parentTaskId } : {}),
       delegationChain,
-      ...(input.executionPlan?.length
-        ? { executionPlan: input.executionPlan.map((step, index) => normalizeExecutionPlanStep(step, index + 1, authorizationSource, originContext)) }
-        : {}),
+      ...(normalizedSteps?.length ? { executionPlan: normalizedSteps } : {}),
       status: 'queued',
       logs: input.initialLog ? [input.initialLog] : [],
       events: [],
@@ -476,7 +490,7 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
       updatedAt: now(),
     };
-    const status: DelegatedTaskStatus = hasPendingTaskApprovalGate(task) ? 'pending_approval' : 'queued';
+    const status: DelegatedTaskStatus = needsApproval(task.approvalRequirements) ? 'pending_approval' : 'queued';
     task.status = status;
 
     const created = createAuditEntry(task.id, 'task.created', 'elora', `Elora delegated task to Nexora: ${task.objective}`, {

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Router } from 'express';
 import { runtimeConfig } from '../../config.js';
+import { policyRequiresApproval, type PolicyDecision } from '../../governance/policyDecision.js';
 
 const TOKEN_STORE_PATH = process.env.GOOGLE_TOKEN_STORE_PATH || path.join(runtimeConfig.dataDir, 'google-tokens.enc.json');
 const TOKEN_SERVICE_KEY = 'google';
@@ -16,6 +17,7 @@ export const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.compose',
   'https://www.googleapis.com/auth/drive.metadata.readonly',
   'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/spreadsheets.readonly',
@@ -198,6 +200,25 @@ export function googleAuthStatus() {
     scope: tokens.scope || null,
     expiry_date: tokens.expiry_date || null,
     token_type: tokens.token_type || null,
+  };
+}
+
+
+export function requirePolicyApproval(input: ApprovalGateInput, action: string, decision: PolicyDecision) {
+  if (!policyRequiresApproval(decision)) return null;
+  if (input.confirmedByUser === true) return null;
+  return {
+    ok: false,
+    status: 'approval_required',
+    action,
+    policy: {
+      action: decision.action,
+      classification: decision.policyClassification,
+      reason: decision.reason,
+      trustDomain: decision.trustDomain,
+      ...(decision.action === 'ask_before_execution' ? { boundary: decision.boundary } : {}),
+    },
+    message: 'This Google action crosses an explicit approval boundary and is blocked until confirmedByUser is true.',
   };
 }
 

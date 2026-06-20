@@ -54,6 +54,35 @@ const approvalReasonLabels = {
     "Phone-call voice sessions cannot run write, send, purchase/commit, code-execution, or code workspace tools during the call.",
 };
 
+
+const explicitApprovalBoundaries = new Set([
+  "rmt",
+  "personal_information_sensitive",
+  "private_data_sensitive",
+  "destructive_irreversible",
+  "external_commitment",
+]);
+
+const approvalBoundary = (execution = {}) => {
+  const request = execution.approvalRequest || {};
+  const rawBoundary = execution.policyBoundary || request.boundary || request.policyBoundary || request.approvalBoundary;
+  if (rawBoundary) return String(rawBoundary);
+  const combined = [execution.approvalScope, request.approvalScope, execution.riskLevel, request.reason]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (/rmt|purchase|payment|pay|financial|contract|subscription|commit/.test(combined)) return "rmt";
+  if (/private[_ -]?data|personal[_ -]?information|personal[_ -]?info|sensitive|secret|token/.test(combined)) return "personal_information_sensitive";
+  if (/destructive|irreversible|permanent|destroy|delete/.test(combined)) return "destructive_irreversible";
+  if (/external[._ -]?send|external[._ -]?commitment|send|share|publish|expose/.test(combined)) return "external_commitment";
+  return undefined;
+};
+
+const shouldShowApprovalCard = (execution) =>
+  execution.approvalStatus === "pending" &&
+  execution.approvalRequest &&
+  explicitApprovalBoundaries.has(approvalBoundary(execution));
+
 const isApprovalRuntimeEvent = (data) => {
   const type = String(data?.type || "");
   const status = String(
@@ -140,10 +169,7 @@ const EloraConsole = () => {
       throw new Error(`Unable to load approvals (${response.status})`);
     const payload = await response.json();
     const approvals = (payload.executions || [])
-      .filter(
-        (execution) =>
-          execution.approvalStatus === "pending" && execution.approvalRequest,
-      )
+      .filter(shouldShowApprovalCard)
       .map(toApprovalCard);
     setPendingApprovals(approvals);
     return approvals;

@@ -106,6 +106,7 @@ import { createObservationRecommendation } from '../governance/recommendations.j
 import { decideToolPolicy } from '../governance/policyDecision.js';
 import { recordTrustEventFromPolicyDecision } from '../governance/trustService.js';
 
+
 export type ToolCategory =
   | 'calendar'
   | 'gmail'
@@ -3708,6 +3709,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
     riskLevel: definition.riskLevel,
     approvalStatus: approvalRequired ? (approved ? 'approved' : 'pending') : 'not_required',
     approvalScope,
+
     linkedIds: {
       sessionId: context.sessionId,
       voiceSessionId: context.voiceSessionId,

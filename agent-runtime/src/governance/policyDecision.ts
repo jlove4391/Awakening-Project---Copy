@@ -137,6 +137,7 @@ export function decidePolicy(input: PolicyDecisionInput): PolicyDecision {
 
 
 
+
 export function decideToolPolicy(definition: Pick<RegisteredToolDefinition, 'name' | 'riskLevel' | 'audit' | 'requiredApprovalScope'>, input: Record<string, unknown> = {}, approvalScope?: ApprovalScope | string) {
   return decidePolicy({
     toolName: definition.name,

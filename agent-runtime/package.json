@@ -42,7 +42,7 @@
     "smoke:lead-workflow-orchestrator": "tsx scripts/smoke-lead-workflow-orchestrator.ts",
     "smoke:leadgen-live-proof": "tsx scripts/smoke-leadgen-live-proof.ts",
     "smoke:sdk-approvals": "tsx scripts/smoke-sdk-approvals.ts",
-    "smoke:policy-decisions": "tsx scripts/smoke-policy-decisions.ts"
+
   },
   "dependencies": {
     "@openai/agents": "0.11.7",

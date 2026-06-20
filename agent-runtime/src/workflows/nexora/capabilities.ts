@@ -1,5 +1,6 @@
 import type { ExecutionOrigin } from '../../tasks/types.js';
 import type { RegisteredToolDefinition, ToolRiskLevel } from '../../tools/registry.js';
+import { decideToolPolicy, policyRequiresApproval } from '../../governance/policyDecision.js';
 
 export type NexoraCapabilityId =
   | 'read_repo'
@@ -75,8 +76,9 @@ const LOW_RISK_PROVIDER_ACTION_PATTERNS = /^(status|list|search|read|lookup|plan
 
 export function requiresHardApprovalGate(definition: Pick<RegisteredToolDefinition, 'name' | 'riskLevel' | 'audit' | 'requiredApprovalScope'> | undefined) {
   if (!definition) return true;
-  if (definition.requiredApprovalScope) return true;
-  if (definition.name === 'code.commit') return true;
+  const policyDecision = decideToolPolicy(definition);
+  if (policyRequiresApproval(policyDecision)) return true;
+  if (policyDecision.action === 'execute') return false;
   if (definition.audit.action.includes('delete')) return true;
   if (definition.riskLevel === 'external_send' || definition.riskLevel === 'purchase_or_commit') return true;
 
@@ -133,8 +135,8 @@ export const nexoraCapabilities: Record<NexoraCapabilityId, NexoraCapabilityDefi
     label: 'write files',
     allowedTools: ['code.edit', 'code.create_file', 'code.patch_file', 'code.move_path', 'code.copy_path', 'code.mkdir', 'code.write_json', 'code.git_restore_file', 'code.git_create_branch'],
     riskLevel: 'write',
-    approvalRequirement: 'explicit_step_approval',
-    defaultEnabled: false,
+    approvalRequirement: 'none',
+    defaultEnabled: true,
     environmentFlag: 'NEXORA_ENABLE_WRITE_FILES',
     requiredReceiptFields: ['capabilityId', 'toolName', 'changedFiles', 'diffSummary', 'approvalNote', 'resultSummary'],
   },
@@ -153,8 +155,8 @@ export const nexoraCapabilities: Record<NexoraCapabilityId, NexoraCapabilityDefi
     label: 'run commands',
     allowedTools: ['code.run_command', 'code.test', 'delegation.execute_code'],
     riskLevel: 'code_execution',
-    approvalRequirement: 'explicit_step_approval',
-    defaultEnabled: false,
+    approvalRequirement: 'none',
+    defaultEnabled: true,
     environmentFlag: 'NEXORA_ENABLE_RUN_COMMANDS',
     requiredReceiptFields: ['capabilityId', 'toolName', 'command', 'cwd', 'exitCode', 'approvalNote', 'outputSummary'],
   },

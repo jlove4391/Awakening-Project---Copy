@@ -48,26 +48,14 @@ const task = await createDelegatedTask({
   initialLog: 'Smoke task for delegated Nexora workspace file creation.',
 });
 
-assert.equal(task.status, 'pending_approval', 'task should start pending delegated-task approval');
-console.log(`✓ Created delegated task ${task.id}.`);
-
-const approvedTask = await approveDelegatedTask(task.id, 'smoke', 'Approve delegated file-create smoke task.');
-assert.equal(approvedTask?.status, 'queued', 'task should queue after delegated-task approval');
-console.log('✓ Approved delegated task.');
+assert.equal(task.status, 'queued', 'ordinary delegated file creation should queue without task approval');
+assert.equal(task.approvalRequirements.length, 0, 'ordinary delegated file creation should not create task approval requirements');
+assert.equal(task.executionPlan?.[0]?.approvalStatus, 'not_required', 'ordinary file-write step should not require step approval');
+console.log(`✓ Created queued delegated task ${task.id} without task/step approvals.`);
 
 const firstWorkerState = await waitForTask(task.id, (candidate) => candidate.status === 'completed' || candidate.status === 'failed' || candidate.status === 'blocked');
 let finalTask = firstWorkerState;
 
-if (firstWorkerState.status === 'blocked') {
-  assert.equal(firstWorkerState.blockedReason, 'step_approval_required');
-  assert.equal(firstWorkerState.pendingToolAction?.approvalStatus, 'pending');
-  const stepId = firstWorkerState.pendingToolAction?.stepId;
-  assert.ok(stepId, 'blocked task should expose pending file-write step ID');
-  console.log(`✓ Worker requested file-write approval at step ${stepId}.`);
-
-  const stepApproved = await approveExecutionPlanStep(task.id, stepId, 'smoke', 'Approve code.create_file write for smoke.');
-  assert.equal(stepApproved?.status, 'queued', 'task should requeue after file-write step approval');
-  console.log('✓ Approved file-write step.');
 
   finalTask = await waitForTask(task.id, (candidate) => candidate.status === 'completed' || candidate.status === 'failed' || candidate.status === 'blocked');
 } else {

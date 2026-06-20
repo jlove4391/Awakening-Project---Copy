@@ -135,6 +135,7 @@ export function decidePolicy(input: PolicyDecisionInput): PolicyDecision {
   return { action: 'ask_before_execution', boundary: 'external_commitment', reason: 'Action is outside the ordinary workspace execution envelope.', trustDomain, receiptRequired: true, policyClassification: 'explicit_boundary' };
 }
 
+
 export function decideToolPolicy(definition: Pick<RegisteredToolDefinition, 'name' | 'riskLevel' | 'audit' | 'requiredApprovalScope'>, input: Record<string, unknown> = {}, approvalScope?: ApprovalScope | string) {
   return decidePolicy({
     toolName: definition.name,

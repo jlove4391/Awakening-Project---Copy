@@ -101,11 +101,7 @@ export function isOrdinaryWorkspacePolicyInput(input: PolicyDecisionInput) {
   }
   if (input.category === 'memory') return !isPersonalInformationSensitivePolicyInput(input);
   if (input.category === 'drive') return String(input.action || '').startsWith('create') && !isPersonalInformationSensitivePolicyInput(input);
-  if (input.category === 'calendar') {
-    const attendees = input.input?.attendees;
-    const attendeeCount = Array.isArray(attendees) ? attendees.length : attendees ? 1 : 0;
-    return !isPersonalInformationSensitivePolicyInput(input) && attendeeCount === 0;
-  }
+
   if (input.category === 'gmail') return /draft|search|read|list|organize/u.test(String(input.action || '')) && !isPersonalInformationSensitivePolicyInput(input);
   if (input.category === 'delegation') return true;
   return input.riskLevel === 'read';

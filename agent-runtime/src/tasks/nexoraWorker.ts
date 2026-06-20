@@ -1,9 +1,11 @@
 import type { RegisteredToolDefinition } from '../tools/registry.js';
 import { evaluateNexoraCapabilityForStep, findNexoraCapabilityForTool, isAllowedUserRequestedOrDelegatedCoreTool } from '../workflows/nexora/capabilities.js';
+import { decidePolicyForToolName, policyRequiresApproval, type PolicyDecision } from '../governance/policyDecision.js';
 import type { RuntimeContext } from '../types.js';
 import { appendExecutionPlanStep, cancelDelegatedTask, getDelegatedTask, updateDelegatedTask, updateExecutionPlanStep } from './store.js';
 import type { DelegatedTask } from './types.js';
 import type { DelegatedTaskHandler } from './queue.js';
+import { getRelationshipContext } from '../relationship/relationshipService.js';
 import { redactForLogs } from '../workflows/nexora/secretsPolicy.js';
 
 type NexoraToolInputBuilder = (task: DelegatedTask) => Record<string, unknown>;
@@ -142,11 +144,17 @@ async function ensureDriveCreatePlan(task: DelegatedTask) {
 
   const input = buildDriveCreateInput(task);
   if (!input) return undefined;
+  const policyDecision = decidePolicyForToolName('drive.create_text_file', input);
+  const approvalRequired = policyRequiresApproval(policyDecision);
   return appendExecutionPlanStep(task.id, {
     targetTool: 'drive.create_text_file',
     arguments: input,
-    approvalStatus: 'pending',
-    approval: { required: true, status: 'pending', reason: 'drive_write_approval_required' },
+    approvalStatus: approvalRequired ? 'pending' : 'not_required',
+    approval: {
+      required: approvalRequired,
+      status: approvalRequired ? 'pending' : 'not_required',
+      reason: approvalRequired ? policyDecision.reason : undefined,
+    },
   });
 }
 
@@ -233,11 +241,17 @@ async function chooseExecutionStrategy(task: DelegatedTask) {
   return [...selected.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
-async function isStepHighRisk(toolName: string) {
+async function stepPolicyDecision(toolName: string, input: Record<string, unknown>) {
   const { getRegisteredTool } = await loadToolRegistry();
   const definition = getRegisteredTool(toolName);
-  const capability = definition ? findNexoraCapabilityForTool(definition.name) : undefined;
-  return !definition || !capability || definition.riskLevel !== 'read' || definition.humanApprovalRequired || capability.approvalRequirement !== 'none';
+  const relationshipContext = await getRelationshipContext('jordan');
+  const inputWithRelationship = { ...input, relationshipContext };
+  if (!definition) return decidePolicyForToolName(toolName, inputWithRelationship);
+  return decidePolicyForToolName(definition.name, inputWithRelationship);
+}
+
+async function isStepHighRisk(toolName: string, input: Record<string, unknown>) {
+  return policyRequiresApproval(await stepPolicyDecision(toolName, input));
 }
 
 function approvalScopeForStep(definition: RegisteredToolDefinition | undefined) {
@@ -260,10 +274,10 @@ function stepInput(step: NonNullable<DelegatedTask['executionPlan']>[number]): R
   return value && typeof value === 'object' && !Array.isArray(value) ? { ...(value as Record<string, unknown>) } : { value };
 }
 
-async function blockForStepApproval(task: DelegatedTask, step: NonNullable<DelegatedTask['executionPlan']>[number]) {
+async function blockForStepApproval(task: DelegatedTask, step: NonNullable<DelegatedTask['executionPlan']>[number], policyDecision: PolicyDecision) {
   const { getRegisteredTool } = await loadToolRegistry();
   const definition = getRegisteredTool(step.targetTool);
-  const reason = 'step_approval_required';
+  const reason = policyDecision.action === 'ask_before_execution' ? 'step_approval_required' : policyDecision.action === 'setup_needed' ? 'provider_configuration_required' : 'policy_block';
   const approvalScope = approvalScopeForStep(definition);
   const pendingToolAction = {
     stepId: step.id,
@@ -273,24 +287,24 @@ async function blockForStepApproval(task: DelegatedTask, step: NonNullable<Deleg
     arguments: step.arguments,
     argumentTemplate: step.argumentTemplate,
     approvalStatus: 'pending' as const,
-    reason,
+    reason: policyDecision.reason,
     approvalScope,
   };
   await updateExecutionPlanStep(task.id, step.id, {
     status: 'blocked',
     approvalStatus: 'pending',
-    approval: { required: true, status: 'pending', reason, scope: approvalScope },
+    approval: { required: true, status: 'pending', reason: policyDecision.reason, scope: approvalScope },
   });
   await updateDelegatedTask(task.id, {
     status: 'blocked',
     blockedReason: reason,
     pendingToolAction,
-    log: `Nexora blocked before ${step.targetTool}; explicit approval is required for this step.`,
+    log: `Nexora blocked before ${step.targetTool}; ${policyDecision.reason}`,
     event: {
       type: 'task.blocked',
       actor: 'nexora',
-      summary: 'Task is blocked until the pending tool action is approved.',
-      details: { blockedReason: reason, pendingToolAction },
+      summary: policyDecision.action === 'ask_before_execution' ? 'Task is blocked until the pending tool action is approved.' : 'Task is blocked by central policy.',
+      details: { blockedReason: reason, pendingToolAction, policyDecision },
     },
   });
 }
@@ -386,6 +400,7 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
 
   if (task.executionPlan?.length) {
     const context = createTaskRuntimeContext(task);
+    context.relationshipContext = await getRelationshipContext('jordan');
     const executedSteps: Array<{ stepId: string; tool: string; input: Record<string, unknown>; result: unknown }> = [];
 
     const taskDeadline = task.timeoutMs ? Date.now() + task.timeoutMs : undefined;
@@ -396,9 +411,11 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
         return true;
       }
       if (['completed', 'skipped', 'cancelled'].includes(step.status)) continue;
-      const highRisk = await isStepHighRisk(step.targetTool);
-      let capabilityDecision = evaluateNexoraCapabilityForStep(step.targetTool, step.approvalStatus, task.executionOrigin);
-      if (!capabilityDecision.allowed && capabilityDecision.reason === 'approval_required' && isUserAuthorizedForStep(task, step.targetTool)) {
+      const input = stepInput(step);
+      const policyDecision = await stepPolicyDecision(step.targetTool, input);
+      const highRisk = policyRequiresApproval(policyDecision);
+      let capabilityDecision = evaluateNexoraCapabilityForStep(step.targetTool, highRisk ? step.approvalStatus : 'not_required', task.executionOrigin);
+      if (!capabilityDecision.allowed && capabilityDecision.reason === 'approval_required' && !highRisk && isUserAuthorizedForStep(task, step.targetTool)) {
         await updateExecutionPlanStep(task.id, step.id, {
           approvalStatus: 'approved',
           approval: {
@@ -414,13 +431,17 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
         step.approvalStatus = 'approved';
         capabilityDecision = evaluateNexoraCapabilityForStep(step.targetTool, step.approvalStatus, task.executionOrigin);
       }
+      if (highRisk && step.approvalStatus !== 'approved') {
+        await blockForStepApproval(task, step, policyDecision);
+        return true;
+      }
+
       if (!capabilityDecision.allowed) {
-        if (capabilityDecision.reason === 'approval_required') await blockForStepApproval(task, step);
+        if (capabilityDecision.reason === 'approval_required') await blockForStepApproval(task, step, policyDecision);
         else await blockForCapabilityPolicy(task, step, capabilityDecision);
         return true;
       }
 
-      const input = stepInput(step);
       if (highRisk) {
         input.confirmedByUser = true;
         input.taskId = task.id;

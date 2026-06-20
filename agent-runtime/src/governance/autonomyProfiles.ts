@@ -2,6 +2,7 @@ import path from 'node:path';
 import type { RegisteredToolDefinition } from '../tools/registry.js';
 import { runtimeConfig, type AutonomyLevel } from '../config.js';
 import type { ExecutionMode } from '../types.js';
+import { decideToolPolicy, policyRequiresApproval } from './policyDecision.js';
 
 export type AutonomyProfileName = 'dev_autonomy' | 'proactive_observation';
 
@@ -9,7 +10,7 @@ export const autonomyLevelDefinitions = {
   0: { label: 'reactive_only', description: 'Reactive only; ELORA/CORE acts only in direct response to user requests.' },
   1: { label: 'proactive_read_only_observation', description: 'Proactive read-only observation; no stored recommendations or writes.' },
   2: { label: 'ranked_recommendations', description: 'Read-only observation plus ranked internal recommendations.' },
-  3: { label: 'draft_patch_proposals', description: 'Ranked recommendations plus draft patch proposals requiring approval before application.' },
+  3: { label: 'trusted_execution', description: 'Trusted autonomy; ordinary workspace execution may run with receipts while explicit policy boundaries still require approval.' },
 } as const satisfies Record<AutonomyLevel, { label: string; description: string }>;
 
 export function isKnownAutonomyLevel(value: unknown): value is AutonomyLevel {
@@ -25,67 +26,15 @@ export function activeAutonomyLevel(context?: { autonomyLevel?: AutonomyLevel })
 }
 
 
-const HARD_APPROVAL_SCOPES = new Set([
-  'repo.commit',
-  'repo.delete',
-  'provider.create',
-  'provider.update',
-  'provider.delete',
-  'database.migrate',
-  'external.send',
-]);
-
-const AUTONOMOUS_MUTATION_SCOPES = new Set([
-  'repo.write',
-  'repo.delete',
-  'repo.command',
-  'repo.commit',
-  'provider.create',
-  'provider.update',
-  'provider.delete',
-  'database.migrate',
-  'external.send',
-]);
-
-const DEV_AUTONOMY_SANDBOX_ROOTS = ['.runtime-data/dev-autonomy', 'sandbox/dev-autonomy'];
 const DEV_AUTONOMY_WEB_TOOLS = new Set(['web.fetch_url', 'web.crawl_site']);
-const SOURCE_OR_PACKAGE_PATTERNS = [
-  /(^|\/)src\//,
-  /(^|\/)package\.json$/,
-  /(^|\/)package-lock\.json$/,
-  /(^|\/)pnpm-lock\.yaml$/,
-  /(^|\/)yarn\.lock$/,
-];
-
-function normalizeWorkspacePath(value: unknown) {
-  if (typeof value !== 'string' || !value.trim()) return '';
-  return value.replace(/\\/g, '/').replace(/^\.\//, '');
-}
-
-function isApprovedSandboxPath(value: unknown) {
-  const normalized = normalizeWorkspacePath(value);
-  if (!normalized || path.posix.isAbsolute(normalized) || normalized.split('/').includes('..')) return false;
-  return DEV_AUTONOMY_SANDBOX_ROOTS.some((root) => normalized === root || normalized.startsWith(`${root}/`));
-}
-
-function isSourceOrPackagePath(value: unknown) {
-  const normalized = normalizeWorkspacePath(value);
-  return SOURCE_OR_PACKAGE_PATTERNS.some((pattern) => pattern.test(normalized));
-}
 
 export function isKnownAutonomyProfile(value: unknown): value is AutonomyProfileName {
   return value === 'dev_autonomy' || value === 'proactive_observation';
 }
 
 export function devAutonomyAllowsWithoutApproval(definition: RegisteredToolDefinition, input: Record<string, unknown>) {
-  if (definition.riskLevel === 'read') return true;
-  if (DEV_AUTONOMY_WEB_TOOLS.has(definition.name)) return true;
-
-  if (definition.name === 'code.create_file') {
-    return isApprovedSandboxPath(input.path) && !isSourceOrPackagePath(input.path);
-  }
-
-  return false;
+  const decision = decideToolPolicy(definition, input);
+  return !policyRequiresApproval(decision);
 }
 
 export function isDraftPatchProposalInput(input: Record<string, unknown>) {
@@ -99,12 +48,9 @@ export function autonomyLevelAllows(
   executionMode?: ExecutionMode,
 ) {
   const mode = normalizeExecutionMode(executionMode, level === 0 ? 'reactive' : 'observation');
-  if (level === 0) return (mode === 'reactive' || mode === 'delegated') && definition.name !== 'observation.recommend';
-  if (definition.riskLevel === 'read') return true;
-  if (definition.name !== 'observation.recommend') return false;
-  if (level === 1) return false;
-  if (level === 2) return !isDraftPatchProposalInput(input);
-  if (level === 3) return true;
+  const policyDecision = decideToolPolicy(definition, input);
+  if (mode !== 'observation') return !policyRequiresApproval(policyDecision);
+  if (definition.riskLevel === 'read' || definition.name === 'observation.recommend') return true;
   return false;
 }
 
@@ -118,7 +64,6 @@ export function requiresApprovalForAutonomyProfile(
   input: Record<string, unknown>,
 ) {
   if (profile === 'proactive_observation') return !proactiveObservationAllows(definition, activeAutonomyLevel({ autonomyLevel: runtimeConfig.autonomy.level || 2 }), input);
-  if (profile !== 'dev_autonomy') return definition.humanApprovalRequired;
   return !devAutonomyAllowsWithoutApproval(definition, input);
 }
 
@@ -135,11 +80,8 @@ export function requiresApprovalForExecutionMode(
 ) {
   const mode = normalizeExecutionMode(executionMode, profile ? 'autonomous' : 'reactive');
   if (mode === 'observation' || profile === 'proactive_observation') return !proactiveObservationAllows(definition, runtimeConfig.autonomy.level, input);
-  if (approvalScope && HARD_APPROVAL_SCOPES.has(approvalScope)) return true;
-  if (mode !== 'autonomous') return false;
-  if (definition.riskLevel === 'read') return false;
-  if (profile === 'dev_autonomy') return requiresApprovalForAutonomyProfile(profile, definition, input);
-  return definition.humanApprovalRequired || (approvalScope ? AUTONOMOUS_MUTATION_SCOPES.has(approvalScope) : true);
+  const policyDecision = decideToolPolicy(definition, input, approvalScope);
+  return policyRequiresApproval(policyDecision);
 }
 
 export const devAutonomyProfile = {
@@ -148,19 +90,14 @@ export const devAutonomyProfile = {
     readOnlyInspection: true,
     webTools: [...DEV_AUTONOMY_WEB_TOOLS],
     internalDrafts: true,
-    sandboxFileCreationRoots: DEV_AUTONOMY_SANDBOX_ROOTS,
+    workspaceBoundary: 'configured workspace root with path protection, secret protection, policy boundaries, and trust envelope receipts',
   },
   approvalRequiredFor: [
-    'src edits',
-    'package edits',
-    'shell commands',
-    'deletes',
-    'commits',
-    'external sends',
-    'provider writes',
-    'database migrations',
-    'purchases',
-    'infrastructure actions',
+    'RMT or financial/legal commitments',
+    'private-data-sensitive exposure or sending',
+    'destructive irreversible actions',
+    'external commitments outside the ordinary workspace envelope',
+    'missing provider setup that requires user configuration',
   ],
 };
 

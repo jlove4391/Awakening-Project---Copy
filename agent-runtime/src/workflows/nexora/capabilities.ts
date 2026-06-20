@@ -1,5 +1,6 @@
 import type { ExecutionOrigin } from '../../tasks/types.js';
 import type { RegisteredToolDefinition, ToolRiskLevel } from '../../tools/registry.js';
+import { decideToolPolicy, policyRequiresApproval } from '../../governance/policyDecision.js';
 
 export type NexoraCapabilityId =
   | 'read_repo'
@@ -10,6 +11,7 @@ export type NexoraCapabilityId =
   | 'commit'
   | 'create_app'
   | 'manage_provider_resources'
+  | 'ordinary_provider_workspace'
   | 'inspect_databanks'
   | 'mutate_databanks'
   | 'fetch_url'
@@ -75,8 +77,9 @@ const LOW_RISK_PROVIDER_ACTION_PATTERNS = /^(status|list|search|read|lookup|plan
 
 export function requiresHardApprovalGate(definition: Pick<RegisteredToolDefinition, 'name' | 'riskLevel' | 'audit' | 'requiredApprovalScope'> | undefined) {
   if (!definition) return true;
-  if (definition.requiredApprovalScope) return true;
-  if (definition.name === 'code.commit') return true;
+  const policyDecision = decideToolPolicy(definition);
+  if (policyRequiresApproval(policyDecision)) return true;
+  if (policyDecision.action === 'execute') return false;
   if (definition.audit.action.includes('delete')) return true;
   if (definition.riskLevel === 'external_send' || definition.riskLevel === 'purchase_or_commit') return true;
 
@@ -133,8 +136,8 @@ export const nexoraCapabilities: Record<NexoraCapabilityId, NexoraCapabilityDefi
     label: 'write files',
     allowedTools: ['code.edit', 'code.create_file', 'code.patch_file', 'code.move_path', 'code.copy_path', 'code.mkdir', 'code.write_json', 'code.git_restore_file', 'code.git_create_branch'],
     riskLevel: 'write',
-    approvalRequirement: 'explicit_step_approval',
-    defaultEnabled: false,
+    approvalRequirement: 'none',
+    defaultEnabled: true,
     environmentFlag: 'NEXORA_ENABLE_WRITE_FILES',
     requiredReceiptFields: ['capabilityId', 'toolName', 'changedFiles', 'diffSummary', 'approvalNote', 'resultSummary'],
   },
@@ -153,8 +156,8 @@ export const nexoraCapabilities: Record<NexoraCapabilityId, NexoraCapabilityDefi
     label: 'run commands',
     allowedTools: ['code.run_command', 'code.test', 'delegation.execute_code'],
     riskLevel: 'code_execution',
-    approvalRequirement: 'explicit_step_approval',
-    defaultEnabled: false,
+    approvalRequirement: 'none',
+    defaultEnabled: true,
     environmentFlag: 'NEXORA_ENABLE_RUN_COMMANDS',
     requiredReceiptFields: ['capabilityId', 'toolName', 'command', 'cwd', 'exitCode', 'approvalNote', 'outputSummary'],
   },
@@ -181,12 +184,22 @@ export const nexoraCapabilities: Record<NexoraCapabilityId, NexoraCapabilityDefi
   manage_provider_resources: {
     id: 'manage_provider_resources',
     label: 'manage provider resources',
-    allowedTools: ['digitalocean.status', 'digitalocean.list_apps', 'digitalocean.list_databases', 'digitalocean.plan_app', 'digitalocean.plan_database', 'digitalocean.create_app', 'digitalocean.create_database', 'digitalocean.create_infrastructure', 'digitalocean.update_infrastructure', 'digitalocean.delete_infrastructure', 'drive.create_text_file'],
+    allowedTools: ['digitalocean.status', 'digitalocean.list_apps', 'digitalocean.list_databases', 'digitalocean.plan_app', 'digitalocean.plan_database', 'digitalocean.create_app', 'digitalocean.create_database', 'digitalocean.create_infrastructure', 'digitalocean.update_infrastructure', 'digitalocean.delete_infrastructure'],
     riskLevel: 'purchase_or_commit',
     approvalRequirement: 'explicit_human_approval',
     defaultEnabled: false,
     environmentFlag: 'NEXORA_ENABLE_PROVIDER_RESOURCES',
     requiredReceiptFields: ['capabilityId', 'toolName', 'provider', 'resourceType', 'resourceId', 'approvalNote', 'resultSummary'],
+  },
+  ordinary_provider_workspace: {
+    id: 'ordinary_provider_workspace',
+    label: 'ordinary provider workspace actions',
+    allowedTools: ['drive.create_text_file', 'calendar.create_event', 'gmail.create_draft'],
+    riskLevel: 'write',
+    approvalRequirement: 'none',
+    defaultEnabled: true,
+    environmentFlag: 'NEXORA_ENABLE_ORDINARY_PROVIDER_WORKSPACE',
+    requiredReceiptFields: ['capabilityId', 'toolName', 'provider', 'resourceType', 'resourceId', 'resultSummary'],
   },
   inspect_databanks: {
     id: 'inspect_databanks',

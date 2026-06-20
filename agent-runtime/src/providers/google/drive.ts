@@ -1,4 +1,5 @@
-import { googleApiRequest, requireExplicitApproval, type ApprovalGateInput } from './auth.js';
+import { decidePolicy } from '../../governance/policyDecision.js';
+import { googleApiRequest, requirePolicyApproval, type ApprovalGateInput } from './auth.js';
 
 const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
 const DRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3';
@@ -44,8 +45,18 @@ export async function searchDriveFiles(input: SearchFilesInput) {
   return { ok: true, provider: 'google-drive', files: response.files || [] };
 }
 
+export function classifyDriveTextFilePolicy(input: CreateTextFileInput) {
+  return decidePolicy({
+    category: 'drive',
+    action: 'create_text_file',
+    riskLevel: 'write',
+    input: { name: input.name, parentId: input.parentId, content: input.content, mimeType: input.mimeType },
+  });
+}
+
 export async function createDriveTextFile(input: CreateTextFileInput) {
-  const approvalBlock = requireExplicitApproval(input, 'drive.create_text_file');
+  const policyDecision = classifyDriveTextFilePolicy(input);
+  const approvalBlock = requirePolicyApproval(input, 'drive.create_text_file', policyDecision);
   if (approvalBlock) return approvalBlock;
 
   const mimeType = input.mimeType || 'text/plain';

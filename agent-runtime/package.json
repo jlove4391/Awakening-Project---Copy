@@ -41,7 +41,10 @@
     "smoke:leadgen-source-mode": "tsx scripts/smoke-leadgen-source-mode.ts",
     "smoke:lead-workflow-orchestrator": "tsx scripts/smoke-lead-workflow-orchestrator.ts",
     "smoke:leadgen-live-proof": "tsx scripts/smoke-leadgen-live-proof.ts",
-    "smoke:sdk-approvals": "tsx scripts/smoke-sdk-approvals.ts"
+    "smoke:sdk-approvals": "tsx scripts/smoke-sdk-approvals.ts",
+    "smoke:policy-decisions": "tsx scripts/smoke-policy-decisions.ts",
+    "smoke:trust-scoring": "tsx scripts/smoke-trust-scoring.ts",
+    "smoke:google-provider-policies": "tsx scripts/smoke-google-provider-policies.ts"
   },
   "dependencies": {
     "@openai/agents": "0.11.7",

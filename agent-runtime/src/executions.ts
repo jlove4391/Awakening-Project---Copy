@@ -37,6 +37,7 @@ export interface ExecutionRecord {
   policyAction?: PolicyAction;
   policyClassification?: PolicyDecision['policyClassification'];
   policyBoundary?: PolicyBoundary;
+
   approvalRequest?: ExecutionApprovalRequest;
   executionResult?: unknown;
   providerResponseSummary?: string;
@@ -135,6 +136,7 @@ export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'times
     policyAction: input.policyAction,
     policyClassification: input.policyClassification,
     policyBoundary: input.policyBoundary,
+
     approvalRequest: input.approvalRequest,
     executionResult: redactProviderReceiptPayload(input.executionResult),
     providerResponseSummary: input.providerResponseSummary ? redactProviderReceiptPayload(input.providerResponseSummary) : input.providerResponseSummary,
@@ -177,6 +179,7 @@ export function completeExecutionRecord(
     policyAction: record.policyAction,
     policyClassification: record.policyClassification,
     policyBoundary: record.policyBoundary,
+
     approvalRequest: record.approvalRequest,
     executionResult: redactProviderReceiptPayload(patch.executionResult),
     providerResponseSummary: patch.providerResponseSummary ? redactProviderReceiptPayload(patch.providerResponseSummary) : summarizeProviderResponse(patch.executionResult),

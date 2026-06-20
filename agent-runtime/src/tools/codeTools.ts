@@ -179,6 +179,7 @@ function ensureConfirmed(input: ApprovalGateInput, toolName: string) {
   return isApprovalConfirmed(input) ? null : approvalRequired(toolName);
 }
 
+
 function ensureOrdinaryWorkspaceExecution(input: ApprovalGateInput, toolName: string, action: string, riskLevel: 'write' | 'code_execution' = 'write') {
   if (isApprovalConfirmed(input)) return null;
   const decision = decidePolicy({
@@ -187,7 +188,7 @@ function ensureOrdinaryWorkspaceExecution(input: ApprovalGateInput, toolName: st
     category: 'code',
     riskLevel,
     approvalScope: riskLevel === 'code_execution' ? 'repo.command' : 'repo.write',
-    input: input as Record<string, unknown>,
+
   });
   return policyRequiresApproval(decision) ? approvalRequired(toolName) : null;
 }
@@ -646,10 +647,10 @@ export async function codePatchFile(input: { path: string; search: string; repla
 }
 
 export async function codeDeleteFile(input: DeleteInput) {
-  const approval = ensureConfirmed(input, 'code.delete_file');
-  if (approval) return approval;
   const { root, target, relativePath } = await resolveExistingWorkspacePath(input.path);
   assertDeleteAllowed(input, relativePath);
+  const approval = ensurePolicyDeleteExecution(input, 'code.delete_file', input.permanent === true ? 'permanent_delete_file' : 'delete_file');
+  if (approval) return approval;
   const stats = await fs.lstat(target);
   if (stats.isSymbolicLink()) throw new Error('code.delete_file cannot delete symlinks.');
   if (!stats.isFile()) throw new Error('code.delete_file can only delete files. Use code.delete_path for explicit directory deletes.');
@@ -667,10 +668,10 @@ export async function codeDeleteFile(input: DeleteInput) {
 }
 
 export async function codeDeletePath(input: DeleteInput) {
-  const approval = ensureConfirmed(input, 'code.delete_path');
-  if (approval) return approval;
   const { root, target, relativePath } = await resolveExistingWorkspacePath(input.path);
   assertDeleteAllowed(input, relativePath);
+  const approval = ensurePolicyDeleteExecution(input, 'code.delete_path', input.permanent === true ? 'permanent_delete_path' : 'delete_path');
+  if (approval) return approval;
   const stats = await fs.lstat(target);
   if (stats.isSymbolicLink()) throw new Error('code.delete_path cannot delete symlinks.');
   if (!input.allowHighRiskDelete && stats.isDirectory() && await pathContainsProtectedDeleteTarget(root, target)) {

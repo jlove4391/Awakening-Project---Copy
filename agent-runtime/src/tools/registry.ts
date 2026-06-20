@@ -103,8 +103,6 @@ import { redactForLogs, redactProviderReceiptPayload } from '../workflows/nexora
 import { webCrawlSite, webFetchUrl } from './webTools.js';
 import { activeAutonomyLevel, autonomyLevelAllows, normalizeExecutionMode, proactiveObservationAllows, requiresApprovalForExecutionMode } from '../governance/autonomyProfiles.js';
 import { createObservationRecommendation } from '../governance/recommendations.js';
-import { decideToolPolicy } from '../governance/policyDecision.js';
-import { recordTrustEventFromPolicyDecision } from '../governance/trustService.js';
 
 
 export type ToolCategory =
@@ -3761,7 +3759,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       actor: context.agent || 'elora',
       action: definition.name,
       executionId: blockedRecord.id,
-      metadata: { approvalRequired, executionMode, autonomyLevel },
+
     });
     await writeToolAuditLog({
       event: `${definition.name}.approval_required`,
@@ -3797,7 +3795,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       executionId: completedRecord.id,
       receiptComplete: Boolean(completedRecord.receipt.summary),
       validationPassed: true,
-      metadata: { approvalRequired, executionMode, autonomyLevel },
+
     });
     await writeToolAuditLog({
       event: definition.audit.logEvents[1] || `${definition.name}.completed`,
@@ -3830,7 +3828,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
       action: definition.name,
       executionId: failedRecord.id,
       validationPassed: false,
-      metadata: { approvalRequired, executionMode, autonomyLevel, error: message },
+
     });
     await writeToolAuditLog({
       event: `${definition.name}.failed`,

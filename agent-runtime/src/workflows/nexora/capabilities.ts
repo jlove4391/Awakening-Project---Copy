@@ -11,6 +11,7 @@ export type NexoraCapabilityId =
   | 'commit'
   | 'create_app'
   | 'manage_provider_resources'
+  | 'ordinary_provider_workspace'
   | 'inspect_databanks'
   | 'mutate_databanks'
   | 'fetch_url'
@@ -183,12 +184,22 @@ export const nexoraCapabilities: Record<NexoraCapabilityId, NexoraCapabilityDefi
   manage_provider_resources: {
     id: 'manage_provider_resources',
     label: 'manage provider resources',
-    allowedTools: ['digitalocean.status', 'digitalocean.list_apps', 'digitalocean.list_databases', 'digitalocean.plan_app', 'digitalocean.plan_database', 'digitalocean.create_app', 'digitalocean.create_database', 'digitalocean.create_infrastructure', 'digitalocean.update_infrastructure', 'digitalocean.delete_infrastructure', 'drive.create_text_file'],
+    allowedTools: ['digitalocean.status', 'digitalocean.list_apps', 'digitalocean.list_databases', 'digitalocean.plan_app', 'digitalocean.plan_database', 'digitalocean.create_app', 'digitalocean.create_database', 'digitalocean.create_infrastructure', 'digitalocean.update_infrastructure', 'digitalocean.delete_infrastructure'],
     riskLevel: 'purchase_or_commit',
     approvalRequirement: 'explicit_human_approval',
     defaultEnabled: false,
     environmentFlag: 'NEXORA_ENABLE_PROVIDER_RESOURCES',
     requiredReceiptFields: ['capabilityId', 'toolName', 'provider', 'resourceType', 'resourceId', 'approvalNote', 'resultSummary'],
+  },
+  ordinary_provider_workspace: {
+    id: 'ordinary_provider_workspace',
+    label: 'ordinary provider workspace actions',
+    allowedTools: ['drive.create_text_file', 'calendar.create_event', 'gmail.create_draft'],
+    riskLevel: 'write',
+    approvalRequirement: 'none',
+    defaultEnabled: true,
+    environmentFlag: 'NEXORA_ENABLE_ORDINARY_PROVIDER_WORKSPACE',
+    requiredReceiptFields: ['capabilityId', 'toolName', 'provider', 'resourceType', 'resourceId', 'resultSummary'],
   },
   inspect_databanks: {
     id: 'inspect_databanks',

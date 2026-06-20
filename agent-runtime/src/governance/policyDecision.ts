@@ -15,10 +15,7 @@ export interface PolicyDecisionInput {
 }
 
 export type PolicyDecision =
-  | { action: 'execute'; receiptRequired: boolean; reason: string; trustDomain: string; policyClassification: 'ordinary_execution' | 'execute_with_receipt' }
-  | { action: 'ask_before_execution'; boundary: PolicyBoundary; reason: string; trustDomain: string; receiptRequired: true; policyClassification: 'explicit_boundary' }
-  | { action: 'setup_needed'; provider?: string; reason: string; nextSteps: string[]; trustDomain: string; receiptRequired: true; policyClassification: 'setup_needed' }
-  | { action: 'blocked'; reason: string; trustDomain: string; receiptRequired: true; policyClassification: 'policy_block' };
+
 
 const RMT_TERMS = [
   'purchase',
@@ -97,6 +94,7 @@ export function isOrdinaryWorkspacePolicyInput(input: PolicyDecisionInput) {
   const ordinaryRepoScopes = new Set(['repo.write', 'repo.command', 'repo.commit']);
   if (input.approvalScope && ordinaryRepoScopes.has(String(input.approvalScope))) return true;
   if (input.category === 'code' || input.category === 'vscode' || input.category === 'nexora') {
+
     return !isDestructiveIrreversiblePolicyInput(input);
   }
   if (input.category === 'memory') return !isPersonalInformationSensitivePolicyInput(input);

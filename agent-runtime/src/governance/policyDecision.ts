@@ -101,7 +101,7 @@ export function isOrdinaryWorkspacePolicyInput(input: PolicyDecisionInput) {
   }
   if (input.category === 'memory') return !isPersonalInformationSensitivePolicyInput(input);
   if (input.category === 'drive') return String(input.action || '').startsWith('create') && !isPersonalInformationSensitivePolicyInput(input);
-  if (input.category === 'calendar') return !isPersonalInformationSensitivePolicyInput(input) && !haystack(input).includes('attendee');
+
   if (input.category === 'gmail') return /draft|search|read|list|organize/u.test(String(input.action || '')) && !isPersonalInformationSensitivePolicyInput(input);
   if (input.category === 'delegation') return true;
   return input.riskLevel === 'read';

@@ -49,7 +49,7 @@ import { ClientRecordSchema, ProjectRecordSchema } from '../workflows/closing/ty
 import { createWelcomeSequence } from '../workflows/closing/welcomeSequence.js';
 import { scaffoldApp } from '../workflows/nexora/scaffoldApp.js';
 import { createDriveTextFile, searchDriveFiles } from '../providers/google/drive.js';
-import { searchGmailMessages, sendGmailEmail } from '../providers/google/gmail.js';
+import { createGmailDraft, searchGmailMessages, sendGmailEmail } from '../providers/google/gmail.js';
 import { readSheetRange, updateSheetRange } from '../providers/google/sheets.js';
 import type { RuntimeContext } from '../types.js';
 import type { ApprovalScope } from '../tasks/types.js';
@@ -1294,7 +1294,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
   },
   {
     name: 'calendar.create_event',
-    description: 'Create a calendar event through the configured calendar provider adapter.',
+    description: 'Create an internal calendar reminder/event through the configured provider. Events with attendees, private data exposure, or external commitments require explicit approval.',
     inputSchema: objectSchema(
       {
         calendarId: stringSchema('Calendar identifier; defaults to primary when omitted.'),
@@ -1303,6 +1303,8 @@ export const toolRegistry: RegisteredToolDefinition[] = [
         start: stringSchema('ISO-8601 start time.'),
         end: stringSchema('ISO-8601 end time.'),
         attendees: stringArraySchema('Attendee email addresses.'),
+        confirmedByUser: approvalBooleanSchema,
+        approvalNote: approvalNoteSchema,
       },
       ['summary', 'start', 'end'],
     ),
@@ -1313,10 +1315,12 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       start: z.string().min(1),
       end: z.string().min(1),
       attendees: z.array(z.string().email()).default([]),
+      confirmedByUser: z.boolean().default(false),
+      approvalNote: z.string().default(''),
     }),
     scopes: ['https://www.googleapis.com/auth/calendar.events'],
     riskLevel: 'write',
-    humanApprovalRequired: true,
+    humanApprovalRequired: false,
     audit: {
       category: 'calendar',
       action: 'create_event',
@@ -1345,6 +1349,43 @@ export const toolRegistry: RegisteredToolDefinition[] = [
     executor: searchGmailMessages,
   },
   {
+    name: 'gmail.create_draft',
+    description: 'Create a Gmail draft through the configured provider. Draft creation is internal/non-sending by default; private-data exposure boundaries still require explicit approval.',
+    inputSchema: objectSchema(
+      {
+        to: stringArraySchema('Optional draft recipient email addresses.'),
+        cc: stringArraySchema('Optional draft CC recipient email addresses.'),
+        bcc: stringArraySchema('Optional draft BCC recipient email addresses.'),
+        subject: stringSchema('Draft email subject.'),
+        body: stringSchema('Plain-text draft email body.'),
+        confirmedByUser: approvalBooleanSchema,
+        approvalNote: approvalNoteSchema,
+      },
+      ['subject', 'body'],
+    ),
+    parameters: z.object({
+      to: z.array(z.string().email()).default([]),
+      cc: z.array(z.string().email()).default([]),
+      bcc: z.array(z.string().email()).default([]),
+      subject: z.string().min(1),
+      body: z.string().min(1),
+      confirmedByUser: z.boolean().default(false),
+      approvalNote: z.string().default(''),
+    }),
+    scopes: ['https://www.googleapis.com/auth/gmail.compose'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: {
+      category: 'gmail',
+      action: 'create_draft',
+      resourceType: 'gmail_draft',
+      actorField: 'to',
+      sensitiveFields: ['to', 'cc', 'bcc', 'subject', 'body'],
+      logEvents: ['tool.gmail.create_draft.requested', 'tool.gmail.create_draft.completed'],
+    },
+    executor: createGmailDraft,
+  },
+  {
     name: 'gmail.send_email',
     description: 'Send an email from the connected Gmail account.',
     inputSchema: objectSchema(
@@ -1354,6 +1395,8 @@ export const toolRegistry: RegisteredToolDefinition[] = [
         bcc: stringArraySchema('BCC recipient email addresses.'),
         subject: stringSchema('Email subject.'),
         body: stringSchema('Plain-text email body.'),
+        confirmedByUser: approvalBooleanSchema,
+        approvalNote: approvalNoteSchema,
       },
       ['to', 'subject', 'body'],
     ),
@@ -1363,6 +1406,8 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       bcc: z.array(z.string().email()).default([]),
       subject: z.string().min(1),
       body: z.string().min(1),
+      confirmedByUser: z.boolean().default(false),
+      approvalNote: z.string().default(''),
     }),
     scopes: ['https://www.googleapis.com/auth/gmail.send'],
     riskLevel: 'external_send',
@@ -1396,9 +1441,9 @@ export const toolRegistry: RegisteredToolDefinition[] = [
   },
   {
     name: 'drive.create_text_file',
-    description: 'Create a text file in the connected drive provider.',
+    description: 'Create an internal text file in the connected Drive provider. Sharing/exposure or private-data-sensitive content requires explicit approval.',
     inputSchema: objectSchema(
-      { name: stringSchema('File name.'), parentId: stringSchema('Parent folder ID.'), content: stringSchema('Text content to write.'), mimeType: stringSchema('MIME type.') },
+      { name: stringSchema('File name.'), parentId: stringSchema('Parent folder ID.'), content: stringSchema('Text content to write.'), mimeType: stringSchema('MIME type.'), confirmedByUser: approvalBooleanSchema, approvalNote: approvalNoteSchema },
       ['name', 'content'],
     ),
     parameters: z.object({
@@ -1406,10 +1451,12 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       parentId: z.string().default(''),
       content: z.string().min(1),
       mimeType: z.string().default('text/plain'),
+      confirmedByUser: z.boolean().default(false),
+      approvalNote: z.string().default(''),
     }),
     scopes: ['https://www.googleapis.com/auth/drive.file'],
     riskLevel: 'write',
-    humanApprovalRequired: true,
+    humanApprovalRequired: false,
     audit: {
       category: 'drive',
       action: 'create_text_file',
@@ -3604,9 +3651,7 @@ function normalizeToolInput(input: unknown): Record<string, unknown> {
 
 
 function isDirectProviderWrite(definition: RegisteredToolDefinition) {
-  return definition.name === 'calendar.create_event'
-    || definition.name === 'drive.create_text_file'
-    || definition.name === 'gmail.send_email'
+  return definition.name === 'gmail.send_email'
     || definition.name === 'sheets.update_range';
 }
 

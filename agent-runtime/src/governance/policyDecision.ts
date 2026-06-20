@@ -101,11 +101,7 @@ export function isOrdinaryWorkspacePolicyInput(input: PolicyDecisionInput) {
   }
   if (input.category === 'memory') return !isPersonalInformationSensitivePolicyInput(input);
   if (input.category === 'drive') return String(input.action || '').startsWith('create') && !isPersonalInformationSensitivePolicyInput(input);
-  if (input.category === 'calendar') {
-    const attendees = input.input?.attendees;
-    const attendeeCount = Array.isArray(attendees) ? attendees.length : attendees ? 1 : 0;
-    return !isPersonalInformationSensitivePolicyInput(input) && attendeeCount === 0;
-  }
+
   if (input.category === 'gmail') return /draft|search|read|list|organize/u.test(String(input.action || '')) && !isPersonalInformationSensitivePolicyInput(input);
   if (input.category === 'delegation') return true;
   return input.riskLevel === 'read';
@@ -139,46 +135,6 @@ export function decidePolicy(input: PolicyDecisionInput): PolicyDecision {
   return { action: 'ask_before_execution', boundary: 'external_commitment', reason: 'Action is outside the ordinary workspace execution envelope.', trustDomain, receiptRequired: true, policyClassification: 'explicit_boundary' };
 }
 
-
-export function inferPolicyInputForToolName(toolName: string, input: Record<string, unknown> = {}): PolicyDecisionInput {
-  const [category = 'runtime', ...actionParts] = toolName.split('.');
-  const action = actionParts.join('.') || toolName;
-  const lowerTool = toolName.toLowerCase();
-  const lowerAction = action.toLowerCase();
-  const riskLevel = lowerTool === 'gmail.send_email' || lowerAction.includes('send')
-    ? 'external_send'
-    : lowerAction.includes('run_command') || lowerAction.includes('test') || lowerAction.includes('execute_code')
-      ? 'code_execution'
-      : lowerTool.includes('digitalocean.create') || lowerTool.includes('purchase')
-        ? 'purchase_or_commit'
-        : lowerAction.startsWith('list') || lowerAction.startsWith('search') || lowerAction.startsWith('read') || lowerAction.includes('status')
-          ? 'read'
-          : 'write';
-  const approvalScope = category === 'code'
-    ? lowerAction.includes('delete')
-      ? 'repo.delete'
-      : riskLevel === 'code_execution'
-        ? 'repo.command'
-        : lowerAction.includes('commit')
-          ? 'repo.commit'
-          : 'repo.write'
-    : riskLevel === 'external_send'
-      ? 'external.send'
-      : lowerAction.includes('migrate')
-        ? 'database.migrate'
-        : lowerAction.includes('delete')
-          ? 'provider.delete'
-          : lowerAction.includes('create')
-            ? 'provider.create'
-            : lowerAction.includes('update')
-              ? 'provider.update'
-              : undefined;
-  return { toolName, category, action, riskLevel, approvalScope, input };
-}
-
-export function decidePolicyForToolName(toolName: string, input: Record<string, unknown> = {}) {
-  return decidePolicy(inferPolicyInputForToolName(toolName, input));
-}
 
 export function decideToolPolicy(definition: Pick<RegisteredToolDefinition, 'name' | 'riskLevel' | 'audit' | 'requiredApprovalScope'>, input: Record<string, unknown> = {}, approvalScope?: ApprovalScope | string) {
   return decidePolicy({

@@ -105,7 +105,7 @@ import { activeAutonomyLevel, autonomyLevelAllows, normalizeExecutionMode, proac
 import { createObservationRecommendation } from '../governance/recommendations.js';
 import { decideToolPolicy } from '../governance/policyDecision.js';
 import { recordTrustEventFromPolicyDecision } from '../governance/trustService.js';
-import { getRelationshipContext } from '../relationship/relationshipService.js';
+
 
 export type ToolCategory =
   | 'calendar'
@@ -3698,10 +3698,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   const sanitizedInput = sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []);
   const approvedExecutionId = typeof context.approvedExecutionId === 'string' ? context.approvedExecutionId : undefined;
   const approvalScope = requiredApprovalScope(definition);
-  const policyDecision = decideToolPolicy(definition, { ...parsedInput, relationshipContext: context.relationshipContext }, approvalScope);
-  const approvalRequired = (executionMode === 'observation' || context.autonomyProfile === 'proactive_observation')
-    ? !proactiveObservationAllows(definition, autonomyLevel, parsedInput)
-    : requiresApprovalForExecutionMode(context.executionMode, context.autonomyProfile, definition, { ...parsedInput, relationshipContext: context.relationshipContext }, approvalScope);
+
   const approved = !approvalRequired || sdkApproved || Boolean(parsedInput.confirmedByUser === true && approvedExecutionId);
   const executionRecord = createExecutionRecord({
     kind: 'tool_call',
@@ -3712,10 +3709,7 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
     riskLevel: definition.riskLevel,
     approvalStatus: approvalRequired ? (approved ? 'approved' : 'pending') : 'not_required',
     approvalScope,
-    trustDomain: policyDecision.trustDomain,
-    policyAction: policyDecision.action,
-    policyClassification: policyDecision.policyClassification,
-    policyBoundary: policyDecision.action === 'ask_before_execution' ? policyDecision.boundary : undefined,
+
     linkedIds: {
       sessionId: context.sessionId,
       voiceSessionId: context.voiceSessionId,

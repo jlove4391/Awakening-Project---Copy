@@ -147,6 +147,9 @@ tasksRouter.post('/', async (req, res, next) => {
       executionOrigin,
       parentTaskId,
       rootTaskId,
+      assignedAgent,
+      memoryContext,
+      outputContract,
     } = req.body || {};
     const taskObjective = String(objective || title || '').trim();
     if (!taskObjective) {
@@ -167,6 +170,9 @@ tasksRouter.post('/', async (req, res, next) => {
       executionOrigin: executionOrigin === 'autonomous' || executionOrigin === 'delegated' || executionOrigin === 'reactive' ? executionOrigin : undefined,
       parentTaskId: typeof parentTaskId === 'string' && parentTaskId.trim() ? parentTaskId.trim() : undefined,
       rootTaskId: typeof rootTaskId === 'string' && rootTaskId.trim() ? rootTaskId.trim() : undefined,
+      assignedAgent: ['nexora', 'kaz', 'caz', 'jynx', 'kalyra'].includes(String(assignedAgent)) ? assignedAgent : undefined,
+      memoryContext: Array.isArray(memoryContext) ? memoryContext : undefined,
+      outputContract: outputContract && typeof outputContract === 'object' && !Array.isArray(outputContract) ? outputContract : undefined,
     });
 
     res.status(201).json(taskResponse(task));

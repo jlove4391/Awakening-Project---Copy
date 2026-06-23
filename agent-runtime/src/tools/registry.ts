@@ -3287,16 +3287,19 @@ export const toolRegistry: RegisteredToolDefinition[] = [
   },
   {
     name: 'delegation.create_task',
-    description: 'Create a durable delegated task from Elora to Nexora with objective, constraints, tool needs, approvals, events, and audit trail.',
+    description: 'Create a durable bounded specialist call from Elora to Nexora, Kaz/Caz, Jynx, or Kalyra with objective, constraints, tool needs, approvals, events, Alpha receipt, and audit trail. Elora synthesizes the final user-facing response.',
     inputSchema: objectSchema(
       {
-        objective: stringSchema('Specific outcome Nexora should accomplish.'),
+        objective: stringSchema('Specific outcome the bounded specialist should accomplish for Elora synthesis.'),
         constraints: stringArraySchema('Rules, limits, or context Nexora must follow.'),
-        requiredTools: stringArraySchema('Tool names or capabilities Nexora is expected to need.'),
+        requiredTools: stringArraySchema('Tool names or capabilities the bounded specialist is expected to need.'),
         approvalRequirements: stringArraySchema('Human approvals required before the task can be dispatched.'),
         initialLog: stringSchema('Optional initial task log entry.'),
         executionPlan: { type: 'array', description: 'Optional ordered execution-plan steps with targetTool, arguments, per-step timeoutMs, and per-step approval state.', items: { type: 'object', additionalProperties: true } },
         timeoutMs: numberSchema('Optional task timeout in milliseconds.', { minimum: 1000, maximum: 600000 }),
+        assignedAgent: stringSchema('Bounded specialist to call: nexora, kaz/caz, jynx, or kalyra. Defaults to Nexora unless requiredTools imply another specialist.'),
+        memoryContext: { type: 'array', description: 'Relevant memory/context references included in the specialist call contract.', items: { type: 'object', additionalProperties: true } },
+        outputContract: { type: 'object', description: 'Optional output contract override; Elora remains the only user-facing synthesizer.', additionalProperties: true },
       },
       ['objective'],
     ),
@@ -3307,6 +3310,12 @@ export const toolRegistry: RegisteredToolDefinition[] = [
       approvalRequirements: z.array(z.string()).default([]),
       initialLog: z.string().default(''),
       timeoutMs: z.number().int().min(1000).max(600000).optional(),
+      assignedAgent: z.enum(['nexora', 'kaz', 'caz', 'jynx', 'kalyra']).optional(),
+      memoryContext: z.array(z.unknown()).default([]),
+      outputContract: z.object({
+        deliverable: z.string().optional(),
+        expected_format: z.enum(['summary', 'structured_result', 'plan', 'receipt']).optional(),
+      }).optional(),
       executionPlan: z.array(z.object({
         id: z.string().optional(),
         order: z.number().optional(),
@@ -3332,7 +3341,7 @@ export const toolRegistry: RegisteredToolDefinition[] = [
   },
   {
     name: 'delegation.list_tasks',
-    description: 'List durable Elora-to-Nexora delegated task statuses for the current session.',
+    description: 'List durable Elora specialist-call/delegated task statuses for the current session.',
     inputSchema: objectSchema({ includeAllSessions: { type: 'boolean', description: 'When true, include tasks from every session.' } }),
     parameters: z.object({ includeAllSessions: z.boolean().default(false) }),
     scopes: ['runtime.delegation.read'],

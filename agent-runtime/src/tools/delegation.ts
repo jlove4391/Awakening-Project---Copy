@@ -23,6 +23,9 @@ export async function createDelegationTask(
     executionPlan?: any[];
     timeoutMs?: number;
     authorizationSource?: 'user_requested' | 'user_delegated' | 'autonomous';
+    assignedAgent?: 'nexora' | 'kaz' | 'caz' | 'jynx' | 'kalyra';
+    memoryContext?: unknown[];
+    outputContract?: { deliverable?: string; expected_format?: 'summary' | 'structured_result' | 'plan' | 'receipt' };
   },
   context: RuntimeContext,
 ) {
@@ -36,8 +39,11 @@ export async function createDelegationTask(
     executionPlan: input.executionPlan,
     timeoutMs: input.timeoutMs,
     authorizationSource: input.authorizationSource || 'user_delegated',
+    assignedAgent: input.assignedAgent,
+    memoryContext: input.memoryContext,
+    outputContract: input.outputContract,
   });
-  if (task.status === 'queued') durableTaskQueue.enqueue(task);
+  if (task.status === 'queued' && task.assignedAgent === 'nexora') durableTaskQueue.enqueue(task);
   return task;
 }
 

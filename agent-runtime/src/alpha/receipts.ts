@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { runtimeConfig } from '../config.js';
 
 export type AlphaReceiptCompleteness = 'complete' | 'incomplete';
 
@@ -75,4 +78,14 @@ export function validateAlphaReceipt(receipt: Partial<AlphaReceiptPayload> | und
     return false;
   });
   return { status: missingFields.length ? 'incomplete' : 'complete', missingFields };
+}
+
+
+const alphaAuditDir = path.join(runtimeConfig.dataDir, 'alpha');
+const alphaAuditPath = path.join(alphaAuditDir, 'receipts.jsonl');
+
+export async function appendAlphaReceipt(receipt: AlphaReceiptPayload) {
+  await fs.mkdir(alphaAuditDir, { recursive: true });
+  await fs.appendFile(alphaAuditPath, `${JSON.stringify(receipt)}\n`);
+  return { path: alphaAuditPath, receipt_id: receipt.receipt_id };
 }

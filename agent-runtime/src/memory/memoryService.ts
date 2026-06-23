@@ -1,17 +1,18 @@
 import { jsonMemoryAdapter } from './adapters/jsonMemoryAdapter.js';
 import { PostgresMemoryAdapterStub } from './adapters/postgresMemoryAdapter.stub.js';
 import type { MemoryRepository } from './memoryRepository.js';
-import type {
-  CreateMemoryInput,
-  MemoryCategory,
-  MemoryDecisionInput,
-  MemoryRecord,
-  MemorySearchFilter,
-  ProjectTimeline,
-  ReceiptMemoryInput,
-  SessionContext,
-  UpdateMemoryPatch,
-  WorkOrderMemoryInput,
+import {
+  AlphaMemoryStatus,
+  type CreateMemoryInput,
+  type MemoryCategory,
+  type MemoryDecisionInput,
+  type MemoryRecord,
+  type MemorySearchFilter,
+  type ProjectTimeline,
+  type ReceiptMemoryInput,
+  type SessionContext,
+  type UpdateMemoryPatch,
+  type WorkOrderMemoryInput,
 } from './memoryTypes.js';
 import { normalizeMemoryScope, type MemoryListFilter, type StoredMemory } from './store.js';
 
@@ -85,12 +86,17 @@ function toMemoryRecord(memory: StoredMemory): MemoryRecord {
 }
 
 function scoreMemory(memory: MemoryRecord, queryTerms: string[]) {
-  if (!queryTerms.length) return { score: 1 + memory.importance, matchedTerms: [] };
+  const statusBoost =
+    memory.status === AlphaMemoryStatus.Canonical ? 0.35 :
+    memory.status === AlphaMemoryStatus.Active ? 0.25 :
+    memory.status === AlphaMemoryStatus.Candidate ? -0.1 :
+    0;
+  if (!queryTerms.length) return { score: 1 + memory.importance + statusBoost + memory.retrievalPriority * 0.2, matchedTerms: [] };
   const haystack = `${memory.title || ''} ${memory.text} ${memory.summary || ''} ${memory.scope} ${memory.category} ${(memory.tags || []).join(' ')}`.toLowerCase();
   const matchedTerms = queryTerms.filter((term) => haystack.includes(term));
   const recencyBoost = Math.max(0, 1 - (Date.now() - Date.parse(memory.updatedAt || memory.createdAt)) / (1000 * 60 * 60 * 24 * 30)) * 0.25;
   return {
-    score: matchedTerms.length / queryTerms.length + memory.importance * 0.35 + recencyBoost,
+    score: matchedTerms.length / queryTerms.length + memory.importance * 0.35 + recencyBoost + statusBoost + memory.retrievalPriority * 0.2,
     matchedTerms,
   };
 }
@@ -145,6 +151,77 @@ export class MemoryService {
       createdAt: input.createdAt,
     });
     return toMemoryRecord(memory);
+  }
+
+  createMemoryCandidate(input: CreateMemoryInput): Promise<MemoryRecord> {
+    return this.createMemory({
+      ...input,
+      status: input.status ?? AlphaMemoryStatus.Candidate,
+      reviewNeeded: input.reviewNeeded ?? true,
+      metadata: {
+        ...(input.metadata || {}),
+        lifecycleStatus: input.status ?? AlphaMemoryStatus.Candidate,
+      },
+    });
+  }
+
+  promoteMemory(id: string, patch: UpdateMemoryPatch = {}): Promise<MemoryRecord | undefined> {
+    return this.updateMemory(id, {
+      ...patch,
+      status: patch.status ?? AlphaMemoryStatus.Canonical,
+      reviewNeeded: patch.reviewNeeded ?? false,
+      metadata: {
+        ...(patch.metadata || {}),
+        lifecycleStatus: patch.status ?? AlphaMemoryStatus.Canonical,
+        promotedAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  rejectMemory(id: string, patch: UpdateMemoryPatch = {}): Promise<MemoryRecord | undefined> {
+    return this.updateMemory(id, {
+      ...patch,
+      status: patch.status ?? AlphaMemoryStatus.Rejected,
+      reviewNeeded: patch.reviewNeeded ?? false,
+      retrievalPriority: patch.retrievalPriority ?? 0,
+      metadata: {
+        ...(patch.metadata || {}),
+        lifecycleStatus: patch.status ?? AlphaMemoryStatus.Rejected,
+        rejectedAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  deprecateMemory(id: string, patch: UpdateMemoryPatch = {}): Promise<MemoryRecord | undefined> {
+    return this.updateMemory(id, {
+      ...patch,
+      status: patch.status ?? AlphaMemoryStatus.Deprecated,
+      reviewNeeded: patch.reviewNeeded ?? false,
+      retrievalPriority: patch.retrievalPriority ?? 0.1,
+      metadata: {
+        ...(patch.metadata || {}),
+        lifecycleStatus: patch.status ?? AlphaMemoryStatus.Deprecated,
+        deprecatedAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  async markMemoryContradiction(id: string, contradicts: string | string[], patch: UpdateMemoryPatch = {}): Promise<MemoryRecord | undefined> {
+    const existing = await this.getMemoryById(id);
+    if (!existing) return undefined;
+    const contradictionIds = Array.isArray(contradicts) ? contradicts : [contradicts];
+    const mergedContradictions = [...new Set([...(existing.contradicts || []), ...contradictionIds.map(String).filter(Boolean)])];
+    return this.updateMemory(id, {
+      ...patch,
+      status: patch.status ?? AlphaMemoryStatus.Disputed,
+      reviewNeeded: patch.reviewNeeded ?? true,
+      contradicts: patch.contradicts ?? mergedContradictions,
+      metadata: {
+        ...(patch.metadata || {}),
+        lifecycleStatus: patch.status ?? AlphaMemoryStatus.Disputed,
+        contradictedAt: new Date().toISOString(),
+      },
+    });
   }
 
   async updateMemory(id: string, patch: UpdateMemoryPatch): Promise<MemoryRecord | undefined> {

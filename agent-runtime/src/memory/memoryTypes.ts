@@ -37,7 +37,11 @@ export enum AlphaMemoryConfidence {
 }
 
 export enum AlphaMemoryStatus {
+  Candidate = 'candidate',
   Active = 'active',
+  Canonical = 'canonical',
+  Deprecated = 'deprecated',
+  Rejected = 'rejected',
   Archived = 'archived',
   Superseded = 'superseded',
   Disputed = 'disputed',

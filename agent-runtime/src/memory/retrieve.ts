@@ -1,7 +1,7 @@
 import { memoryService } from './memoryService.js';
 import { normalizeMemoryScope, type StoredMemory } from './store.js';
 import type { MemoryReference, MemoryScope } from '../types.js';
-import type { AlphaMemoryConfidence, AlphaMemoryStatus, AlphaMemoryType, MemoryCategory } from './memoryTypes.js';
+import { AlphaMemoryStatus, type AlphaMemoryConfidence, type AlphaMemoryType, type MemoryCategory } from './memoryTypes.js';
 
 export interface RetrieveMemoryInput {
   sessionId?: string;
@@ -30,8 +30,12 @@ export interface RetrievedMemory extends StoredMemory {
 }
 
 export async function retrieveMemories(input: RetrieveMemoryInput): Promise<RetrievedMemory[]> {
+  const statuses = input.statuses?.length
+    ? input.statuses
+    : Object.values(AlphaMemoryStatus).filter((status) => status !== AlphaMemoryStatus.Deprecated && status !== AlphaMemoryStatus.Rejected);
   return memoryService.searchMemories({
     ...input,
+    statuses,
     scopes: input.scopes?.map((scope) => normalizeMemoryScope(scope)),
   }) as Promise<RetrievedMemory[]>;
 }

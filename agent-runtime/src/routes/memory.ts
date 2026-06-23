@@ -86,6 +86,56 @@ memoryRouter.post('/', async (req, res, next) => {
   }
 });
 
+memoryRouter.post('/candidates', async (req, res, next) => {
+  try {
+    const {
+      sessionId = 'default',
+      text,
+      scope = 'conversation_summary',
+      tags = [],
+      importance,
+      metadata,
+      source = 'api',
+      actor,
+      alphaType,
+      confidence,
+      reviewNeeded,
+      contradicts,
+      retrievalPriority,
+      category,
+      type,
+      title,
+      summary,
+    } = req.body || {};
+    if (!text?.trim()) {
+      res.status(400).json({ error: 'text is required' });
+      return;
+    }
+    const memory = await memoryService.createMemoryCandidate({
+      sessionId: String(sessionId),
+      text: String(text),
+      scope,
+      tags: stringList(tags),
+      importance,
+      metadata,
+      source,
+      actor,
+      alphaType,
+      confidence,
+      reviewNeeded,
+      contradicts: stringList(contradicts),
+      retrievalPriority,
+      category,
+      type,
+      title,
+      summary,
+    });
+    res.status(201).json({ memory });
+  } catch (error) {
+    next(error);
+  }
+});
+
 memoryRouter.post('/retrieve', async (req, res, next) => {
   try {
     const {
@@ -118,6 +168,64 @@ memoryRouter.post('/retrieve', async (req, res, next) => {
         minRetrievalPriority,
       }),
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+memoryRouter.post('/:memoryId/promote', async (req, res, next) => {
+  try {
+    const memory = await memoryService.promoteMemory(req.params.memoryId, req.body || {});
+    if (!memory) {
+      res.status(404).json({ error: 'memory not found' });
+      return;
+    }
+    res.json({ memory });
+  } catch (error) {
+    next(error);
+  }
+});
+
+memoryRouter.post('/:memoryId/reject', async (req, res, next) => {
+  try {
+    const memory = await memoryService.rejectMemory(req.params.memoryId, req.body || {});
+    if (!memory) {
+      res.status(404).json({ error: 'memory not found' });
+      return;
+    }
+    res.json({ memory });
+  } catch (error) {
+    next(error);
+  }
+});
+
+memoryRouter.post('/:memoryId/deprecate', async (req, res, next) => {
+  try {
+    const memory = await memoryService.deprecateMemory(req.params.memoryId, req.body || {});
+    if (!memory) {
+      res.status(404).json({ error: 'memory not found' });
+      return;
+    }
+    res.json({ memory });
+  } catch (error) {
+    next(error);
+  }
+});
+
+memoryRouter.post('/:memoryId/contradictions', async (req, res, next) => {
+  try {
+    const { contradicts, memoryIds, memoryId, ...patch } = req.body || {};
+    const contradictionIds = stringList(contradicts).length ? stringList(contradicts) : stringList(memoryIds).length ? stringList(memoryIds) : stringList(memoryId);
+    if (!contradictionIds.length) {
+      res.status(400).json({ error: 'contradicts, memoryIds, or memoryId is required' });
+      return;
+    }
+    const memory = await memoryService.markMemoryContradiction(req.params.memoryId, contradictionIds, patch);
+    if (!memory) {
+      res.status(404).json({ error: 'memory not found' });
+      return;
+    }
+    res.json({ memory });
   } catch (error) {
     next(error);
   }

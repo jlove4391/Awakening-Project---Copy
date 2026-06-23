@@ -132,7 +132,13 @@ function normalizeAlphaStatus(value: unknown): AlphaMemoryStatus {
 
 function defaultRetrievalPriority(status: AlphaMemoryStatus, confidence: AlphaMemoryConfidence) {
   const confidenceScore = confidence === AlphaMemoryConfidence.High ? 0.9 : confidence === AlphaMemoryConfidence.Low ? 0.35 : 0.65;
-  const statusMultiplier = status === AlphaMemoryStatus.Active ? 1 : status === AlphaMemoryStatus.Disputed ? 0.45 : status === AlphaMemoryStatus.Superseded ? 0.2 : 0.1;
+  const statusMultiplier =
+    status === AlphaMemoryStatus.Canonical ? 1 :
+    status === AlphaMemoryStatus.Active ? 0.9 :
+    status === AlphaMemoryStatus.Candidate ? 0.55 :
+    status === AlphaMemoryStatus.Disputed ? 0.45 :
+    status === AlphaMemoryStatus.Superseded ? 0.2 :
+    0.1;
   return Math.max(0, Math.min(1, Number((confidenceScore * statusMultiplier).toFixed(2))));
 }
 

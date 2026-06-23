@@ -106,6 +106,7 @@ import { createObservationRecommendation } from '../governance/recommendations.j
 import { decideToolPolicy, policyRequiresApproval } from '../governance/policyDecision.js';
 import { getTrustScore, recordTrustEventFromPolicyDecision } from '../governance/trustService.js';
 import { getRelationshipContext } from '../relationship/relationshipService.js';
+import { alphaCreateArtifact, alphaEditArtifact } from '../alpha/artifacts.js';
 
 
 export type ToolCategory =
@@ -133,7 +134,8 @@ export type ToolCategory =
   | 'code'
   | 'vscode'
   | 'web'
-  | 'observation';
+  | 'observation'
+  | 'alpha';
 
 export type ToolRiskLevel = 'read' | 'write' | 'external_send' | 'purchase_or_commit' | 'code_execution';
 
@@ -1037,6 +1039,29 @@ function createClientProject(input: Record<string, unknown>) {
 }
 
 export const toolRegistry: RegisteredToolDefinition[] = [
+
+  {
+    name: 'alpha.create_artifact',
+    description: 'Create an internal Alpha artifact under the configured Alpha artifact root. Rejects absolute paths and parent traversal; records metadata and a reversible Alpha receipt. Classified as act/report, not approval-gated.',
+    inputSchema: objectSchema({ projectId: stringSchema('Project ID for the artifact.'), title: stringSchema('Human title.'), type: stringSchema('Artifact type.'), path: relativePathSchema, content: stringSchema('UTF-8 artifact content.'), createdBy: stringSchema('Actor creating the artifact.'), sourceRequest: stringSchema('Source request that caused this artifact.'), receiptId: stringSchema('Optional receipt ID to reuse.') }, ['projectId', 'title', 'type', 'path', 'content', 'sourceRequest']),
+    parameters: z.object({ projectId: z.string().min(1), title: z.string().min(1), type: z.string().min(1), path: z.string().min(1), content: z.string(), createdBy: z.string().default('alpha'), sourceRequest: z.string().min(1), receiptId: z.string().default('') }),
+    scopes: ['runtime.alpha.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: { category: 'alpha', action: 'create_artifact', resourceType: 'alpha_artifact', resourceIdField: 'path', sensitiveFields: ['path', 'content', 'sourceRequest'], logEvents: ['tool.alpha.create_artifact.requested', 'tool.alpha.create_artifact.completed'] },
+    executor: alphaCreateArtifact,
+  },
+  {
+    name: 'alpha.edit_artifact',
+    description: 'Edit an internal Alpha artifact under the configured Alpha artifact root. Rejects absolute paths and parent traversal; records before/after metadata and rollback instructions for a reversible Alpha receipt. Classified as act/report, not approval-gated.',
+    inputSchema: objectSchema({ projectId: stringSchema('Project ID for the artifact.'), title: stringSchema('Human title.'), type: stringSchema('Artifact type.'), path: relativePathSchema, content: stringSchema('Replacement UTF-8 artifact content.'), expectedSha256: stringSchema('Optional sha256 of existing content.'), createdBy: stringSchema('Actor editing the artifact.'), sourceRequest: stringSchema('Source request that caused this edit.'), receiptId: stringSchema('Optional receipt ID to reuse.') }, ['projectId', 'title', 'type', 'path', 'content', 'sourceRequest']),
+    parameters: z.object({ projectId: z.string().min(1), title: z.string().min(1), type: z.string().min(1), path: z.string().min(1), content: z.string(), expectedSha256: z.string().default(''), createdBy: z.string().default('alpha'), sourceRequest: z.string().min(1), receiptId: z.string().default('') }),
+    scopes: ['runtime.alpha.write'],
+    riskLevel: 'write',
+    humanApprovalRequired: false,
+    audit: { category: 'alpha', action: 'edit_artifact', resourceType: 'alpha_artifact', resourceIdField: 'path', sensitiveFields: ['path', 'content', 'sourceRequest'], logEvents: ['tool.alpha.edit_artifact.requested', 'tool.alpha.edit_artifact.completed'] },
+    executor: alphaEditArtifact,
+  },
   {
     name: 'web.fetch_url',
     description: 'Fetch a single HTTP(S) URL as a general CORE web tool. Enforces configured byte and timeout limits, follows redirects, and returns text plus receipt-friendly metadata.',
@@ -3582,7 +3607,7 @@ function requiredApprovalScope(definition: RegisteredToolDefinition): ApprovalSc
   if (definition.requiredApprovalScope) return definition.requiredApprovalScope;
   if (definition.name === 'code.commit') return 'repo.commit';
   if (definition.riskLevel === 'code_execution') return 'repo.command';
-  if (definition.audit.category === 'code' || definition.audit.category === 'nexora') {
+  if (definition.audit.category === 'code' || definition.audit.category === 'nexora' || definition.audit.category === 'alpha') {
     return definition.audit.action.includes('delete') ? 'repo.delete' : 'repo.write';
   }
   if (definition.riskLevel === 'external_send') return 'external.send';
@@ -3890,7 +3915,7 @@ export function runtimeToolsForRiskLevels(riskLevels: ToolRiskLevel[]) {
   return toolRegistry.filter((definition) => desired.has(definition.riskLevel)).map(toRuntimeTool);
 }
 
-export const sharedRuntimeToolCategories: ToolCategory[] = ['web', 'calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'outreach', 'objection', 'intake', 'qualification', 'proposal', 'voice', 'memory', 'delegation'];
+export const sharedRuntimeToolCategories: ToolCategory[] = ['alpha', 'web', 'calendar', 'gmail', 'drive', 'sheets', 'crm', 'clay', 'leadgen', 'outreach', 'objection', 'intake', 'qualification', 'proposal', 'voice', 'memory', 'delegation'];
 export const nexoraRuntimeToolCategories: ToolCategory[] = [...sharedRuntimeToolCategories, 'nexora', 'code', 'vscode'];
 
 export const runtimeTools = runtimeToolsForCategories(sharedRuntimeToolCategories);

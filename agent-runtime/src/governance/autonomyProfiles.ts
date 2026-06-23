@@ -49,8 +49,10 @@ export function autonomyLevelAllows(
 ) {
   const mode = normalizeExecutionMode(executionMode, level === 0 ? 'reactive' : 'observation');
   const policyDecision = decideToolPolicy(definition, input);
-
-  return false;
+  if (policyRequiresApproval(policyDecision)) return false;
+  if (mode === 'reactive' || mode === 'delegated') return true;
+  if (mode === 'observation') return definition.riskLevel === 'read' || policyDecision.decision === 'report';
+  return level >= 3;
 }
 
 export function proactiveObservationAllows(definition: RegisteredToolDefinition, level: AutonomyLevel = runtimeConfig.autonomy.level, input: Record<string, unknown> = {}) {

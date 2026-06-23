@@ -104,6 +104,7 @@ export function trustDomainForPolicyInput(input: PolicyDecisionInput) {
   if (input.category === 'gmail' || input.approvalScope === 'external.send') return 'gmail';
   if (input.category === 'memory') return 'memory';
   if (input.category === 'delegation') return 'work_orders';
+  if (input.category === 'alpha') return 'alpha_artifacts';
   if (input.category === 'databank') return 'databanks';
   if (input.category === 'digitalocean') return 'infrastructure';
   return input.category || 'runtime';
@@ -129,7 +130,7 @@ export function isDestructiveIrreversiblePolicyInput(input: PolicyDecisionInput)
 export function isOrdinaryWorkspacePolicyInput(input: PolicyDecisionInput) {
   const ordinaryRepoScopes = new Set(['repo.write', 'repo.command', 'repo.commit']);
   if (input.approvalScope && ordinaryRepoScopes.has(String(input.approvalScope))) return true;
-  if (input.category === 'code' || input.category === 'vscode' || input.category === 'nexora') return !isDestructiveIrreversiblePolicyInput(input);
+  if (input.category === 'code' || input.category === 'vscode' || input.category === 'nexora' || input.category === 'alpha') return !isDestructiveIrreversiblePolicyInput(input);
   if (input.category === 'memory') return !isPersonalInformationSensitivePolicyInput(input);
   if (input.category === 'drive') return String(input.action || '').startsWith('create') && !isPersonalInformationSensitivePolicyInput(input);
   if (input.category === 'gmail') return /draft|search|read|list|organize/u.test(String(input.action || '')) && !isPersonalInformationSensitivePolicyInput(input);

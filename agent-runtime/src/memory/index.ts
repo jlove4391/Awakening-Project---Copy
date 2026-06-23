@@ -127,6 +127,7 @@ export { listMemories, retrieveMemories, type RetrieveMemoryInput, type Retrieve
 export { deleteMemory, remember, writeMemory, type RememberOptions } from './write.js';
 export { replaceConversationSummary, summarizeMemories, writeConversationSummary, type SummarizeMemoryInput } from './summarize.js';
 export { memoryService, MemoryService } from './memoryService.js';
+export { AlphaMemoryConfidence, AlphaMemoryStatus, AlphaMemoryType } from './memoryTypes.js';
 export type {
   CreateMemoryInput,
   MemoryActorIdentity,

@@ -1,7 +1,7 @@
 import { memoryService } from './memoryService.js';
 import { normalizeMemoryScope, type StoredMemory } from './store.js';
 import type { MemoryReference, MemoryScope } from '../types.js';
-import type { MemoryCategory } from './memoryTypes.js';
+import type { AlphaMemoryConfidence, AlphaMemoryStatus, AlphaMemoryType, MemoryCategory } from './memoryTypes.js';
 
 export interface RetrieveMemoryInput {
   sessionId?: string;
@@ -16,6 +16,12 @@ export interface RetrieveMemoryInput {
   personaId?: string;
   categories?: MemoryCategory[];
   types?: MemoryCategory[];
+  alphaTypes?: AlphaMemoryType[];
+  confidence?: AlphaMemoryConfidence | AlphaMemoryConfidence[];
+  statuses?: AlphaMemoryStatus[];
+  reviewNeeded?: boolean;
+  contradicts?: string[];
+  minRetrievalPriority?: number;
 }
 
 export interface RetrievedMemory extends StoredMemory {

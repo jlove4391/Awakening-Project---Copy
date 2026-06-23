@@ -16,6 +16,34 @@ export type MemoryCategory =
 export type MemoryActorType = 'user' | 'persona' | 'system' | 'agent' | 'api' | 'voice' | 'migration';
 export type MemorySource = 'agent' | 'user' | 'system' | 'api' | 'voice' | 'migration';
 
+export enum AlphaMemoryType {
+  Fact = 'fact',
+  Preference = 'preference',
+  Decision = 'decision',
+  Event = 'event',
+  ProjectNote = 'project_note',
+  WorkOrder = 'work_order',
+  Approval = 'approval',
+  Receipt = 'receipt',
+  Relationship = 'relationship',
+  PersonaLesson = 'persona_lesson',
+  ConversationSummary = 'conversation_summary',
+}
+
+export enum AlphaMemoryConfidence {
+  Low = 'low',
+  Medium = 'medium',
+  High = 'high',
+}
+
+export enum AlphaMemoryStatus {
+  Active = 'active',
+  Archived = 'archived',
+  Superseded = 'superseded',
+  Disputed = 'disputed',
+}
+
+
 export interface MemoryActorIdentity {
   actorId?: string;
   actorType?: MemoryActorType;
@@ -39,6 +67,12 @@ export interface MemoryRecord extends MemoryReference {
   organizationId?: string;
   projectId?: string;
   personaId?: string;
+  alphaType?: AlphaMemoryType;
+  confidence: AlphaMemoryConfidence;
+  status: AlphaMemoryStatus;
+  reviewNeeded: boolean;
+  contradicts: string[];
+  retrievalPriority: number;
   category: MemoryCategory;
   title?: string;
   text: string;
@@ -59,6 +93,12 @@ export interface CreateMemoryInput {
   organizationId?: string;
   projectId?: string;
   personaId?: string;
+  alphaType?: AlphaMemoryType;
+  confidence?: AlphaMemoryConfidence;
+  status?: AlphaMemoryStatus;
+  reviewNeeded?: boolean;
+  contradicts?: string[];
+  retrievalPriority?: number;
   category?: MemoryCategory;
   type?: MemoryCategory;
   title?: string;
@@ -78,6 +118,12 @@ export interface UpdateMemoryPatch {
   organizationId?: string;
   projectId?: string;
   personaId?: string;
+  alphaType?: AlphaMemoryType;
+  confidence?: AlphaMemoryConfidence;
+  status?: AlphaMemoryStatus;
+  reviewNeeded?: boolean;
+  contradicts?: string[];
+  retrievalPriority?: number;
   category?: MemoryCategory;
   type?: MemoryCategory;
   title?: string;
@@ -97,6 +143,12 @@ export interface MemorySearchFilter {
   organizationId?: string;
   projectId?: string;
   personaId?: string;
+  alphaTypes?: AlphaMemoryType[];
+  confidence?: AlphaMemoryConfidence | AlphaMemoryConfidence[];
+  statuses?: AlphaMemoryStatus[];
+  reviewNeeded?: boolean;
+  contradicts?: string[];
+  minRetrievalPriority?: number;
   categories?: MemoryCategory[];
   types?: MemoryCategory[];
   scopes?: Array<MemoryScope | string>;
@@ -111,13 +163,13 @@ export interface MemoryDecisionInput extends Omit<CreateMemoryInput, 'category' 
   rationale?: string;
 }
 
-export interface WorkOrderMemoryInput extends Omit<CreateMemoryInput, 'category' | 'text'> {
+export interface WorkOrderMemoryInput extends Omit<CreateMemoryInput, 'category' | 'text' | 'status'> {
   workOrderId?: string;
   objective: string;
   status?: string;
 }
 
-export interface ReceiptMemoryInput extends Omit<CreateMemoryInput, 'category' | 'text'> {
+export interface ReceiptMemoryInput extends Omit<CreateMemoryInput, 'category' | 'text' | 'status'> {
   receiptId?: string;
   action: string;
   status?: string;

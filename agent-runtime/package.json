@@ -16,6 +16,7 @@
     "smoke:specialists": "tsx scripts/smoke-specialist-routing.ts",
     "smoke:intake-routing": "tsx scripts/smoke-intake-routing.ts",
     "smoke:phase1-stabilization": "tsx scripts/smoke-phase1-stabilization.ts",
+    "smoke:core-alpha-realifai": "tsx scripts/smoke-core-alpha-realifai.ts",
     "smoke:specialist-routing": "tsx scripts/smoke-specialist-routing.ts",
     "smoke:lead-import": "tsx scripts/smoke-lead-import.ts",
     "smoke:qualification": "tsx scripts/smoke-qualification.ts",

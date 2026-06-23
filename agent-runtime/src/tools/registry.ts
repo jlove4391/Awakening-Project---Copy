@@ -199,6 +199,11 @@ const stringArraySchema = (description: string) => ({
   description,
   items: { type: 'string' },
 });
+const unknownArraySchema = (description: string) => ({
+  type: 'array',
+  description,
+  items: {},
+});
 const approvalBooleanSchema = {
   type: 'boolean',
   description: 'Must be true only after explicit user approval for this write/send action.',
@@ -1043,8 +1048,8 @@ export const toolRegistry: RegisteredToolDefinition[] = [
   {
     name: 'alpha.create_artifact',
     description: 'Create an internal Alpha artifact under the configured Alpha artifact root. Rejects absolute paths and parent traversal; records metadata and a reversible Alpha receipt. Classified as act/report, not approval-gated.',
-    inputSchema: objectSchema({ projectId: stringSchema('Project ID for the artifact.'), title: stringSchema('Human title.'), type: stringSchema('Artifact type.'), path: relativePathSchema, content: stringSchema('UTF-8 artifact content.'), createdBy: stringSchema('Actor creating the artifact.'), sourceRequest: stringSchema('Source request that caused this artifact.'), receiptId: stringSchema('Optional receipt ID to reuse.') }, ['projectId', 'title', 'type', 'path', 'content', 'sourceRequest']),
-    parameters: z.object({ projectId: z.string().min(1), title: z.string().min(1), type: z.string().min(1), path: z.string().min(1), content: z.string(), createdBy: z.string().default('alpha'), sourceRequest: z.string().min(1), receiptId: z.string().default('') }),
+    inputSchema: objectSchema({ projectId: stringSchema('Project ID for the artifact.'), title: stringSchema('Human title.'), type: stringSchema('Artifact type.'), path: relativePathSchema, content: stringSchema('UTF-8 artifact content.'), createdBy: stringSchema('Actor creating the artifact.'), sourceRequest: stringSchema('Source request that caused this artifact.'), receiptId: stringSchema('Optional receipt ID to reuse.'), memoryUsed: unknownArraySchema('Memory references used to decide/create the artifact.'), memoryCandidates: unknownArraySchema('Candidate memories produced by the artifact decision.'), authorityBasis: stringSchema('Optional explicit act/report authority basis.') }, ['projectId', 'title', 'type', 'path', 'content', 'sourceRequest']),
+    parameters: z.object({ projectId: z.string().min(1), title: z.string().min(1), type: z.string().min(1), path: z.string().min(1), content: z.string(), createdBy: z.string().default('alpha'), sourceRequest: z.string().min(1), receiptId: z.string().default(''), memoryUsed: z.array(z.any()).default([]), memoryCandidates: z.array(z.any()).default([]), authorityBasis: z.string().default('') }),
     scopes: ['runtime.alpha.write'],
     riskLevel: 'write',
     humanApprovalRequired: false,
@@ -1054,8 +1059,8 @@ export const toolRegistry: RegisteredToolDefinition[] = [
   {
     name: 'alpha.edit_artifact',
     description: 'Edit an internal Alpha artifact under the configured Alpha artifact root. Rejects absolute paths and parent traversal; records before/after metadata and rollback instructions for a reversible Alpha receipt. Classified as act/report, not approval-gated.',
-    inputSchema: objectSchema({ projectId: stringSchema('Project ID for the artifact.'), title: stringSchema('Human title.'), type: stringSchema('Artifact type.'), path: relativePathSchema, content: stringSchema('Replacement UTF-8 artifact content.'), expectedSha256: stringSchema('Optional sha256 of existing content.'), createdBy: stringSchema('Actor editing the artifact.'), sourceRequest: stringSchema('Source request that caused this edit.'), receiptId: stringSchema('Optional receipt ID to reuse.') }, ['projectId', 'title', 'type', 'path', 'content', 'sourceRequest']),
-    parameters: z.object({ projectId: z.string().min(1), title: z.string().min(1), type: z.string().min(1), path: z.string().min(1), content: z.string(), expectedSha256: z.string().default(''), createdBy: z.string().default('alpha'), sourceRequest: z.string().min(1), receiptId: z.string().default('') }),
+    inputSchema: objectSchema({ projectId: stringSchema('Project ID for the artifact.'), title: stringSchema('Human title.'), type: stringSchema('Artifact type.'), path: relativePathSchema, content: stringSchema('Replacement UTF-8 artifact content.'), expectedSha256: stringSchema('Optional sha256 of existing content.'), createdBy: stringSchema('Actor editing the artifact.'), sourceRequest: stringSchema('Source request that caused this edit.'), receiptId: stringSchema('Optional receipt ID to reuse.'), memoryUsed: unknownArraySchema('Memory references used to decide/edit the artifact.'), memoryCandidates: unknownArraySchema('Candidate memories produced by the artifact decision.'), authorityBasis: stringSchema('Optional explicit act/report authority basis.') }, ['projectId', 'title', 'type', 'path', 'content', 'sourceRequest']),
+    parameters: z.object({ projectId: z.string().min(1), title: z.string().min(1), type: z.string().min(1), path: z.string().min(1), content: z.string(), expectedSha256: z.string().default(''), createdBy: z.string().default('alpha'), sourceRequest: z.string().min(1), receiptId: z.string().default(''), memoryUsed: z.array(z.any()).default([]), memoryCandidates: z.array(z.any()).default([]), authorityBasis: z.string().default('') }),
     scopes: ['runtime.alpha.write'],
     riskLevel: 'write',
     humanApprovalRequired: false,

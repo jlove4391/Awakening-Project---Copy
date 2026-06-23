@@ -31,6 +31,7 @@
     "smoke:specialists": "npm --workspace @awakening/agent-runtime run smoke:specialists --",
     "smoke:intake-routing": "npm --workspace @awakening/agent-runtime run smoke:intake-routing --",
     "smoke:phase1-stabilization": "npm --workspace @awakening/agent-runtime run smoke:phase1-stabilization",
+    "smoke:core-alpha-realifai": "npm --workspace @awakening/agent-runtime run smoke:core-alpha-realifai",
     "smoke:specialist-routing": "npm --workspace @awakening/agent-runtime run smoke:specialist-routing --",
     "smoke:lead-import": "npm --workspace @awakening/agent-runtime run smoke:lead-import",
     "smoke:qualification": "npm --workspace @awakening/agent-runtime run smoke:qualification",

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { runtimeConfig } from '../config.js';
-import { createAlphaReceipt } from './receipts.js';
+import { appendAlphaReceipt, createAlphaReceipt } from './receipts.js';
 
 type ArtifactStatus = 'created' | 'edited';
 
@@ -14,6 +14,9 @@ interface ArtifactBaseInput {
   createdBy?: string;
   sourceRequest: string;
   receiptId?: string;
+  memoryUsed?: unknown[];
+  memoryCandidates?: unknown[];
+  authorityBasis?: string;
 }
 
 interface CreateArtifactInput extends ArtifactBaseInput {
@@ -95,14 +98,15 @@ export async function alphaCreateArtifact(input: CreateArtifactInput) {
     requested_by: metadata.created_by,
     action: 'act/report:create_alpha_artifact',
     reason: input.sourceRequest,
-    memory_used: [],
-    authority_basis: 'ordinary internal artifact creation; no approval gate required',
+    memory_used: input.memoryUsed || [],
+    authority_basis: input.authorityBasis || 'ordinary internal artifact creation; no approval gate required',
     tools_used: ['alpha.create_artifact', 'code.create_file'],
     outcome: `Created Alpha artifact ${relativePath}`,
     artifact_paths: [relativePath, metadataPath],
     reversal_path: `Delete ${relativePath} and ${metadataPath} from ${root}.`,
-    memory_candidates: [],
+    memory_candidates: input.memoryCandidates || [],
   });
+  await appendAlphaReceipt(receipt);
   return { ok: true, status: 'created', workspaceRoot: root, path: relativePath, metadataPath, metadata, receipt };
 }
 
@@ -131,13 +135,14 @@ export async function alphaEditArtifact(input: EditArtifactInput) {
     requested_by: metadata.created_by,
     action: 'act/report:edit_alpha_artifact',
     reason: input.sourceRequest,
-    memory_used: [],
-    authority_basis: 'ordinary internal artifact edit; no approval gate required',
+    memory_used: input.memoryUsed || [],
+    authority_basis: input.authorityBasis || 'ordinary internal artifact edit; no approval gate required',
     tools_used: ['alpha.edit_artifact', 'code.edit'],
     outcome: `Edited Alpha artifact ${relativePath}`,
     artifact_paths: [relativePath, metadataPath],
     reversal_path: metadata.rollback.instruction,
-    memory_candidates: [],
+    memory_candidates: input.memoryCandidates || [],
   });
+  await appendAlphaReceipt(receipt);
   return { ok: true, status: 'edited', workspaceRoot: root, path: relativePath, metadataPath, previousSha256, sha256: afterSha256, metadata, receipt };
 }

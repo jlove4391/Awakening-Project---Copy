@@ -143,8 +143,8 @@ function baseMeta(input: PolicyDecisionInput): Pick<PolicyDecisionBase, 'riskLev
   const trustDomain = trustDomainForPolicyInput(input);
   const consequenceDomain: AlphaConsequenceDomain = input.category === 'digitalocean' ? 'infrastructure'
     : includesAny(text, PUBLIC_SHARING_TERMS) ? 'public'
-      : isRmtPolicyInput(input) ? 'financial'
-        : isPersonalInformationSensitivePolicyInput(input) ? 'client_data'
+      : isPersonalInformationSensitivePolicyInput(input) ? 'client_data'
+        : isRmtPolicyInput(input) ? 'financial'
           : input.hasRequiredSetup === false ? 'runtime_setup'
             : input.category === 'delegation' ? 'internal_operations'
               : 'workspace';
@@ -174,11 +174,11 @@ export function decidePolicy(input: PolicyDecisionInput): PolicyDecision {
   if (includesAny(text, PUBLIC_SHARING_TERMS)) {
     return withMeta(input, { decision: 'escalate', action: 'ask_before_execution', boundary: 'public_representation', reason: 'Public sharing or publishing requires explicit approval before execution.', receiptRequired: true, policyClassification: 'explicit_boundary' });
   }
-  if (isRmtPolicyInput(input)) {
-    return withMeta(input, { decision: 'escalate', action: 'ask_before_execution', boundary: 'rmt', reason: 'Action may create money movement, purchase, subscription, contract, domain/SaaS purchase, or financial/legal commitment.', receiptRequired: true, policyClassification: 'explicit_boundary' });
-  }
   if (isPersonalInformationSensitivePolicyInput(input)) {
     return withMeta(input, { decision: 'escalate', action: 'ask_before_execution', boundary: 'personal_information_sensitive', reason: 'Action may expose, transmit, delete, alter, share, or import client personal/private/financial information.', receiptRequired: true, policyClassification: 'explicit_boundary' });
+  }
+  if (isRmtPolicyInput(input)) {
+    return withMeta(input, { decision: 'escalate', action: 'ask_before_execution', boundary: 'rmt', reason: 'Action may create money movement, purchase, subscription, contract, domain/SaaS purchase, or financial/legal commitment.', receiptRequired: true, policyClassification: 'explicit_boundary' });
   }
   if (isDestructiveIrreversiblePolicyInput(input)) {
     return withMeta(input, { decision: 'escalate', action: 'ask_before_execution', boundary: 'destructive_irreversible', reason: 'Permanent deletion or destructive irreversible action requires explicit approval.', receiptRequired: true, policyClassification: 'explicit_boundary' });

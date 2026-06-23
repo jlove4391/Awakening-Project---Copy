@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { runtimeConfig } from '../config.js';
-import { decidePolicyForToolName, policyRequiresApproval } from '../governance/policyDecision.js';
+import { decidePolicyForToolName, policyBlocksExecution, policyRequiresApproval } from '../governance/policyDecision.js';
 import { isAllowedUserRequestedOrDelegatedCoreTool } from '../workflows/nexora/capabilities.js';
 import { attachNexoraCompletion } from '../workflows/nexora/completion.js';
 import { taskEvents } from './events.js';
@@ -234,6 +234,7 @@ function normalizeExecutionPlanStep(
   const requestedApprovalStatus = input.approval?.status || input.approvalStatus || 'not_required';
   const policyDecision = decidePolicyForToolName(input.targetTool, stepInputForPolicy(input));
   const approvalRequired = policyRequiresApproval(policyDecision);
+  const policyBlocked = policyBlocksExecution(policyDecision);
   const approvalStatus: ExecutionPlanStepApprovalStatus = approvalRequired
     ? (requestedApprovalStatus === 'approved' || requestedApprovalStatus === 'rejected' ? requestedApprovalStatus : 'pending')
     : 'not_required';
@@ -251,11 +252,11 @@ function normalizeExecutionPlanStep(
       approvedAt: input.approval?.approvedAt,
       rejectedAt: input.approval?.rejectedAt,
       note: input.approval?.note,
-      reason: approvalRequired ? input.approval?.reason || policyDecision.reason : undefined,
+      reason: approvalRequired || policyBlocked ? input.approval?.reason || policyDecision.reason : undefined,
       authorizationSource,
       scope: input.approval?.scope,
     },
-    status: input.status || 'queued',
+    status: input.status || (policyBlocked ? 'blocked' : 'queued'),
     executionOrigin,
     ...(input.parentTaskId || originContext?.parentTaskId ? { parentTaskId: input.parentTaskId || originContext?.parentTaskId } : {}),
     ...(input.rootTaskId || originContext?.rootTaskId ? { rootTaskId: input.rootTaskId || originContext?.rootTaskId } : {}),

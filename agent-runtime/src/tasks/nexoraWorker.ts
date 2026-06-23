@@ -1,6 +1,6 @@
 import type { RegisteredToolDefinition } from '../tools/registry.js';
 import { evaluateNexoraCapabilityForStep, findNexoraCapabilityForTool, isAllowedUserRequestedOrDelegatedCoreTool } from '../workflows/nexora/capabilities.js';
-import { decidePolicyForToolName, policyRequiresApproval, type PolicyDecision } from '../governance/policyDecision.js';
+import { decidePolicyForToolName, decideToolPolicy, policyBlocksExecution, policyRequiresApproval, type PolicyDecision } from '../governance/policyDecision.js';
 import type { RuntimeContext } from '../types.js';
 import { appendExecutionPlanStep, cancelDelegatedTask, getDelegatedTask, updateDelegatedTask, updateExecutionPlanStep } from './store.js';
 import type { DelegatedTask } from './types.js';
@@ -241,10 +241,10 @@ async function chooseExecutionStrategy(task: DelegatedTask) {
   return [...selected.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
-async function stepPolicyDecision(toolName: string, input: Record<string, unknown>) {
+async function stepPolicyDecision(toolName: string, input: Record<string, unknown>): Promise<PolicyDecision> {
   const { getRegisteredTool } = await loadToolRegistry();
   const definition = getRegisteredTool(toolName);
-
+  return definition ? decideToolPolicy(definition, input) : decidePolicyForToolName(toolName, input);
 }
 
 async function isStepHighRisk(toolName: string, input: Record<string, unknown>) {
@@ -274,7 +274,7 @@ function stepInput(step: NonNullable<DelegatedTask['executionPlan']>[number]): R
 async function blockForStepApproval(task: DelegatedTask, step: NonNullable<DelegatedTask['executionPlan']>[number], policyDecision: PolicyDecision) {
   const { getRegisteredTool } = await loadToolRegistry();
   const definition = getRegisteredTool(step.targetTool);
-  const reason = policyDecision.action === 'ask_before_execution' ? 'step_approval_required' : policyDecision.action === 'setup_needed' ? 'provider_configuration_required' : 'policy_block';
+  const reason = policyDecision.decision === 'escalate' ? 'step_approval_required' : policyDecision.decision === 'setup_needed' ? 'provider_configuration_required' : 'policy_block';
   const approvalScope = approvalScopeForStep(definition);
   const pendingToolAction = {
     stepId: step.id,
@@ -300,7 +300,7 @@ async function blockForStepApproval(task: DelegatedTask, step: NonNullable<Deleg
     event: {
       type: 'task.blocked',
       actor: 'nexora',
-      summary: policyDecision.action === 'ask_before_execution' ? 'Task is blocked until the pending tool action is approved.' : 'Task is blocked by central policy.',
+      summary: policyDecision.decision === 'escalate' ? 'Task is blocked until the pending tool action is approved.' : 'Task is blocked by central policy.',
       details: { blockedReason: reason, pendingToolAction, policyDecision },
     },
   });
@@ -410,6 +410,7 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
       if (['completed', 'skipped', 'cancelled'].includes(step.status)) continue;
       const input = stepInput(step);
       const policyDecision = await stepPolicyDecision(step.targetTool, input);
+      const blockedByPolicy = policyBlocksExecution(policyDecision);
       const highRisk = policyRequiresApproval(policyDecision);
       let capabilityDecision = evaluateNexoraCapabilityForStep(step.targetTool, highRisk ? step.approvalStatus : 'not_required', task.executionOrigin);
       if (!capabilityDecision.allowed && capabilityDecision.reason === 'approval_required' && !highRisk && isUserAuthorizedForStep(task, step.targetTool)) {
@@ -428,7 +429,7 @@ export const nexoraToolExecutionWorker: DelegatedTaskHandler = async (task) => {
         step.approvalStatus = 'approved';
         capabilityDecision = evaluateNexoraCapabilityForStep(step.targetTool, step.approvalStatus, task.executionOrigin);
       }
-      if (highRisk && step.approvalStatus !== 'approved') {
+      if (blockedByPolicy || (highRisk && step.approvalStatus !== 'approved')) {
         await blockForStepApproval(task, step, policyDecision);
         return true;
       }

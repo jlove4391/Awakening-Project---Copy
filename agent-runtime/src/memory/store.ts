@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { runtimeConfig } from '../config.js';
 import type { MemoryReference, MemoryScope } from '../types.js';
-import type { MemoryActorIdentity, MemoryCategory, TchaiMemoryMetadata } from './memoryTypes.js';
+import { AlphaMemoryConfidence, AlphaMemoryStatus, AlphaMemoryType, type MemoryActorIdentity, type MemoryCategory, type TchaiMemoryMetadata } from './memoryTypes.js';
 
 export const durableMemoryScopes = [
   'user_profile',
@@ -29,6 +29,12 @@ export interface StoredMemory extends MemoryReference {
   projectId?: string;
   personaId?: string;
   category?: MemoryCategory;
+  alphaType?: AlphaMemoryType;
+  confidence: AlphaMemoryConfidence;
+  status: AlphaMemoryStatus;
+  reviewNeeded: boolean;
+  contradicts: string[];
+  retrievalPriority: number;
   title?: string;
   summary?: string;
   updatedAt: string;
@@ -57,6 +63,12 @@ export interface MemoryWriteInput {
   personaId?: string;
   category?: MemoryCategory;
   type?: MemoryCategory;
+  alphaType?: AlphaMemoryType;
+  confidence?: AlphaMemoryConfidence;
+  status?: AlphaMemoryStatus;
+  reviewNeeded?: boolean;
+  contradicts?: string[];
+  retrievalPriority?: number;
   title?: string;
   summary?: string;
   actor?: MemoryActorIdentity;
@@ -73,6 +85,12 @@ export interface MemoryListFilter {
   personaId?: string;
   categories?: MemoryCategory[];
   types?: MemoryCategory[];
+  alphaTypes?: AlphaMemoryType[];
+  confidence?: AlphaMemoryConfidence | AlphaMemoryConfidence[];
+  statuses?: AlphaMemoryStatus[];
+  reviewNeeded?: boolean;
+  contradicts?: string[];
+  minRetrievalPriority?: number;
   includeGlobal?: boolean;
   limit?: number;
 }
@@ -99,6 +117,43 @@ function cleanTags(tags: string[] | undefined) {
   return [...new Set((tags || []).map((tag) => tag.trim().toLowerCase()).filter(Boolean))];
 }
 
+function cleanStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(String).map((item) => item.trim()).filter(Boolean))];
+}
+
+function normalizeAlphaConfidence(value: unknown): AlphaMemoryConfidence {
+  return Object.values(AlphaMemoryConfidence).includes(value as AlphaMemoryConfidence) ? (value as AlphaMemoryConfidence) : AlphaMemoryConfidence.Medium;
+}
+
+function normalizeAlphaStatus(value: unknown): AlphaMemoryStatus {
+  return Object.values(AlphaMemoryStatus).includes(value as AlphaMemoryStatus) ? (value as AlphaMemoryStatus) : AlphaMemoryStatus.Active;
+}
+
+function defaultRetrievalPriority(status: AlphaMemoryStatus, confidence: AlphaMemoryConfidence) {
+  const confidenceScore = confidence === AlphaMemoryConfidence.High ? 0.9 : confidence === AlphaMemoryConfidence.Low ? 0.35 : 0.65;
+  const statusMultiplier = status === AlphaMemoryStatus.Active ? 1 : status === AlphaMemoryStatus.Disputed ? 0.45 : status === AlphaMemoryStatus.Superseded ? 0.2 : 0.1;
+  return Math.max(0, Math.min(1, Number((confidenceScore * statusMultiplier).toFixed(2))));
+}
+
+function normalizeAlphaType(value: unknown): AlphaMemoryType | undefined {
+  return Object.values(AlphaMemoryType).includes(value as AlphaMemoryType) ? (value as AlphaMemoryType) : undefined;
+}
+
+function backfillStoredMemory(memory: StoredMemory): StoredMemory {
+  const confidence = normalizeAlphaConfidence(memory.confidence ?? memory.metadata?.confidence);
+  const status = normalizeAlphaStatus(memory.status ?? memory.metadata?.status);
+  return {
+    ...memory,
+    alphaType: normalizeAlphaType(memory.alphaType ?? memory.metadata?.alphaType) ?? (memory.category as AlphaMemoryType | undefined),
+    confidence,
+    status,
+    reviewNeeded: Boolean(memory.reviewNeeded ?? memory.metadata?.reviewNeeded ?? false),
+    contradicts: cleanStringList(memory.contradicts ?? memory.metadata?.contradicts),
+    retrievalPriority: clampImportance(memory.retrievalPriority ?? memory.metadata?.retrievalPriority ?? defaultRetrievalPriority(status, confidence)),
+  };
+}
+
 export function normalizeMemoryScope(scope: MemoryScope | string | undefined): MemoryScope {
   const raw = String(scope || 'conversation_summary').trim();
   const mapped = legacyScopeMap[raw] || raw;
@@ -110,6 +165,9 @@ function normalizeMemory(input: MemoryWriteInput, existing?: StoredMemory): Stor
   const timestamp = now();
   const text = input.text.trim();
   if (!text) throw new Error('memory text is required');
+  const confidence = normalizeAlphaConfidence(input.confidence ?? existing?.confidence);
+  const status = normalizeAlphaStatus(input.status ?? existing?.status);
+  const retrievalPriority = clampImportance(input.retrievalPriority ?? existing?.retrievalPriority ?? defaultRetrievalPriority(status, confidence));
   return {
     id: input.id || existing?.id || randomUUID(),
     sessionId: input.sessionId,
@@ -123,6 +181,12 @@ function normalizeMemory(input: MemoryWriteInput, existing?: StoredMemory): Stor
     projectId: input.projectId ?? existing?.projectId ?? (input.metadata?.projectId as string | undefined) ?? (existing?.metadata?.projectId as string | undefined),
     personaId: input.personaId ?? existing?.personaId ?? (input.metadata?.personaId as string | undefined) ?? (existing?.metadata?.personaId as string | undefined),
     category: input.category || input.type || existing?.category || (input.metadata?.category as MemoryCategory | undefined) || (existing?.metadata?.category as MemoryCategory | undefined) || (input.scope === 'conversation_summary' ? 'conversation_summary' : undefined),
+    alphaType: normalizeAlphaType(input.alphaType) ?? existing?.alphaType ?? normalizeAlphaType(input.category || input.type) ?? normalizeAlphaType(input.metadata?.alphaType) ?? normalizeAlphaType(existing?.metadata?.alphaType),
+    confidence,
+    status,
+    reviewNeeded: input.reviewNeeded ?? existing?.reviewNeeded ?? Boolean(input.metadata?.reviewNeeded ?? existing?.metadata?.reviewNeeded ?? false),
+    contradicts: input.contradicts !== undefined ? cleanStringList(input.contradicts) : cleanStringList(existing?.contradicts ?? existing?.metadata?.contradicts),
+    retrievalPriority,
     title: input.title ?? existing?.title ?? (input.metadata?.title as string | undefined) ?? (existing?.metadata?.title as string | undefined),
     summary: input.summary ?? existing?.summary ?? (input.metadata?.summary as string | undefined) ?? (existing?.metadata?.summary as string | undefined),
     metadata: {
@@ -133,6 +197,12 @@ function normalizeMemory(input: MemoryWriteInput, existing?: StoredMemory): Stor
       ...(input.projectId ? { projectId: input.projectId } : {}),
       ...(input.personaId ? { personaId: input.personaId } : {}),
       ...(input.category || input.type ? { category: input.category || input.type } : {}),
+      ...(input.alphaType ? { alphaType: input.alphaType } : {}),
+      confidence,
+      status,
+      reviewNeeded: input.reviewNeeded ?? existing?.reviewNeeded ?? Boolean(input.metadata?.reviewNeeded ?? existing?.metadata?.reviewNeeded ?? false),
+      contradicts: input.contradicts !== undefined ? cleanStringList(input.contradicts) : cleanStringList(existing?.contradicts ?? existing?.metadata?.contradicts),
+      retrievalPriority,
       ...(input.title ? { title: input.title } : {}),
       ...(input.summary ? { summary: input.summary } : {}),
       ...(input.actor?.actorId ? { actorId: input.actor.actorId } : {}),
@@ -154,7 +224,7 @@ async function readDb(): Promise<MemoryDatabase> {
   try {
     const raw = await fs.readFile(memoryDbPath, 'utf8');
     const parsed = JSON.parse(raw) as MemoryDatabase;
-    cachedDb = { version: 1, memories: Array.isArray(parsed.memories) ? parsed.memories : [] };
+    cachedDb = { version: 1, memories: Array.isArray(parsed.memories) ? parsed.memories.map(backfillStoredMemory) : [] };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     cachedDb = emptyDb();
@@ -188,6 +258,16 @@ function matchesFilter(memory: StoredMemory, filter: MemoryListFilter = {}) {
   if (filter.organizationId && memory.organizationId !== filter.organizationId && memory.metadata?.organizationId !== filter.organizationId) return false;
   if (filter.projectId && memory.projectId !== filter.projectId && memory.metadata?.projectId !== filter.projectId) return false;
   if (filter.personaId && memory.personaId !== filter.personaId && memory.metadata?.personaId !== filter.personaId) return false;
+  if (filter.alphaTypes?.length && (!memory.alphaType || !filter.alphaTypes.includes(memory.alphaType))) return false;
+  const confidences = Array.isArray(filter.confidence) ? filter.confidence : filter.confidence ? [filter.confidence] : undefined;
+  if (confidences?.length && !confidences.includes(memory.confidence)) return false;
+  if (filter.statuses?.length && !filter.statuses.includes(memory.status)) return false;
+  if (filter.reviewNeeded !== undefined && memory.reviewNeeded !== filter.reviewNeeded) return false;
+  if (filter.contradicts?.length) {
+    const actual = new Set(memory.contradicts || []);
+    for (const id of filter.contradicts) if (!actual.has(id)) return false;
+  }
+  if (filter.minRetrievalPriority !== undefined && memory.retrievalPriority < filter.minRetrievalPriority) return false;
   const categories = filter.categories || filter.types;
   if (categories?.length) {
     const actual = memory.category || memory.metadata?.category;
@@ -210,7 +290,7 @@ export class MemoryStore {
     return enqueueWrite(async () => {
       const db = await readDb();
       const index = input.id ? db.memories.findIndex((memory) => memory.id === input.id) : -1;
-      const memory = normalizeMemory(input, index >= 0 ? db.memories[index] : undefined);
+      const memory = normalizeMemory(input, index >= 0 ? backfillStoredMemory(db.memories[index]) : undefined);
       if (index >= 0) db.memories[index] = memory;
       else db.memories.unshift(memory);
       await writeDb(db);
@@ -221,6 +301,7 @@ export class MemoryStore {
   async list(filter: MemoryListFilter = {}): Promise<StoredMemory[]> {
     const db = await readDb();
     return db.memories
+      .map(backfillStoredMemory)
       .filter((memory) => matchesFilter(memory, filter))
       .sort((a, b) => Date.parse(b.updatedAt || b.createdAt) - Date.parse(a.updatedAt || a.createdAt))
       .slice(0, filter.limit ?? 50);
@@ -228,7 +309,8 @@ export class MemoryStore {
 
   async get(id: string): Promise<StoredMemory | undefined> {
     const db = await readDb();
-    return db.memories.find((memory) => memory.id === id);
+    const memory = db.memories.find((memory) => memory.id === id);
+    return memory ? backfillStoredMemory(memory) : undefined;
   }
 
   async remove(id: string): Promise<boolean> {

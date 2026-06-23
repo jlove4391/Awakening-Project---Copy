@@ -33,6 +33,12 @@ export async function remember(sessionId: string, text: string, options: Remembe
     type: options.type,
     title: options.title,
     summary: options.summary,
+    alphaType: options.alphaType,
+    confidence: options.confidence,
+    status: options.status,
+    reviewNeeded: options.reviewNeeded,
+    contradicts: options.contradicts,
+    retrievalPriority: options.retrievalPriority,
     actor: options.actor,
     createdAt: options.createdAt,
   });

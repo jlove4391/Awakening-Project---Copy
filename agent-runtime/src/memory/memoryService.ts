@@ -49,6 +49,12 @@ function memoryFilterToRepositoryFilter(filter: MemorySearchFilter = {}): Memory
     projectId: filter.projectId,
     personaId: filter.personaId,
     categories: filter.categories || filter.types,
+    alphaTypes: filter.alphaTypes,
+    confidence: filter.confidence,
+    statuses: filter.statuses,
+    reviewNeeded: filter.reviewNeeded,
+    contradicts: filter.contradicts,
+    minRetrievalPriority: filter.minRetrievalPriority,
     scopes: filter.scopes,
     tags: filter.tags,
     includeGlobal: filter.includeGlobal,
@@ -67,6 +73,12 @@ function toMemoryRecord(memory: StoredMemory): MemoryRecord {
     category: memory.category || (metadata.category as MemoryCategory | undefined) || (memory.scope === 'conversation_summary' ? 'conversation_summary' : 'fact'),
     title: memory.title || (metadata.title as string | undefined),
     summary: memory.summary || (metadata.summary as string | undefined),
+    alphaType: memory.alphaType,
+    confidence: memory.confidence,
+    status: memory.status,
+    reviewNeeded: memory.reviewNeeded,
+    contradicts: memory.contradicts || [],
+    retrievalPriority: memory.retrievalPriority,
     tags: memory.tags || [],
     metadata,
   };
@@ -97,6 +109,12 @@ export class MemoryService {
       category,
       ...(input.title ? { title: input.title } : {}),
       ...(input.summary ? { summary: input.summary } : {}),
+      ...(input.alphaType ? { alphaType: input.alphaType } : {}),
+      ...(input.confidence ? { confidence: input.confidence } : {}),
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.reviewNeeded !== undefined ? { reviewNeeded: input.reviewNeeded } : {}),
+      ...(input.contradicts !== undefined ? { contradicts: input.contradicts } : {}),
+      ...(input.retrievalPriority !== undefined ? { retrievalPriority: input.retrievalPriority } : {}),
       ...(input.actor?.actorId ? { actorId: input.actor.actorId } : {}),
       ...(input.actor?.actorType ? { actorType: input.actor.actorType } : {}),
       ...(input.actor?.displayName ? { actorDisplayName: input.actor.displayName } : {}),
@@ -117,6 +135,12 @@ export class MemoryService {
       category,
       title: input.title,
       summary: input.summary,
+      alphaType: input.alphaType,
+      confidence: input.confidence,
+      status: input.status,
+      reviewNeeded: input.reviewNeeded,
+      contradicts: input.contradicts,
+      retrievalPriority: input.retrievalPriority,
       actor: input.actor,
       createdAt: input.createdAt,
     });
@@ -143,6 +167,12 @@ export class MemoryService {
       category: patch.category || patch.type || existing.category,
       title: patch.title ?? existing.title,
       summary: patch.summary ?? existing.summary,
+      alphaType: patch.alphaType ?? existing.alphaType,
+      confidence: patch.confidence ?? existing.confidence,
+      status: patch.status ?? existing.status,
+      reviewNeeded: patch.reviewNeeded ?? existing.reviewNeeded,
+      contradicts: patch.contradicts ?? existing.contradicts,
+      retrievalPriority: patch.retrievalPriority ?? existing.retrievalPriority,
       actor: patch.actor,
       createdAt: existing.createdAt,
     });
@@ -184,24 +214,26 @@ export class MemoryService {
   }
 
   recordWorkOrderMemory(input: WorkOrderMemoryInput): Promise<MemoryRecord> {
+    const { status: workOrderStatus, ...memoryInput } = input;
     return this.createMemory({
-      ...input,
+      ...memoryInput,
       category: 'work_order',
       title: input.title || `Work order${input.workOrderId ? ` ${input.workOrderId}` : ''}`,
-      text: `${input.objective}${input.status ? `\nStatus: ${input.status}` : ''}`,
+      text: `${input.objective}${workOrderStatus ? `\nStatus: ${workOrderStatus}` : ''}`,
       tags: ['work-order', ...(input.tags || [])],
-      metadata: { ...(input.metadata || {}), workOrderId: input.workOrderId, status: input.status },
+      metadata: { ...(input.metadata || {}), workOrderId: input.workOrderId, status: workOrderStatus },
     });
   }
 
   recordReceiptMemory(input: ReceiptMemoryInput): Promise<MemoryRecord> {
+    const { status: receiptStatus, ...memoryInput } = input;
     return this.createMemory({
-      ...input,
+      ...memoryInput,
       category: 'receipt',
       title: input.title || `Receipt${input.receiptId ? ` ${input.receiptId}` : ''}`,
-      text: `${input.action}${input.status ? `\nStatus: ${input.status}` : ''}`,
+      text: `${input.action}${receiptStatus ? `\nStatus: ${receiptStatus}` : ''}`,
       tags: ['receipt', ...(input.tags || [])],
-      metadata: { ...(input.metadata || {}), receiptId: input.receiptId, status: input.status },
+      metadata: { ...(input.metadata || {}), receiptId: input.receiptId, status: receiptStatus },
     });
   }
 

@@ -42,7 +42,8 @@
     "smoke:leadgen-source-mode": "tsx scripts/smoke-leadgen-source-mode.ts",
     "smoke:lead-workflow-orchestrator": "tsx scripts/smoke-lead-workflow-orchestrator.ts",
     "smoke:leadgen-live-proof": "tsx scripts/smoke-leadgen-live-proof.ts",
-    "smoke:sdk-approvals": "tsx scripts/smoke-sdk-approvals.ts"
+    "smoke:sdk-approvals": "tsx scripts/smoke-sdk-approvals.ts",
+    "smoke:core-alpha-thesis-to-scope": "tsx scripts/smoke-core-alpha-thesis-to-scope.ts"
   },
   "dependencies": {
     "@openai/agents": "0.11.7",

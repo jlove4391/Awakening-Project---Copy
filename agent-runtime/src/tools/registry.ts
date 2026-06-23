@@ -3699,6 +3699,8 @@ export async function executeRegisteredTool(name: string, input: unknown, contex
   const sanitizedInput = sanitizeAuditInput(parsedInput, definition.audit.sensitiveFields || []);
   const approvedExecutionId = typeof context.approvedExecutionId === 'string' ? context.approvedExecutionId : undefined;
   const approvalScope = requiredApprovalScope(definition);
+  const policyDecision = decideToolPolicy(definition, parsedInput, approvalScope);
+  const approvalRequired = policyRequiresApproval(policyDecision);
 
   const approved = !approvalRequired || sdkApproved || Boolean(parsedInput.confirmedByUser === true && approvedExecutionId);
   const executionRecord = createExecutionRecord({

@@ -206,18 +206,6 @@ function ensureOrdinaryWorkspaceExecution(input: ApprovalGateInput, toolName: st
 }
 
 
-function ensureOrdinaryWorkspaceExecution(input: ApprovalGateInput, toolName: string, action: string, riskLevel: 'write' | 'code_execution' = 'write') {
-  if (isApprovalConfirmed(input)) return null;
-  const decision = decidePolicy({
-    toolName,
-    action,
-    category: 'code',
-    riskLevel,
-    approvalScope: riskLevel === 'code_execution' ? 'repo.command' : 'repo.write',
-
-  });
-  return policyRequiresApproval(decision) ? approvalRequired(toolName) : null;
-}
 
 
 function hasMeaningfulNote(note?: string) {

@@ -14,7 +14,51 @@ export interface PolicyDecisionInput {
   hasRequiredSetup?: boolean;
 }
 
+export type PolicyClassification =
+  | 'setup_needed'
+  | 'explicit_boundary'
+  | 'ordinary_execution'
+  | 'execute_with_receipt'
+  | 'blocked';
+
+interface PolicyDecisionBase {
+  reason: string;
+  trustDomain: string;
+  receiptRequired: boolean;
+  policyClassification: PolicyClassification;
+}
+
+export interface ExecutePolicyDecision extends PolicyDecisionBase {
+  action: 'execute';
+  policyClassification: 'ordinary_execution' | 'execute_with_receipt';
+}
+
+export interface AskBeforeExecutionPolicyDecision extends PolicyDecisionBase {
+  action: 'ask_before_execution';
+  boundary: PolicyBoundary;
+  policyClassification: 'explicit_boundary';
+}
+
+export interface SetupNeededPolicyDecision extends PolicyDecisionBase {
+  action: 'setup_needed';
+  provider?: string;
+  nextSteps: string[];
+  policyClassification: 'setup_needed';
+}
+
+export interface BlockedPolicyDecision extends PolicyDecisionBase {
+  action: 'blocked';
+  boundary?: PolicyBoundary;
+  provider?: string;
+  nextSteps?: string[];
+  policyClassification: 'blocked';
+}
+
 export type PolicyDecision =
+  | ExecutePolicyDecision
+  | AskBeforeExecutionPolicyDecision
+  | SetupNeededPolicyDecision
+  | BlockedPolicyDecision;
 
 
 const RMT_TERMS = [

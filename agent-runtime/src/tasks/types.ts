@@ -1,4 +1,25 @@
 export type RuntimeAgentName = 'elora' | 'nexora' | 'kaz' | 'jynx' | 'kalyra';
+export type SpecialistAgentName = Exclude<RuntimeAgentName, 'elora'> | 'caz';
+
+export interface SpecialistCall {
+  id: string;
+  specialist: SpecialistAgentName;
+  input_contract: {
+    objective: string;
+    constraints: string[];
+    required_tools: string[];
+    bounded_capabilities: string[];
+  };
+  output_contract: {
+    deliverable: string;
+    expected_format: 'summary' | 'structured_result' | 'plan' | 'receipt';
+    must_return_to: 'elora';
+  };
+  memory_context: unknown[];
+  result_summary?: string;
+  confidence?: number;
+  receipt_id?: string;
+}
 
 export type DelegatedTaskStatus = 'queued' | 'pending_approval' | 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled';
 
@@ -48,6 +69,7 @@ export type DelegatedTaskEventType =
   | 'task.cancellation_requested'
   | 'task.timeout'
   | 'task.receipt_created'
+  | 'specialist.call_created'
   | 'proposal.created'
   | 'proposal.approved'
   | 'proposal.patch_applied'
@@ -118,7 +140,7 @@ export interface TaskReceipt {
   id: string;
   taskId: string;
   parentAgent: RuntimeAgentName;
-  assignedAgent: RuntimeAgentName;
+  assignedAgent: SpecialistAgentName;
   status: DelegatedTaskStatus;
   executionOrigin: ExecutionOrigin;
   rootTaskId: string;
@@ -217,7 +239,8 @@ export interface DelegatedTask {
   id: string;
   sessionId: string;
   parentAgent: 'elora';
-  assignedAgent: Exclude<RuntimeAgentName, 'elora'>;
+  assignedAgent: SpecialistAgentName;
+  specialistCall: SpecialistCall;
   objective: string;
   constraints: string[];
   requiredTools: string[];
@@ -259,6 +282,9 @@ export interface CreateDelegatedTaskInput {
   executionOrigin?: ExecutionOrigin;
   parentTaskId?: string;
   rootTaskId?: string;
+  assignedAgent?: SpecialistAgentName;
+  memoryContext?: unknown[];
+  outputContract?: Partial<SpecialistCall['output_contract']>;
 }
 
 

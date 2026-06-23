@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { runtimeConfig } from '../config.js';
+import { appendAlphaReceipt, createAlphaReceipt } from '../alpha/receipts.js';
 import { decidePolicyForToolName, policyBlocksExecution, policyRequiresApproval } from '../governance/policyDecision.js';
 import { isAllowedUserRequestedOrDelegatedCoreTool } from '../workflows/nexora/capabilities.js';
 import { attachNexoraCompletion } from '../workflows/nexora/completion.js';
@@ -24,6 +25,8 @@ import type {
   TaskReceipt,
   UpdateExecutionPlanStepInput,
   UpdateDelegatedTaskInput,
+  SpecialistAgentName,
+  SpecialistCall,
 } from './types.js';
 
 const taskDir = path.join(runtimeConfig.dataDir, 'tasks');
@@ -33,6 +36,45 @@ const taskLogDir = path.join(taskDir, 'logs');
 const maxInlineLogBytes = 4_096;
 const maxInlineLogs = 100;
 const maxInlineCommandOutputBytes = 8_192;
+
+
+const specialistCapabilities: Record<SpecialistAgentName, string[]> = {
+  nexora: ['technical_implementation', 'ai_systems', 'automation', 'crm_workspace', 'repository_commands', 'tests_builds_validation'],
+  kaz: ['operations', 'sops', 'client_journey', 'bottlenecks', 'service_model', '30_60_90_plans'],
+  caz: ['operations', 'sops', 'client_journey', 'bottlenecks', 'service_model', '30_60_90_plans'],
+  jynx: ['finance_operations', 'pricing_visibility', 'invoice_payment_workflow', 'cash_flow_workflow', 'dashboard_requirements'],
+  kalyra: ['offer_drafts', 'proposal_review_scripts', 'buyer_priorities', 'objection_prep', 'follow_up_questions', 'value_language'],
+};
+
+function normalizeSpecialist(value: unknown, requiredTools: string[] = []): SpecialistAgentName {
+  const requested = String(value || '').toLowerCase();
+  if (requested === 'kaz' || requested === 'caz' || requested === 'jynx' || requested === 'kalyra' || requested === 'nexora') return requested;
+  const tools = requiredTools.join(' ').toLowerCase();
+  if (/finance|pricing|invoice|payment|cash|dashboard/.test(tools)) return 'jynx';
+  if (/ops|operation|sop|client journey|bottleneck|service model|30\/60\/90/.test(tools)) return 'kaz';
+  if (/offer|proposal|buyer|objection|closing|follow.?up|value proposition/.test(tools)) return 'kalyra';
+  return 'nexora';
+}
+
+function createSpecialistCall(input: CreateDelegatedTaskInput, taskId: string, specialist: SpecialistAgentName): SpecialistCall {
+  const bounded = specialistCapabilities[specialist];
+  return {
+    id: randomUUID(),
+    specialist,
+    input_contract: {
+      objective: input.objective,
+      constraints: input.constraints || [],
+      required_tools: input.requiredTools || [],
+      bounded_capabilities: bounded,
+    },
+    output_contract: {
+      deliverable: input.outputContract?.deliverable || 'Return bounded specialist findings for Elora to synthesize into the final user-facing response.',
+      expected_format: input.outputContract?.expected_format || 'structured_result',
+      must_return_to: 'elora',
+    },
+    memory_context: input.memoryContext || [],
+  };
+}
 
 const terminalStatuses = new Set<DelegatedTaskStatus>(['completed', 'failed', 'cancelled']);
 let cache: DelegatedTask[] | undefined;
@@ -459,6 +501,23 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
     const taskId = randomUUID();
     const executionOrigin = normalizeExecutionOrigin(input.executionOrigin, authorizationSource);
     const parentTask = input.parentTaskId ? tasks.find((candidate) => candidate.id === input.parentTaskId) : undefined;
+    const assignedAgent = normalizeSpecialist(input.assignedAgent, input.requiredTools || []);
+    const specialistCall = createSpecialistCall(input, taskId, assignedAgent);
+    const alphaReceipt = createAlphaReceipt({
+      receipt_id: specialistCall.receipt_id,
+      actor: 'elora',
+      requested_by: authorizationSource === 'autonomous' ? 'agent' : 'user',
+      action: `specialist.call:${assignedAgent}`,
+      reason: `Elora routed bounded specialist call ${specialistCall.id} for task ${taskId}.`,
+      memory_used: specialistCall.memory_context,
+      authority_basis: authorizationSource,
+      tools_used: input.requiredTools || [],
+      outcome: 'created',
+      artifact_paths: [],
+      reversal_path: 'Cancel the delegated task before execution or ignore the specialist result before Elora synthesis.',
+      memory_candidates: [],
+    });
+    specialistCall.receipt_id = alphaReceipt.receipt_id;
     const rootTaskId = input.rootTaskId || parentTask?.rootTaskId || input.parentTaskId || taskId;
     const delegationChain = parentTask ? [...parentTask.delegationChain, taskId] : [taskId];
     const originContext = { executionOrigin, rootTaskId, parentTaskId: input.parentTaskId, delegationChain };
@@ -472,7 +531,8 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       id: taskId,
       sessionId: input.sessionId,
       parentAgent: 'elora',
-      assignedAgent: 'nexora',
+      assignedAgent,
+      specialistCall,
       objective: input.objective,
       constraints: input.constraints || [],
       requiredTools: input.requiredTools || [],
@@ -494,7 +554,7 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
     const status: DelegatedTaskStatus = needsApproval(task.approvalRequirements) ? 'pending_approval' : 'queued';
     task.status = status;
 
-    const created = createAuditEntry(task.id, 'task.created', 'elora', `Elora delegated task to Nexora: ${task.objective}`, {
+    const created = createAuditEntry(task.id, 'task.created', 'elora', `Elora created bounded ${assignedAgent} specialist call for synthesis: ${task.objective}`, {
       sessionId: task.sessionId,
       parentAgent: task.parentAgent,
       assignedAgent: task.assignedAgent,
@@ -504,6 +564,8 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       rootTaskId: task.rootTaskId,
       parentTaskId: task.parentTaskId,
       delegationChain: task.delegationChain,
+      specialistCall,
+      alphaReceipt,
     }, originContext);
     task.events.push(created);
     task.auditTrail.push(created);
@@ -517,14 +579,14 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       task.events.push(approval, approvalNeeded);
       task.auditTrail.push(approval, approvalNeeded);
     } else {
-      const queued = createAuditEntry(task.id, 'task.queued', 'system', 'Task was added to the durable Nexora queue.', { authorizationSource: task.authorizationSource, executionOrigin: task.executionOrigin }, originContext);
+      const queued = createAuditEntry(task.id, 'task.queued', 'system', assignedAgent === 'nexora' ? 'Task was added to the durable Nexora queue.' : `Bounded ${assignedAgent} specialist call is recorded for Elora synthesis; no separate user-facing thread is opened.`, { authorizationSource: task.authorizationSource, executionOrigin: task.executionOrigin }, originContext);
       task.events.push(queued);
       task.auditTrail.push(queued);
     }
 
     tasks.unshift(task);
     await persistTasks();
-    await Promise.all(task.auditTrail.map(appendAuditJsonl));
+    await Promise.all([...task.auditTrail.map(appendAuditJsonl), appendAlphaReceipt(alphaReceipt)]);
     taskEvents.emitTaskCreated(task, getDelegatedTaskUiState(task));
     return task;
   });
@@ -727,6 +789,11 @@ export async function updateDelegatedTask(taskId: string, input: UpdateDelegated
 
     if (input.result) {
       task.result = await sanitizeResult(task.id, input.result);
+      task.specialistCall.result_summary = task.result.summary;
+      if (task.result.data && typeof task.result.data === 'object' && !Array.isArray(task.result.data)) {
+        const confidence = (task.result.data as Record<string, unknown>).confidence;
+        if (typeof confidence === 'number') task.specialistCall.confidence = Math.max(0, Math.min(1, confidence));
+      }
       const resultEvent = createAuditEntry(task.id, 'task.result_recorded', input.event?.actor || 'nexora', task.result.summary, {
         ok: task.result.ok,
         data: task.result.data,

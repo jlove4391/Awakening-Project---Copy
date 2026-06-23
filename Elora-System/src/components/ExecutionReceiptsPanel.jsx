@@ -21,6 +21,29 @@ const formatDateTime = (value) => {
 const riskClass = (riskLevel) =>
   `execution-risk execution-risk-${String(riskLevel || "unknown").replace(/_/g, "-")}`;
 
+
+const alphaFieldLabels = [
+  ["receipt_id", "Receipt ID"],
+  ["timestamp", "Timestamp"],
+  ["actor", "Actor"],
+  ["requested_by", "Requested by"],
+  ["action", "Action"],
+  ["reason", "Reason"],
+  ["memory_used", "Memory used"],
+  ["authority_basis", "Authority basis"],
+  ["tools_used", "Tools used"],
+  ["outcome", "Outcome"],
+  ["artifact_paths", "Artifacts"],
+  ["reversal_path", "Reversal path"],
+  ["memory_candidates", "Memory candidates"],
+];
+
+const formatAlphaValue = (value) => {
+  if (Array.isArray(value)) return value.length ? value.map((item) => (typeof item === "string" ? item : JSON.stringify(item))).join(", ") : "—";
+  if (value && typeof value === "object") return JSON.stringify(value);
+  return value || "—";
+};
+
 const humanizeStatus = (value) =>
   String(value || "unknown")
     .replace(/_/g, " ")
@@ -553,6 +576,26 @@ const ExecutionReceiptsPanel = ({
               <p className="execution-receipt-summary">
                 {executionOutcomeLabel(execution)}: {executionSummary(execution)}
               </p>
+
+
+              {execution.receipt?.alpha && (
+                <div className="execution-alpha-receipt">
+                  <div className="execution-record-meta">
+                    <span>Alpha: {humanizeStatus(execution.receipt.alphaValidation?.status || "complete")}</span>
+                    {execution.receipt.alphaValidation?.missingFields?.length > 0 && (
+                      <span>missing: {execution.receipt.alphaValidation.missingFields.join(", ")}</span>
+                    )}
+                  </div>
+                  <dl className="execution-detail-grid">
+                    {alphaFieldLabels.map(([field, label]) => (
+                      <div key={field}>
+                        <dt>{label}</dt>
+                        <dd>{field === "timestamp" ? formatDateTime(execution.receipt.alpha[field]) : formatAlphaValue(execution.receipt.alpha[field])}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              )}
 
               <dl className="execution-detail-grid">
                 <div>

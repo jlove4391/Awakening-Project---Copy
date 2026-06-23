@@ -7,6 +7,7 @@ import type { ApprovalScope } from './tasks/types.js';
 import type { PolicyAction, PolicyBoundary, PolicyDecision } from './governance/policyDecision.js';
 import type { ExecutionMode } from './types.js';
 import { redactProviderReceiptPayload, safeReceiptSummary } from './workflows/nexora/secretsPolicy.js';
+import { createAlphaReceipt, validateAlphaReceipt, type AlphaReceiptPayload, type AlphaReceiptValidation } from './alpha/receipts.js';
 
 export type ExecutionKind = 'tool_call' | 'delegated_task' | 'runtime_action';
 export type ExecutionApprovalStatus = 'not_required' | 'approved' | 'blocked' | 'pending' | 'rejected' | 'unknown';
@@ -66,6 +67,8 @@ export interface ExecutionRecord {
     issuedAt: string;
     executionOrigin?: ExecutionMode;
     autonomyLevel?: number;
+    alpha?: AlphaReceiptPayload;
+    alphaValidation?: AlphaReceiptValidation;
   };
 }
 
@@ -118,10 +121,26 @@ export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'times
   status?: ExecutionStatus;
   errors?: string[];
   receiptSummary?: string;
+  alphaReceipt?: Partial<AlphaReceiptPayload>;
 }): ExecutionRecord {
   const requestedAt = input.requestedAt || now();
   const status = input.status || 'requested';
   const executionOrigin = input.linkedIds.executionOrigin || (input.linkedIds.executionMode === 'reactive' || input.linkedIds.executionMode === 'delegated' || input.linkedIds.executionMode === 'autonomous' ? input.linkedIds.executionMode : undefined);
+  const alpha = createAlphaReceipt({
+    receipt_id: input.alphaReceipt?.receipt_id,
+    timestamp: input.alphaReceipt?.timestamp || requestedAt,
+    actor: input.alphaReceipt?.actor || input.chosenByAgent,
+    requested_by: input.alphaReceipt?.requested_by || input.whoRequested,
+    action: input.alphaReceipt?.action || input.action,
+    reason: input.alphaReceipt?.reason || input.receiptSummary || `${input.action} ${status}`,
+    memory_used: input.alphaReceipt?.memory_used || input.linkedIds.memoryIds || [],
+    authority_basis: input.alphaReceipt?.authority_basis || input.approvalStatus,
+    tools_used: input.alphaReceipt?.tools_used || (input.kind === 'tool_call' ? [input.action] : []),
+    outcome: input.alphaReceipt?.outcome || status,
+    artifact_paths: input.alphaReceipt?.artifact_paths || [],
+    reversal_path: input.alphaReceipt?.reversal_path || 'No reversal path recorded.',
+    memory_candidates: input.alphaReceipt?.memory_candidates || [],
+  });
   return {
     id: randomUUID(),
     kind: input.kind,
@@ -153,6 +172,8 @@ export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'times
       issuedAt: now(),
       executionOrigin,
       autonomyLevel: input.linkedIds.autonomyLevel,
+      alpha,
+      alphaValidation: validateAlphaReceipt(alpha),
     },
   };
 }
@@ -167,9 +188,27 @@ export function completeExecutionRecord(
     approvalStatus?: ExecutionApprovalStatus;
     completedAt?: string;
     receiptSummary?: string;
+    alphaReceipt?: Partial<AlphaReceiptPayload>;
   },
 ): ExecutionRecord {
   const completedAt = patch.completedAt || now();
+  const alpha = createAlphaReceipt({
+    ...(record.receipt.alpha || {}),
+    ...(patch.alphaReceipt || {}),
+    receipt_id: patch.alphaReceipt?.receipt_id || record.receipt.alpha?.receipt_id || record.id,
+    timestamp: patch.alphaReceipt?.timestamp || completedAt,
+    actor: patch.alphaReceipt?.actor || record.receipt.alpha?.actor || record.chosenByAgent,
+    requested_by: patch.alphaReceipt?.requested_by || record.receipt.alpha?.requested_by || record.whoRequested,
+    action: patch.alphaReceipt?.action || record.receipt.alpha?.action || record.action,
+    reason: patch.alphaReceipt?.reason || record.receipt.alpha?.reason || patch.receiptSummary || `${record.action} ${patch.status}`,
+    memory_used: patch.alphaReceipt?.memory_used || record.receipt.alpha?.memory_used || record.linkedIds.memoryIds || [],
+    authority_basis: patch.alphaReceipt?.authority_basis || record.receipt.alpha?.authority_basis || patch.approvalStatus || record.approvalStatus,
+    tools_used: patch.alphaReceipt?.tools_used || record.receipt.alpha?.tools_used || (record.kind === 'tool_call' ? [record.action] : []),
+    outcome: patch.alphaReceipt?.outcome || patch.status,
+    artifact_paths: patch.alphaReceipt?.artifact_paths || record.receipt.alpha?.artifact_paths || [],
+    reversal_path: patch.alphaReceipt?.reversal_path || record.receipt.alpha?.reversal_path || 'No reversal path recorded.',
+    memory_candidates: patch.alphaReceipt?.memory_candidates || record.receipt.alpha?.memory_candidates || [],
+  });
   return {
     ...record,
     status: patch.status,
@@ -194,6 +233,8 @@ export function completeExecutionRecord(
       issuedAt: completedAt,
       executionOrigin: record.receipt.executionOrigin,
       autonomyLevel: record.receipt.autonomyLevel,
+      alpha,
+      alphaValidation: validateAlphaReceipt(alpha),
     },
   };
 }

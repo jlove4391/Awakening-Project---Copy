@@ -40,6 +40,60 @@ const blobToBase64 = (blob) => {
     reader.readAsDataURL(blob);
   });
 };
+const asArray = (value) => {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+};
+
+const formatDetailValue = (value) => {
+  if (Array.isArray(value)) {
+    return value.length
+      ? value
+          .map((item) =>
+            typeof item === "string"
+              ? item
+              : item?.id || item?.path || item?.text || JSON.stringify(item),
+          )
+          .join(", ")
+      : "";
+  }
+  if (value && typeof value === "object") {
+    return value.id || value.decision || value.status || value.path || JSON.stringify(value);
+  }
+  return value ? String(value) : "";
+};
+
+const firstPresent = (...values) => values.find((value) => {
+  if (Array.isArray(value)) return value.length > 0;
+  return value !== undefined && value !== null && value !== "";
+});
+
+const extractEventDetails = (data = {}) => {
+  const finalOutput = data.finalOutput && typeof data.finalOutput === "object" ? data.finalOutput : {};
+  const receipt = data.receipt || finalOutput.receipt || finalOutput.executionReceipt || {};
+  const alpha = receipt.alpha || finalOutput.alpha || data.alpha || {};
+  const authority =
+    firstPresent(
+      data.authorityDecision,
+      finalOutput.authorityDecision,
+      receipt.authorityDecision,
+      alpha.authority_decision,
+      alpha.authorityDecision,
+      alpha.authority_basis,
+    );
+  return [
+    ["Memory refs", firstPresent(data.references, data.memories, finalOutput.memoryReferences, receipt.memory_used, alpha.memory_used)],
+    ["Authority", authority],
+    ["Receipt ID", firstPresent(data.receiptId, finalOutput.receiptId, receipt.id, alpha.receipt_id, alpha.receiptId)],
+    ["Artifacts", firstPresent(data.artifactPaths, finalOutput.artifactPaths, receipt.artifact_paths, receipt.artifactPaths, alpha.artifact_paths, alpha.artifactPaths)],
+    ["Memory candidates", firstPresent(data.memoryCandidates, finalOutput.memoryCandidates, receipt.memory_candidates, receipt.memoryCandidates, alpha.memory_candidates, alpha.memoryCandidates)],
+  ]
+    .map(([label, value]) => [label, formatDetailValue(value)])
+    .filter(([, value]) => value);
+};
+
+const formatEventDetails = (details) =>
+  details.map(([label, value]) => `${label}: ${value}`).join("\n");
 
 const approvalReasonLabels = {
   missing_explicit_user_approval:
@@ -126,6 +180,7 @@ const EloraConsole = () => {
   const [toolEvents, setToolEvents] = useState([]);
   const [taskStatus, setTaskStatus] = useState("idle");
   const [memoryRefs, setMemoryRefs] = useState([]);
+  const [lastCompletedDetails, setLastCompletedDetails] = useState([]);
   const [voiceConfig, setVoiceConfig] = useState(null);
   const [selectedVoice, setSelectedVoice] = useState(
     () => window.localStorage.getItem("elora-voice-profile") || "marin",
@@ -242,16 +297,33 @@ const EloraConsole = () => {
     }
 
     if (event === "memory" || event === "completed") {
-      setMemoryRefs(data.references || data.memories || []);
+      const finalOutput = data.finalOutput && typeof data.finalOutput === "object" ? data.finalOutput : {};
+      const receipt = data.receipt || finalOutput.receipt || finalOutput.executionReceipt || {};
+      const alpha = receipt.alpha || finalOutput.alpha || data.alpha || {};
+      setMemoryRefs(
+        asArray(
+          firstPresent(
+            data.references,
+            data.memories,
+            finalOutput.memoryReferences,
+            receipt.memory_used,
+            alpha.memory_used,
+          ),
+        ),
+      );
     }
 
     if (event === "runtime_event") {
+      const details = extractEventDetails(data);
       setToolEvents((prev) =>
-        [{ type: data.type || "runtime_event", at: Date.now() }, ...prev].slice(
-          0,
-          8,
-        ),
+        [
+          { type: data.type || "runtime_event", at: Date.now(), details },
+          ...prev,
+        ].slice(0, 8),
       );
+      if (String(data.type || "").includes("completed") && details.length) {
+        setLastCompletedDetails(details);
+      }
       if (isApprovalRuntimeEvent(data)) {
         setTaskStatus("approval requested");
         window.setTimeout(() => {
@@ -282,6 +354,12 @@ const EloraConsole = () => {
   if (visibleReply) {
     logMessage(visibleReply, "elora");
     void speakText(visibleReply);
+  }
+
+  const details = extractEventDetails(data);
+  setLastCompletedDetails(details);
+  if (details.length) {
+    logMessage(formatEventDetails(details), "system");
   }
 
   loadPendingApprovals().catch(() => undefined);
@@ -599,7 +677,18 @@ const speakText = async (text) => {
         <ul className="runtime-list">
           {toolEvents.length ? (
             toolEvents.map((item) => (
-              <li key={`${item.at}-${item.type}`}>{item.type}</li>
+              <li key={`${item.at}-${item.type}`}>
+                {item.type}
+                {item.details?.length > 0 && (
+                  <ul>
+                    {item.details.map(([label, value]) => (
+                      <li key={`${item.at}-${label}`}>
+                        {label}: {value}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
             ))
           ) : (
             <li>none yet</li>
@@ -608,7 +697,23 @@ const speakText = async (text) => {
         <p>Memory References:</p>
         <ul className="runtime-list">
           {memoryRefs.length ? (
-            memoryRefs.map((item) => <li key={item.id}>{item.text}</li>)
+            memoryRefs.map((item, index) => (
+              <li key={item.id || item.path || index}>
+                {formatDetailValue(item)}
+              </li>
+            ))
+          ) : (
+            <li>none yet</li>
+          )}
+        </ul>
+        <p>Last Completed Event:</p>
+        <ul className="runtime-list">
+          {lastCompletedDetails.length ? (
+            lastCompletedDetails.map(([label, value]) => (
+              <li key={label}>
+                {label}: {value}
+              </li>
+            ))
           ) : (
             <li>none yet</li>
           )}

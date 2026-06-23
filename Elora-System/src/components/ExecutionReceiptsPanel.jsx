@@ -30,13 +30,52 @@ const alphaFieldLabels = [
   ["action", "Action"],
   ["reason", "Reason"],
   ["memory_used", "Memory used"],
-  ["authority_basis", "Authority basis"],
+  ["authority_decision", "Authority decision"],
   ["tools_used", "Tools used"],
   ["outcome", "Outcome"],
   ["artifact_paths", "Artifacts"],
   ["reversal_path", "Reversal path"],
   ["memory_candidates", "Memory candidates"],
 ];
+
+const firstPresent = (...values) => values.find((value) => {
+  if (Array.isArray(value)) return value.length > 0;
+  return value !== undefined && value !== null && value !== "";
+});
+
+const canonicalAlphaReceipt = (execution = {}) => {
+  const receipt = execution.receipt || {};
+  const alpha = receipt.alpha || {};
+  const source = { ...receipt, ...alpha };
+  const canonical = {
+    receipt_id: firstPresent(source.receipt_id, source.receiptId, receipt.id, execution.receiptId, execution.id),
+    timestamp: firstPresent(source.timestamp, receipt.timestamp, execution.timestamps?.completedAt, execution.timestamps?.requestedAt),
+    actor: firstPresent(source.actor, execution.chosenByAgent, execution.actor),
+    requested_by: firstPresent(source.requested_by, source.requestedBy, execution.whoRequested),
+    action: firstPresent(source.action, execution.action),
+    reason: firstPresent(source.reason, receipt.summary, execution.providerResponseSummary),
+    memory_used: firstPresent(source.memory_used, source.memoryUsed, receipt.memoryUsed, execution.memoryUsed),
+    authority_decision: firstPresent(
+      source.authority_decision,
+      source.authorityDecision,
+      source.authority_basis,
+      source.authorityBasis,
+      execution.authorityDecision,
+      execution.policyDecision,
+    ),
+    tools_used: firstPresent(source.tools_used, source.toolsUsed, execution.toolsUsed, execution.toolName),
+    outcome: firstPresent(source.outcome, execution.status),
+    artifact_paths: firstPresent(source.artifact_paths, source.artifactPaths, receipt.artifactPaths, execution.artifactPaths),
+    reversal_path: firstPresent(source.reversal_path, source.reversalPath, receipt.reversalPath, execution.reversalPath),
+    memory_candidates: firstPresent(source.memory_candidates, source.memoryCandidates, receipt.memoryCandidates, execution.memoryCandidates),
+  };
+  return canonical;
+};
+
+const hasCanonicalAlphaFields = (execution) => {
+  const canonical = canonicalAlphaReceipt(execution);
+  return alphaFieldLabels.some(([field]) => canonical[field] !== undefined && canonical[field] !== null && canonical[field] !== "");
+};
 
 const formatAlphaValue = (value) => {
   if (Array.isArray(value)) return value.length ? value.map((item) => (typeof item === "string" ? item : JSON.stringify(item))).join(", ") : "—";
@@ -88,6 +127,8 @@ const inferApprovalBoundary = (item = {}) => {
 
 const isExplicitApprovalBoundary = (item) => explicitApprovalBoundaries.has(inferApprovalBoundary(item));
 
+const shouldRenderApprovalUi = (item) => Boolean(item) && isExplicitApprovalBoundary(item);
+
 const trustDomainLabel = (item = {}) =>
   item.trustDomain ||
   item.policyDecision?.trustDomain ||
@@ -123,14 +164,14 @@ const latestApprovedRequirement = (task) =>
     .sort((a, b) => String(b.approvedAt || "").localeCompare(String(a.approvedAt || "")))[0];
 
 const pendingStepAction = (task) => {
-  if (task.pendingToolAction?.approvalStatus === "pending" && isExplicitApprovalBoundary(task.pendingToolAction)) {
+  if (task.pendingToolAction?.approvalStatus === "pending" && shouldRenderApprovalUi(task.pendingToolAction)) {
     return task.pendingToolAction;
   }
   return (task.executionPlan || []).find(
     (step) =>
       step.approval?.required &&
       (step.approvalStatus === "pending" || step.approval?.status === "pending") &&
-      isExplicitApprovalBoundary(step),
+      shouldRenderApprovalUi(step),
   );
 };
 
@@ -419,7 +460,7 @@ const ExecutionReceiptsPanel = ({
             task.status === "pending_approval" &&
             approvalState === "pending" &&
             hasPendingTaskApproval(task) &&
-            isExplicitApprovalBoundary(task);
+            shouldRenderApprovalUi(task);
           const stepAction = pendingStepAction(task);
           const stepActionKey = stepAction
             ? `${task.id}:${stepAction.stepId || stepAction.id}`
@@ -554,7 +595,10 @@ const ExecutionReceiptsPanel = ({
             No execution records or delegated tasks have been issued yet.
           </div>
         ) : (
-          executions.map((execution) => (
+          executions.map((execution) => {
+            const alphaReceipt = canonicalAlphaReceipt(execution);
+            const renderAlphaReceipt = hasCanonicalAlphaFields(execution);
+            return (
             <article
               className="execution-record-card"
               key={`${execution.id}-${execution.timestamps?.completedAt || execution.timestamps?.requestedAt}`}
@@ -578,11 +622,11 @@ const ExecutionReceiptsPanel = ({
               </p>
 
 
-              {execution.receipt?.alpha && (
+              {renderAlphaReceipt && (
                 <div className="execution-alpha-receipt">
                   <div className="execution-record-meta">
-                    <span>Alpha: {humanizeStatus(execution.receipt.alphaValidation?.status || "complete")}</span>
-                    {execution.receipt.alphaValidation?.missingFields?.length > 0 && (
+                    <span>Alpha: {humanizeStatus(execution.receipt?.alphaValidation?.status || "complete")}</span>
+                    {execution.receipt?.alphaValidation?.missingFields?.length > 0 && (
                       <span>missing: {execution.receipt.alphaValidation.missingFields.join(", ")}</span>
                     )}
                   </div>
@@ -590,7 +634,7 @@ const ExecutionReceiptsPanel = ({
                     {alphaFieldLabels.map(([field, label]) => (
                       <div key={field}>
                         <dt>{label}</dt>
-                        <dd>{field === "timestamp" ? formatDateTime(execution.receipt.alpha[field]) : formatAlphaValue(execution.receipt.alpha[field])}</dd>
+                        <dd>{field === "timestamp" ? formatDateTime(alphaReceipt[field]) : formatAlphaValue(alphaReceipt[field])}</dd>
                       </div>
                     ))}
                   </dl>
@@ -635,7 +679,8 @@ const ExecutionReceiptsPanel = ({
                 </p>
               )}
             </article>
-          ))
+            );
+          })
         )}
       </div>
     </section>

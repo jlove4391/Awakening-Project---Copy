@@ -12,3 +12,6 @@ coverage/
 *.log
 # Agent runtime local state
 agent-runtime/.runtime-data/
+
+# Business / non-code archive
+True Love Cap/

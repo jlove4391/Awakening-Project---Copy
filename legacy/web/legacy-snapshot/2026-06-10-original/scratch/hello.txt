@@ -1,2 +1,0 @@
-module.exports = function hello(name){ return `Hello, ${name}!`; };
-if (require.main === module) { console.log(hello("Nex")); }

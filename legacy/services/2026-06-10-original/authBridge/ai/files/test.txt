@@ -1,2 +1,0 @@
-This is a test file for Elora's delegation system.
-Shadow Empress initialized.

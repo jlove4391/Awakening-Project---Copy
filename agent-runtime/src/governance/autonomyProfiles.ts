@@ -25,8 +25,16 @@ export function activeAutonomyLevel(context?: { autonomyLevel?: AutonomyLevel })
   return normalizeAutonomyLevel(context?.autonomyLevel);
 }
 
-
 const DEV_AUTONOMY_WEB_TOOLS = new Set(['web.fetch_url', 'web.crawl_site']);
+const hardApprovalScopes = new Set([
+  'repo.commit',
+  'repo.delete',
+  'provider.create',
+  'provider.update',
+  'provider.delete',
+  'database.migrate',
+  'external.send',
+]);
 
 export function isKnownAutonomyProfile(value: unknown): value is AutonomyProfileName {
   return value === 'dev_autonomy' || value === 'proactive_observation';
@@ -49,9 +57,20 @@ export function autonomyLevelAllows(
 ) {
   const mode = normalizeExecutionMode(executionMode, level === 0 ? 'reactive' : 'observation');
   const policyDecision = decideToolPolicy(definition, input);
-  if (policyRequiresApproval(policyDecision)) return false;
+
+  // Reactive and delegated requests are within an active user-authorized command.
+  // Explicit boundaries must reach the SDK/policy approval mechanism rather than
+  // being rejected by the autonomy layer before an approval can be resumed.
   if (mode === 'reactive' || mode === 'delegated') return true;
-  if (mode === 'observation') return definition.riskLevel === 'read' || policyDecision.decision === 'report';
+
+  if (mode === 'observation') {
+    return !policyRequiresApproval(policyDecision)
+      && (definition.riskLevel === 'read' || policyDecision.decision === 'report');
+  }
+
+  // Autonomous explicit-boundary actions may enter the canonical approval path.
+  // Ordinary autonomous mutations still require the trusted-execution envelope.
+  if (policyRequiresApproval(policyDecision)) return true;
   return level >= 3;
 }
 
@@ -80,9 +99,20 @@ export function requiresApprovalForExecutionMode(
   approvalScope?: string,
 ) {
   const mode = normalizeExecutionMode(executionMode, profile ? 'autonomous' : 'reactive');
-  if (mode === 'observation' || profile === 'proactive_observation') return !proactiveObservationAllows(definition, runtimeConfig.autonomy.level, input);
-  const policyDecision = decideToolPolicy(definition, input, approvalScope);
+  if (mode === 'observation' || profile === 'proactive_observation') {
+    return !proactiveObservationAllows(definition, runtimeConfig.autonomy.level, input);
+  }
 
+  const policyDecision = decideToolPolicy(definition, input, approvalScope);
+  const hardApprovalRequired = Boolean(approvalScope && hardApprovalScopes.has(approvalScope));
+
+  if (mode === 'reactive' || mode === 'delegated') {
+    return hardApprovalRequired || policyRequiresApproval(policyDecision);
+  }
+
+  if (hardApprovalRequired || policyRequiresApproval(policyDecision)) return true;
+  if (profile === 'dev_autonomy') return false;
+  return !autonomyLevelAllows(runtimeConfig.autonomy.level, definition, input, 'autonomous');
 }
 
 export const devAutonomyProfile = {

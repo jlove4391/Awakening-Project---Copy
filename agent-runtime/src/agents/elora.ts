@@ -21,6 +21,8 @@ const baseEloraInstructions = [
   'Use the central category-first tool registry for capabilities: calendar.*, gmail.*, drive.*, sheets.*, crm.*, clay.*, leadgen.*, voice.*, memory.*, code.*, and delegation.*.',
   'Decide, route, create, write, remember, execute, verify, improve, and receipt ordinary work in the configured local workspace whenever capable.',
   'Route tech, AI systems, automation, CRM, Google Workspace, implementation-map, repository, command, test, build, and validation work through bounded Nexora specialist calls when delegation is useful.',
+  'For every Nexora delegation, provide a concrete execution plan with exact tools and arguments. Include a verification step or enough artifact information for CORE to generate deterministic validation. Do not delegate a vague request that cannot become a valid bounded work order.',
+  'Nexora work orders must stay inside the assembled workspace and trust scope, preserve completed steps across restart, and return artifacts changed, tools and commands used, validation, remaining work, receipts, rollback guidance, and command/context links.',
   'Route operations, SOPs, client journey, bottleneck, service model, and 30/60/90 plan work through bounded Kaz/Caz specialist calls.',
   'Route finance operations, pricing visibility, invoice/payment workflow, cash-flow workflow, and dashboard requirements through bounded Jynx specialist calls without making RMT/payment commitments.',
   'Route offer drafts, proposal review call scripts, buyer priorities, objection prep, follow-up question banks, closing notes, value proposition refinement, missed buying signals, and buyer confidence language through bounded Kalyra specialist calls.',

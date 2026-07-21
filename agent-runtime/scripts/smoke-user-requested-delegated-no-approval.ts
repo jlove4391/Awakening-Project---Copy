@@ -24,7 +24,7 @@ await mkdir(path.join(workspaceRoot, '.runtime-smoke'), { recursive: true });
 const { approveDelegatedTask, createDelegatedTask, getDelegatedTask } = await import('../src/tasks/store.js');
 await import('../src/tasks/queue.js');
 
-const { evaluateNexoraCapabilityForStep, requiresHardApprovalGate } = await import('../src/workflows/nexora/capabilities.js');
+const { requiresHardApprovalGate } = await import('../src/workflows/nexora/capabilities.js');
 const { requiresApprovalForExecutionMode } = await import('../src/governance/autonomyProfiles.js');
 const { getRegisteredTool } = await import('../src/tools/registry.js');
 const commitDefinition = getRegisteredTool('code.commit');
@@ -41,14 +41,11 @@ assert.equal(requiresHardApprovalGate(deleteDefinition), true, 'deletes must rem
 assert.equal(requiresHardApprovalGate(providerCreateDefinition), true, 'deploy/provider writes must remain hard approval gates');
 assert.equal(requiresHardApprovalGate(testDefinition), false, 'ordinary local tests must not be hard approval gates');
 assert.equal(requiresHardApprovalGate(editDefinition), false, 'ordinary local file edits must not be hard approval gates');
-assert.equal(evaluateNexoraCapabilityForStep('code.commit', 'pending', 'delegated').reason, 'approval_required');
-assert.equal(evaluateNexoraCapabilityForStep('code.delete_file', 'pending', 'delegated').reason, 'approval_required');
-assert.equal(evaluateNexoraCapabilityForStep('drive.create_text_file', 'pending', 'delegated').reason, 'approval_required');
-assert.equal(evaluateNexoraCapabilityForStep('code.test', 'pending', 'delegated').allowed, true);
 assert.equal(requiresApprovalForExecutionMode('delegated', undefined, testDefinition!, {}, 'repo.command'), false, 'delegated local test commands are auto-executable');
+assert.equal(requiresApprovalForExecutionMode('delegated', undefined, editDefinition!, {}, 'repo.write'), false, 'delegated ordinary file edits are auto-executable');
 assert.equal(requiresApprovalForExecutionMode('delegated', undefined, commitDefinition!, {}, 'repo.commit'), true, 'delegated commits stay hard-gated');
 assert.equal(requiresApprovalForExecutionMode('delegated', undefined, deleteDefinition!, {}, 'repo.delete'), true, 'delegated deletes stay hard-gated');
-assert.equal(requiresApprovalForExecutionMode('delegated', undefined, providerCreateDefinition!, {}, 'provider.create'), true, 'delegated provider writes/deploys stay hard-gated');
+assert.equal(requiresApprovalForExecutionMode('delegated', undefined, providerCreateDefinition!, {}, 'provider.create'), true, 'delegated provider writes and deploys stay hard-gated');
 assert.equal(requiresApprovalForExecutionMode('delegated', undefined, gmailSendDefinition!, {}, 'external.send'), true, 'delegated external sends stay hard-gated');
 
 const task = await createDelegatedTask({
@@ -57,64 +54,63 @@ const task = await createDelegatedTask({
   constraints: [`path: ${targetPath}`, `content: ${targetContent.trim()}`],
   requiredTools: ['code.create_file', 'code.test'],
   authorizationSource: 'user_delegated',
-  approvalRequirements: ['Would require approval if this were autonomous/proactive.'],
+  approvalRequirements: ['The direct user delegation supplies authority for ordinary local execution.'],
   executionPlan: [
     {
       id: 'create-user-requested-file',
       targetTool: 'code.create_file',
       arguments: { path: targetPath, content: targetContent },
       approvalStatus: 'pending',
-      approval: { required: true, status: 'pending', reason: 'write_requires_user_authorization' },
+      approval: { required: true, status: 'pending', reason: 'write_requested_by_user' },
     },
     {
       id: 'run-user-requested-test',
       targetTool: 'code.test',
       arguments: {
-        command: `node -e \"require('fs').writeFileSync('${testMarkerPath}', 'test command executed without approval prompt\\n')\"`,
+        command: `node -e "require('fs').writeFileSync('${testMarkerPath}', 'test command executed without approval prompt\\n')"`,
         cwd: '.',
         timeoutMs: 5000,
         maxOutputBytes: 4096,
       },
       approvalStatus: 'pending',
-      approval: { required: true, status: 'pending', reason: 'test_command_requires_user_authorization' },
+      approval: { required: true, status: 'pending', reason: 'test_requested_by_user' },
     },
   ],
-  initialLog: 'Smoke task verifies user-requested delegated execution bypasses approval prompts while preserving audit receipts.',
+  initialLog: 'Smoke task verifies user-requested delegated execution bypasses redundant approval prompts while preserving audit receipts.',
 });
 
 assert.equal(task.authorizationSource, 'user_delegated');
 assert.equal(task.status, 'queued');
 assert.equal(task.approvalRequirements[0]?.status, 'approved');
-assert.equal(task.executionPlan?.[0]?.approvalStatus, 'approved');
-assert.equal(task.executionPlan?.[1]?.approvalStatus, 'approved');
+assert.equal(task.executionPlan?.[0]?.approvalStatus, 'not_required');
+assert.equal(task.executionPlan?.[1]?.approvalStatus, 'not_required');
 assert.ok(task.events.some((event) => event.eventType === 'task.queued'), 'created task should emit queued audit event');
-assert.ok(!task.events.some((event) => event.eventType === 'task.approval_needed'), 'user-authorized governance should not create a pending approval item for explicit delegated/user-requested work');
+assert.ok(!task.events.some((event) => event.eventType === 'task.approval_needed'), 'ordinary explicit delegated work should not create a pending approval item');
 
 const autonomousTask = await createDelegatedTask({
   sessionId,
-  objective: 'Autonomous mutation still requires approval.',
-  requiredTools: ['code.create_file'],
+  objective: 'Autonomous mutation remains supervised until its task authority is approved.',
+  requiredTools: ['code.patch_file'],
   authorizationSource: 'autonomous',
-  approvalRequirements: ['Autonomous write must still wait for approval.'],
+  approvalRequirements: ['Autonomous mutation must wait for task approval under the current supervised envelope.'],
   executionPlan: [
     {
       id: 'autonomous-patch-proposal',
       targetTool: 'code.patch_file',
       arguments: { path: '.runtime-smoke/autonomous-proposal.txt', search: 'before', replace: 'after' },
       approvalStatus: 'pending',
-      approval: { required: true, status: 'pending', reason: 'autonomous_patch_proposal_requires_approval' },
+      approval: { required: true, status: 'pending', reason: 'autonomous_task_authority_required' },
     },
   ],
 });
 assert.equal(autonomousTask.status, 'pending_approval');
 assert.equal(autonomousTask.approvalRequirements[0]?.status, 'pending');
-assert.equal(autonomousTask.executionPlan?.[0]?.approvalStatus, 'pending');
-assert.ok(autonomousTask.events.some((event) => event.eventType === 'task.approval_needed'), 'autonomous patch proposal should create a pending approval item');
+assert.equal(autonomousTask.executionPlan?.[0]?.approvalStatus, 'not_required', 'ordinary patch policy is separate from the task-level autonomous authority gate');
+assert.ok(autonomousTask.events.some((event) => event.eventType === 'task.approval_needed'), 'autonomous task should create a pending approval item');
 
-const approvedAutonomousTask = await approveDelegatedTask(autonomousTask.id, 'smoke', 'Approve autonomous patch proposal through the canonical task approval route.');
+const approvedAutonomousTask = await approveDelegatedTask(autonomousTask.id, 'smoke', 'Approve the supervised autonomous task through the canonical task approval route.');
 assert.equal(approvedAutonomousTask?.status, 'queued');
 assert.equal(approvedAutonomousTask?.approvalRequirements[0]?.status, 'approved');
-assert.equal(approvedAutonomousTask?.executionPlan?.[0]?.approvalStatus, 'approved');
 
 const directUserTask = await createDelegatedTask({
   sessionId,
@@ -126,30 +122,28 @@ assert.equal(directUserTask.status, 'queued');
 assert.equal(directUserTask.approvalRequirements[0]?.status, 'approved');
 assert.ok(!directUserTask.events.some((event) => event.eventType === 'task.approval_needed'), 'direct user request should not create a pending approval item');
 
-
-const hardGateTask = await createDelegatedTask({
+const explicitBoundaryTask = await createDelegatedTask({
   sessionId,
-  objective: 'User-delegated high-risk commit must still require explicit approval.',
-  requiredTools: ['code.commit'],
+  objective: 'A permanent delegated delete must still require explicit approval.',
+  requiredTools: ['code.delete_file'],
   authorizationSource: 'user_delegated',
   executionPlan: [
     {
-      id: 'commit-hard-gate',
-      targetTool: 'code.commit',
-      arguments: { message: 'smoke: should require explicit approval' },
+      id: 'permanent-delete-boundary',
+      targetTool: 'code.delete_file',
+      arguments: {
+        path: targetPath,
+        permanent: true,
+        permanentApprovalNote: 'Permanent deletion remains a separate explicit boundary.',
+      },
       approvalStatus: 'pending',
-      approval: { required: true, status: 'pending', reason: 'commit_requires_explicit_approval' },
+      approval: { required: true, status: 'pending', reason: 'permanent_delete_requires_explicit_approval', scope: 'repo.delete' },
     },
   ],
 });
-assert.equal(hardGateTask.status, 'pending_approval', 'high-risk user-delegated commit must wait for canonical task approval');
-assert.equal(hardGateTask.executionPlan?.[0]?.approvalStatus, 'pending');
-assert.equal(hardGateTask.executionPlan?.[0]?.approval?.status, 'pending');
-assert.ok(hardGateTask.events.some((event) => event.eventType === 'task.approval_needed'), 'hard-gated commit should emit approval-needed prompt');
-
-const approvedHardGateTask = await approveDelegatedTask(hardGateTask.id, 'smoke', 'Approve high-risk delegated commit through the canonical task approval route.');
-assert.equal(approvedHardGateTask?.status, 'queued');
-assert.equal(approvedHardGateTask?.executionPlan?.[0]?.approvalStatus, 'approved');
+assert.equal(explicitBoundaryTask.status, 'pending_approval', 'permanent deletion must remain in the canonical approval queue');
+assert.equal(explicitBoundaryTask.executionPlan?.[0]?.approvalStatus, 'pending');
+assert.ok(explicitBoundaryTask.events.some((event) => event.eventType === 'task.approval_needed'), 'explicit boundary should emit approval-needed state');
 
 const finalTask = await waitForTask(task.id, (candidate) => ['completed', 'failed', 'blocked'].includes(candidate.status));
 assert.equal(finalTask.status, 'completed', `task should complete without an approval block, got ${finalTask.status}: ${finalTask.blockedReason || finalTask.result?.summary}`);
@@ -164,8 +158,8 @@ console.log('User-requested delegated no-approval smoke passed.');
 async function waitForTask(taskId: string, predicate: (task: NonNullable<Awaited<ReturnType<typeof getDelegatedTask>>>) => boolean) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const task = await getDelegatedTask(taskId);
-    if (task && predicate(task)) return task;
+    const candidate = await getDelegatedTask(taskId);
+    if (candidate && predicate(candidate)) return candidate;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   const latest = await getDelegatedTask(taskId);

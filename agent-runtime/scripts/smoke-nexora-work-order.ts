@@ -108,6 +108,16 @@ const approved = await approveExecutionPlanStep(approvalTask.id, stepId!, 'user'
 assert.equal(approved?.status, 'queued');
 durableTaskQueue.enqueue(approvalTask.id);
 const approvalCompleted = await waitForTask(approvalTask.id, (candidate) => ['completed', 'failed', 'blocked'].includes(candidate.status));
+if (approvalCompleted.status !== 'completed') {
+  console.error('Approval-resume diagnostics:', JSON.stringify({
+    status: approvalCompleted.status,
+    blockedReason: approvalCompleted.blockedReason,
+    pendingToolAction: approvalCompleted.pendingToolAction,
+    executionPlan: approvalCompleted.executionPlan,
+    logs: approvalCompleted.logs,
+    events: approvalCompleted.events,
+  }, null, 2));
+}
 assert.equal(approvalCompleted.status, 'completed', approvalCompleted.result?.summary || approvalCompleted.blockedReason || 'approved work order did not complete');
 assert.equal(existsSync(path.join(workspaceRoot, deletePath)), false, 'approved file deletion should execute exactly once');
 assert.equal((approvalCompleted.result?.data as any)?.workOrder?.terminalStatus, 'completed');

@@ -83,23 +83,34 @@ Acceptance:
 
 ## Milestone 4 — Unified receipt and trust loop
 
-Status: **next**
+Status: **completed** in PR #195
 
-Goal: use receipts as the common primitive for audit, memory, trust, UI, and follow-through.
+Goal: use one primary receipt as the common proof primitive for audit, memory, trust, UI, and follow-through.
 
 Deliverables:
 
-- One canonical receipt envelope.
-- Links across request, work order, execution, memory candidate, and trust event.
-- Receipt completeness validation.
-- Trust impact derived from validated outcomes, corrections, failures, and rollbacks.
-- Domain-specific autonomy expansion and contraction recommendations.
+- A durable, versioned canonical receipt envelope with deterministic primary identifiers.
+- One receipt store for subject, actor, authority, policy, approval, command/context, memory, task, work-order, execution, evidence, validation, rollback, and trust links.
+- Receipt completeness and link-integrity validation with precise missing-field and invalid-link diagnostics.
+- Primary canonical receipts for normal registered-tool executions and Nexora work orders, with older execution, task, work-order, SpecialistCall, and Alpha receipt identifiers retained as supporting compatibility evidence.
+- One work-order receipt that persists across pending approval, execution, validation, and completion rather than creating unrelated proof records at each stage.
+- Idempotent receipt-derived trust events for receipt quality, validation, successful or failed execution, and explicit-boundary accuracy.
+- Receipt-linked user-correction and rollback signals.
+- Domain-specific autonomy expansion, hold, and contraction recommendations derived only from complete validated receipt evidence.
+- Hard approval scopes that remain non-expanding boundary evidence even after an approved action completes.
+- Fresh-process persistence for canonical receipts and their linked trust events.
 
 Acceptance:
 
-- Every completed action has one primary receipt that the UI and trust engine can interpret without subsystem-specific branching.
+- Every completed normal tool action and Nexora work order has exactly one primary canonical receipt.
+- Supporting execution, task, work-order, Alpha, memory, and trust records link to the primary receipt without requiring subsystem-specific interpretation.
+- Incomplete, unvalidated, supporting-only, pending-approval, blocked, or hard-boundary receipts cannot expand autonomy.
+- Repeated complete and validated ordinary outcomes can recommend bounded domain expansion; failures, failed validation, corrections, or rollbacks contract or hold the domain recommendation.
+- Receipt and trust state survive a fresh-process restart.
 
 ## Milestone 5 — Real Alpha evidence flows
+
+Status: **next**
 
 Goal: prove CORE with real scenarios through the normal conversational path.
 

@@ -40,24 +40,44 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Typecheck agent runtime
-        run: npm run typecheck:agent-runtime
+        id: typecheck
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run typecheck:agent-runtime 2>&1 | tee typecheck.log
+
+      - name: Upload typecheck diagnostic
+        if: steps.typecheck.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: typecheck-log
+          path: typecheck.log
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Build agent runtime
+        if: steps.typecheck.outcome == 'success'
         run: npm run build:agent-runtime
 
       - name: Verify CORE command lifecycle
+        if: steps.typecheck.outcome == 'success'
         run: npm run smoke:core-command-lifecycle
 
       - name: Verify CORE context continuity and restart
+        if: steps.typecheck.outcome == 'success'
         run: npm run smoke:core-context-continuity
 
       - name: Verify Nexora work-order execution
+        if: steps.typecheck.outcome == 'success'
         run: npm run smoke:nexora-work-order
 
       - name: Verify Nexora work-order restart recovery
+        if: steps.typecheck.outcome == 'success'
         run: npm run smoke:nexora-work-order-restart
 
       - name: Verify SDK approval interruption and resume
+        if: steps.typecheck.outcome == 'success'
         id: sdk-approval-smoke
         continue-on-error: true
         shell: bash
@@ -75,6 +95,7 @@ jobs:
           retention-days: 3
 
       - name: Verify ordinary delegated file execution
+        if: steps.typecheck.outcome == 'success'
         id: delegated-file-smoke
         continue-on-error: true
         shell: bash
@@ -92,6 +113,7 @@ jobs:
           retention-days: 3
 
       - name: Verify user-requested delegation authority
+        if: steps.typecheck.outcome == 'success'
         id: delegated-authority-smoke
         continue-on-error: true
         shell: bash
@@ -109,8 +131,9 @@ jobs:
           retention-days: 3
 
       - name: Check normal conversational smoke setup behavior
+        if: steps.typecheck.outcome == 'success'
         run: npm run smoke:core-command-normal-path
 
-      - name: Enforce smoke results
-        if: always() && (steps.sdk-approval-smoke.outcome == 'failure' || steps.delegated-file-smoke.outcome == 'failure' || steps.delegated-authority-smoke.outcome == 'failure')
+      - name: Enforce validation results
+        if: always() && (steps.typecheck.outcome == 'failure' || steps.sdk-approval-smoke.outcome == 'failure' || steps.delegated-file-smoke.outcome == 'failure' || steps.delegated-authority-smoke.outcome == 'failure')
         run: exit 1

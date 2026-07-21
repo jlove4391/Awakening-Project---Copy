@@ -104,6 +104,60 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Verify canonical receipt and trust loop
+        if: steps.typecheck.outcome == 'success'
+        id: canonical-receipt-smoke
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run smoke:canonical-receipt-trust 2>&1 | tee canonical-receipt-smoke.log
+
+      - name: Upload canonical receipt diagnostic
+        if: steps.canonical-receipt-smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-receipt-smoke-log
+          path: canonical-receipt-smoke.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Verify canonical receipt restart persistence
+        if: steps.typecheck.outcome == 'success'
+        id: canonical-receipt-restart-smoke
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run smoke:canonical-receipt-restart 2>&1 | tee canonical-receipt-restart-smoke.log
+
+      - name: Upload canonical receipt restart diagnostic
+        if: steps.canonical-receipt-restart-smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-receipt-restart-smoke-log
+          path: canonical-receipt-restart-smoke.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Verify canonical Nexora work-order receipt
+        if: steps.typecheck.outcome == 'success'
+        id: canonical-work-order-receipt-smoke
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run smoke:canonical-work-order-receipt 2>&1 | tee canonical-work-order-receipt-smoke.log
+
+      - name: Upload canonical work-order receipt diagnostic
+        if: steps.canonical-work-order-receipt-smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-work-order-receipt-smoke-log
+          path: canonical-work-order-receipt-smoke.log
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Verify SDK approval interruption and resume
         if: steps.typecheck.outcome == 'success'
         id: sdk-approval-smoke
@@ -163,5 +217,5 @@ jobs:
         run: npm run smoke:core-command-normal-path
 
       - name: Enforce validation results
-        if: always() && (steps.typecheck.outcome == 'failure' || steps.nexora-work-order-smoke.outcome == 'failure' || steps.nexora-restart-smoke.outcome == 'failure' || steps.sdk-approval-smoke.outcome == 'failure' || steps.delegated-file-smoke.outcome == 'failure' || steps.delegated-authority-smoke.outcome == 'failure')
+        if: always() && (steps.typecheck.outcome == 'failure' || steps.nexora-work-order-smoke.outcome == 'failure' || steps.nexora-restart-smoke.outcome == 'failure' || steps.canonical-receipt-smoke.outcome == 'failure' || steps.canonical-receipt-restart-smoke.outcome == 'failure' || steps.canonical-work-order-receipt-smoke.outcome == 'failure' || steps.sdk-approval-smoke.outcome == 'failure' || steps.delegated-file-smoke.outcome == 'failure' || steps.delegated-authority-smoke.outcome == 'failure')
         run: exit 1

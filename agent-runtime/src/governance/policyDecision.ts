@@ -197,9 +197,24 @@ export function decideToolPolicy(definition: Pick<RegisteredToolDefinition, 'nam
   return decidePolicy({ toolName: definition.name, action: definition.audit.action, category: definition.audit.category, riskLevel: definition.riskLevel, approvalScope: approvalScope || definition.requiredApprovalScope, input });
 }
 
-export function decidePolicyForToolName(toolName: string, input: Record<string, unknown> = {}, approvalScope?: ApprovalScope | string) {
+function inferNamedToolPolicy(toolName: string) {
   const [category = 'runtime', action = toolName] = toolName.split('.', 2);
-  return decidePolicy({ toolName, action, category, approvalScope, input, riskLevel: 'unknown' });
+  if (category !== 'code' && category !== 'nexora') return { category, action, riskLevel: 'unknown' as const, approvalScope: undefined };
+  if (action === 'commit') return { category, action, riskLevel: 'purchase_or_commit' as const, approvalScope: 'repo.commit' as const };
+  if (action === 'delete_file' || action === 'delete_path') return { category, action, riskLevel: action === 'delete_path' ? ('code_execution' as const) : ('write' as const), approvalScope: 'repo.delete' as const };
+  if (action === 'run_command' || action === 'test' || action === 'execute_code' || action === 'scaffold_app') return { category, action, riskLevel: 'code_execution' as const, approvalScope: 'repo.command' as const };
+  if (/^(edit|create_file|patch_file|move_path|copy_path|mkdir|write_json|git_restore_file|git_create_branch)$/u.test(action)) {
+    return { category, action, riskLevel: 'write' as const, approvalScope: 'repo.write' as const };
+  }
+  if (/^(read|search|tree|read_json|diff|git_status|git_diff|git_log|project_summary|package_scripts|dependency_summary|find_entrypoints|find_configs)$/u.test(action)) {
+    return { category, action, riskLevel: 'read' as const, approvalScope: undefined };
+  }
+  return { category, action, riskLevel: 'unknown' as const, approvalScope: undefined };
+}
+
+export function decidePolicyForToolName(toolName: string, input: Record<string, unknown> = {}, approvalScope?: ApprovalScope | string) {
+  const inferred = inferNamedToolPolicy(toolName);
+  return decidePolicy({ toolName, action: inferred.action, category: inferred.category, approvalScope: approvalScope || inferred.approvalScope, input, riskLevel: inferred.riskLevel });
 }
 
 export function policyRequiresApproval(decision: PolicyDecision) {

@@ -48,6 +48,9 @@ jobs:
       - name: Verify CORE command lifecycle
         run: npm run smoke:core-command-lifecycle
 
+      - name: Verify CORE context continuity and restart
+        run: npm run smoke:core-context-continuity
+
       - name: Verify SDK approval interruption and resume
         id: sdk-approval-smoke
         continue-on-error: true

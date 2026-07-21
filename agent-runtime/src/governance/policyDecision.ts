@@ -129,6 +129,7 @@ export function isDestructiveIrreversiblePolicyInput(input: PolicyDecisionInput)
 
 export function isOrdinaryWorkspacePolicyInput(input: PolicyDecisionInput) {
   const ordinaryRepoScopes = new Set(['repo.write', 'repo.command', 'repo.commit']);
+  if (input.approvalScope === 'repo.delete') return false;
   if (input.approvalScope && ordinaryRepoScopes.has(String(input.approvalScope))) return true;
   if (input.category === 'code' || input.category === 'vscode' || input.category === 'nexora' || input.category === 'alpha') return !isDestructiveIrreversiblePolicyInput(input);
   if (input.category === 'memory') return !isPersonalInformationSensitivePolicyInput(input);

@@ -19,3 +19,26 @@ export {
   listCoreCommands,
   transitionCoreCommand,
 } from './commandStore.js';
+export {
+  assembleCoreContext,
+  getCoreContextBundle,
+  renderCoreContextForInstructions,
+} from './contextAssembler.js';
+export {
+  clearCoreIdentityCacheForTesting,
+  getCoreIdentity,
+  updateCoreIdentity,
+} from './identityStore.js';
+export type {
+  AssembleCoreContextInput,
+  CoreContextBundle,
+  CoreContextCommandReference,
+  CoreContextContinuity,
+  CoreContextReceiptReference,
+  CoreContextReferences,
+  CoreContextTaskReference,
+  CoreExecutionEnvelope,
+  CoreExecutionScopeLimit,
+  CoreIdentityRecord,
+  CoreValidationRequirement,
+} from './contextTypes.js';

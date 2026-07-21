@@ -3,7 +3,7 @@ import { canonicalReceiptId, upsertCanonicalReceipt, type CanonicalReceiptStatus
 import type { DelegatedTaskHandler } from './queue.js';
 import { nexoraWorkOrderExecutionWorker } from './nexoraWorkOrderWorker.js';
 import { appendDelegatedTaskEvent, getDelegatedTask, updateDelegatedTask } from './store.js';
-import type { ApprovalScope, DelegatedTask } from './types.js';
+import type { ApprovalScope, DelegatedTask, ExecutionPlanStep } from './types.js';
 import { createNexoraWorkOrderForTask, getNexoraWorkOrderByTaskId, patchNexoraWorkOrder, type NexoraWorkOrder, type NexoraWorkOrderValidationStatus } from './workOrders.js';
 
 const hardApprovalScopes = new Set<ApprovalScope>([
@@ -24,10 +24,28 @@ function unique(values: Array<string | undefined> = []) {
   return [...new Set(values.filter((value): value is string => Boolean(value?.trim())).map((value) => value.trim()))];
 }
 
+function scopeForToolName(toolName: string): ApprovalScope | undefined {
+  if (toolName === 'code.commit') return 'repo.commit';
+  if (toolName === 'code.delete_file' || toolName === 'code.delete_path') return 'repo.delete';
+  if (toolName === 'gmail.send_email' || toolName === 'voice.speak_text') return 'external.send';
+  if (toolName.includes('migrate')) return 'database.migrate';
+  const [category, action = ''] = toolName.split('.', 2);
+  if (category !== 'code' && category !== 'nexora' && category !== 'delegation') {
+    if (action.startsWith('delete')) return 'provider.delete';
+    if (action.startsWith('create')) return 'provider.create';
+    if (action.startsWith('update')) return 'provider.update';
+  }
+  return undefined;
+}
+
+function scopeForStep(step: ExecutionPlanStep) {
+  return step.approval?.scope || scopeForToolName(step.targetTool);
+}
+
 function hardBoundaryScope(task: DelegatedTask) {
   const scopes = [
     task.pendingToolAction?.approvalScope,
-    ...(task.executionPlan || []).map((step) => step.approval?.scope),
+    ...(task.executionPlan || []).map(scopeForStep),
   ];
   return scopes.find((scope): scope is ApprovalScope => Boolean(scope && hardApprovalScopes.has(scope)));
 }
@@ -88,7 +106,7 @@ export async function publishCanonicalWorkOrderReceipt(taskId: string) {
   const validation = validationStatus(task, order);
   const approvalScope = hardBoundaryScope(task) || task.pendingToolAction?.approvalScope;
   const explicitBoundary = status === 'pending_approval' || status === 'blocked' || Boolean(approvalScope && hardApprovalScopes.has(approvalScope));
-  const approvedBoundary = Boolean(approvalScope && task.executionPlan?.some((step) => step.approval?.scope === approvalScope && step.approvalStatus === 'approved'));
+  const approvedBoundary = Boolean(approvalScope && task.executionPlan?.some((step) => scopeForStep(step) === approvalScope && step.approvalStatus === 'approved'));
   const resultSummary = task.result?.summary
     || (status === 'pending_approval' ? approvalSummary(task, order) : undefined)
     || order.stateHistory.at(-1)?.summary

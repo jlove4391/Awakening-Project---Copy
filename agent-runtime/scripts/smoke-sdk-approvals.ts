@@ -26,75 +26,94 @@ const {
 } = await import('../src/approvals/sdkApprovalStore.js');
 
 const sessionId = `sdk-approval-smoke-${Date.now()}`;
-const targetPath = '.runtime-smoke/sdk-approved.txt';
-const targetContent = 'SDK approval smoke created this file after approval resume.\n';
+const targetPath = '.runtime-smoke/sdk-approved-delete.txt';
+const targetContent = 'SDK approval smoke deletes this file only after approval resume.\n';
 const toolCallId = 'call-sdk-approval-smoke';
+const commandId = 'command-sdk-approval-smoke';
+const deleteInput = {
+  path: targetPath,
+  permanent: true,
+  permanentApprovalNote: 'Approve permanent deletion of the isolated SDK smoke file.',
+};
 
 const context = await getRuntimeContext(sessionId);
 context.agent = 'nexora';
 context.executionMode = 'reactive';
 
-const paused = await executeRegisteredTool('code.create_file', { path: targetPath, content: targetContent }, context, toolCallId) as any;
-assert.equal(paused.ok, false, 'unapproved SDK-gated tool call should not execute');
-assert.equal(paused.status, 'approval_required', 'unapproved tool call should pause for HITL approval');
-assert.equal(existsSync(path.join(workspaceRoot, targetPath)), false, 'paused tool call must not create the file');
+const created = await executeRegisteredTool('code.create_file', { path: targetPath, content: targetContent }, context) as any;
+assert.equal(created.ok, true, 'ordinary local file creation should execute without a redundant approval prompt');
+assert.equal(await readFile(path.join(workspaceRoot, targetPath), 'utf8'), targetContent);
 
+const paused = await executeRegisteredTool('code.delete_file', deleteInput, context, toolCallId) as any;
+assert.equal(paused.ok, false, 'unapproved explicit-boundary tool call should not execute');
+assert.equal(paused.result?.status || paused.status, 'approval_required', 'permanent delete should pause for HITL approval');
+assert.equal(existsSync(path.join(workspaceRoot, targetPath)), true, 'paused permanent delete must preserve the file');
 
 const singlePending = savePendingSdkApproval(sessionId, 'serialized-run-state-single', [
   {
-    name: 'code.create_file',
-    toolName: 'code.create_file',
-    arguments: JSON.stringify({ path: targetPath, content: targetContent }),
-    rawItem: { callId: toolCallId, riskLevel: 'medium' },
+    name: 'code.delete_file',
+    toolName: 'code.delete_file',
+    arguments: JSON.stringify(deleteInput),
+    rawItem: { callId: toolCallId, riskLevel: 'high' },
   } as any,
-]);
+], commandId);
 assert.equal(singlePending.approvals.length, 1);
+assert.equal(singlePending.commandId, commandId, 'pending SDK approval should retain the originating CORE command ID');
 assert.match(formatApprovalPrompt(singlePending), /Reply with an explicit approval decision/);
 assert.equal(getPendingSdkApproval(sessionId)?.approvals[0]?.approvalId, toolCallId);
 
 context.sdkApprovedToolCallIds = [toolCallId];
-context.sdkApprovedToolNames = ['code.create_file'];
-const approved = await executeRegisteredTool('code.create_file', { path: targetPath, content: targetContent }, context, toolCallId) as any;
-assert.equal(approved.ok, true, 'SDK-approved resume should execute the tool');
-assert.equal(await readFile(path.join(workspaceRoot, targetPath), 'utf8'), targetContent);
+context.sdkApprovedToolNames = ['code.delete_file'];
+const approved = await executeRegisteredTool('code.delete_file', deleteInput, context, toolCallId) as any;
+assert.equal(approved.ok, true, 'SDK-approved resume should execute the explicit-boundary tool');
+assert.equal(approved.status, 'permanently_deleted');
+assert.equal(existsSync(path.join(workspaceRoot, targetPath)), false, 'approved permanent delete should remove the isolated file');
 clearPendingSdkApproval(sessionId);
 
-const approvedRecords = await listExecutionRecords({ limit: 10 });
-const completedRecord = approvedRecords.find((record) => record.action === 'code.create_file' && record.status === 'completed');
+const approvedRecords = await listExecutionRecords({ sessionId, limit: 20 });
+const completedRecord = approvedRecords.find((record) => record.action === 'code.delete_file' && record.status === 'completed');
 assert.ok(completedRecord, 'approved execution should write a completed execution record');
-assert.ok(['approved', 'not_required'].includes(completedRecord?.approvalStatus || ''), 'completed execution should reflect approved or no-longer-required approval status');
-assert.equal(completedRecord?.receipt.summary, 'code.create_file completed');
+assert.equal(completedRecord?.approvalStatus, 'approved', 'explicit-boundary completion should reflect SDK approval');
+assert.equal(completedRecord?.receipt.summary, 'code.delete_file completed');
 assert.ok(completedRecord?.providerResponseSummary, 'completed execution should include provider response summary');
 
 const rejectionSessionId = `${sessionId}-reject`;
 const rejectionContext = await getRuntimeContext(rejectionSessionId);
 rejectionContext.agent = 'nexora';
 rejectionContext.executionMode = 'reactive';
+const rejectedPath = '.runtime-smoke/rejected-delete.txt';
+await executeRegisteredTool('code.create_file', { path: rejectedPath, content: 'preserve me\n' }, rejectionContext);
+const rejectedInput = {
+  path: rejectedPath,
+  permanent: true,
+  permanentApprovalNote: 'This isolated file would be permanently deleted only if approved.',
+};
 const rejectedApproval = savePendingSdkApproval(rejectionSessionId, 'serialized-run-state-reject', [
   {
-    name: 'code.create_file',
-    toolName: 'code.create_file',
-    arguments: JSON.stringify({ path: '.runtime-smoke/rejected.txt', content: 'nope\n' }),
-    rawItem: { callId: 'call-rejected', riskLevel: 'medium' },
+    name: 'code.delete_file',
+    toolName: 'code.delete_file',
+    arguments: JSON.stringify(rejectedInput),
+    rawItem: { callId: 'call-rejected', riskLevel: 'high' },
   } as any,
-]);
+], 'command-rejected');
 assert.equal(rejectedApproval.approvals[0]?.approvalId, 'call-rejected');
 clearPendingSdkApproval(rejectionSessionId);
 rejectionContext.sdkApprovedToolCallIds = [];
 rejectionContext.sdkApprovedToolNames = [];
-const rejected = await executeRegisteredTool('code.create_file', { path: '.runtime-smoke/rejected.txt', content: 'nope\n' }, rejectionContext, 'call-rejected') as any;
-assert.equal(rejected.status, 'approval_required', 'rejected/cleared approval should remain blocked if retried without SDK approval');
-assert.equal(existsSync(path.join(workspaceRoot, '.runtime-smoke/rejected.txt')), false, 'rejected approval must not create the file');
+const rejected = await executeRegisteredTool('code.delete_file', rejectedInput, rejectionContext, 'call-rejected') as any;
+assert.equal(rejected.result?.status || rejected.status, 'approval_required', 'rejected or cleared approval should remain blocked if retried without SDK approval');
+assert.equal(existsSync(path.join(workspaceRoot, rejectedPath)), true, 'rejected permanent deletion must preserve the file');
 
 const ambiguitySessionId = `${sessionId}-ambiguous`;
 const ambiguous = savePendingSdkApproval(ambiguitySessionId, 'serialized-run-state-many', [
-  { name: 'code.create_file', toolName: 'code.create_file', arguments: '{"path":"a"}', rawItem: { callId: 'approval-a', riskLevel: 'medium' } } as any,
-  { name: 'code.create_file', toolName: 'code.create_file', arguments: '{"path":"b"}', rawItem: { callId: 'approval-b', riskLevel: 'medium' } } as any,
-]);
+  { name: 'code.delete_file', toolName: 'code.delete_file', arguments: '{"path":"a","permanent":true}', rawItem: { callId: 'approval-a', riskLevel: 'high' } } as any,
+  { name: 'code.delete_file', toolName: 'code.delete_file', arguments: '{"path":"b","permanent":true}', rawItem: { callId: 'approval-b', riskLevel: 'high' } } as any,
+], 'command-ambiguous');
 const ambiguityPrompt = formatApprovalPrompt(ambiguous);
 assert.match(ambiguityPrompt, /Multiple approvals are pending/);
 assert.match(ambiguityPrompt, /approval-a/);
 assert.match(ambiguityPrompt, /approval-b/);
+assert.equal(ambiguous.commandId, 'command-ambiguous');
 clearPendingSdkApproval(ambiguitySessionId);
 
 console.log('SDK approvals smoke passed.');

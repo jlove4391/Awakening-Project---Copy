@@ -5,8 +5,9 @@ import { fileURLToPath } from 'node:url';
 
 const runtimeRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const smokeRoot = path.join(runtimeRoot, '.runtime-data', 'smoke', `core-command-lifecycle-${Date.now()}`);
-process.env.AGENT_RUNTIME_DATA_DIR = path.join(smokeRoot, 'data');
-await mkdir(process.env.AGENT_RUNTIME_DATA_DIR, { recursive: true });
+const dataDir = path.join(smokeRoot, 'data');
+process.env.AGENT_RUNTIME_DATA_DIR = dataDir;
+await mkdir(dataDir, { recursive: true });
 
 const {
   assertCoreCommandTransition,
@@ -45,6 +46,7 @@ await transitionCoreCommand(command.id, 'completed');
 
 const completed = await getCoreCommand(command.id);
 assert.ok(completed);
+if (!completed) throw new Error('completed CORE command was not found');
 assert.equal(completed.state, 'completed');
 assert.equal(completed.authority?.decision, 'execute_with_receipts');
 assert.deepEqual(completed.links.memoryReferenceIds, ['memory-1']);
@@ -78,10 +80,10 @@ assert.equal(commands.length, 2);
 const sessionCommands = await listCoreCommands({ sessionId: 'session-lifecycle' });
 assert.equal(sessionCommands.length, 1);
 
-const commandsDir = path.join(process.env.AGENT_RUNTIME_DATA_DIR, 'core', 'commands');
+const commandsDir = path.join(dataDir, 'core', 'commands');
 const globalRecords = JSON.parse(await readFile(path.join(commandsDir, 'commands.json'), 'utf8')) as Array<{ id: string; state: string }>;
 const sessionRecords = JSON.parse(await readFile(path.join(commandsDir, 'sessions', 'session-lifecycle.json'), 'utf8')) as Array<{ id: string; state: string }>;
-const events = (await readFile(path.join(commandsDir, 'command-events.jsonl'), 'utf8')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+const events = (await readFile(path.join(commandsDir, 'command-events.jsonl'), 'utf8')).trim().split('\n').filter(Boolean).map((line: string) => JSON.parse(line) as { commandId: string; state: string });
 assert.ok(globalRecords.some((record) => record.id === command.id && record.state === 'completed'));
 assert.ok(sessionRecords.some((record) => record.id === command.id && record.state === 'completed'));
 assert.ok(events.some((event) => event.commandId === command.id && event.state === 'receipted'));

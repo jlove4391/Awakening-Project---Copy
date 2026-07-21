@@ -43,6 +43,8 @@
     "smoke:delegated-file-create": "npm --workspace @awakening/agent-runtime run smoke:delegated-file-create",
     "smoke:digitalocean-status": "npm --workspace @awakening/agent-runtime run smoke:digitalocean-status",
     "smoke:databank-status": "npm --workspace @awakening/agent-runtime run smoke:databank-status",
-    "smoke:web-tools": "npm --workspace @awakening/agent-runtime run smoke:web-tools"
+    "smoke:web-tools": "npm --workspace @awakening/agent-runtime run smoke:web-tools",
+    "smoke:core-command-lifecycle": "npm --workspace @awakening/agent-runtime run smoke:core-command-lifecycle",
+    "smoke:core-command-normal-path": "npm --workspace @awakening/agent-runtime run smoke:core-command-normal-path"
   }
 }

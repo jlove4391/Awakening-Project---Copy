@@ -3,7 +3,7 @@ import { canonicalReceiptId, upsertCanonicalReceipt, type CanonicalReceiptStatus
 import type { DelegatedTaskHandler } from './queue.js';
 import { nexoraWorkOrderExecutionWorker } from './nexoraWorkOrderWorker.js';
 import { appendDelegatedTaskEvent, getDelegatedTask, updateDelegatedTask } from './store.js';
-import { getNexoraWorkOrderByTaskId, patchNexoraWorkOrder, type NexoraWorkOrder } from './workOrders.js';
+import { getNexoraWorkOrderByTaskId, patchNexoraWorkOrder, type NexoraWorkOrder, type NexoraWorkOrderValidationStatus } from './workOrders.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -14,10 +14,17 @@ function unique(values: Array<string | undefined> = []) {
 }
 
 function receiptStatus(order: NexoraWorkOrder): CanonicalReceiptStatus {
-  if (order.state === 'ready' || order.state === 'queued') return 'requested';
+  if (order.state === 'draft' || order.state === 'ready' || order.state === 'queued') return 'requested';
   if (order.state === 'running' || order.state === 'validating') return 'running';
   if (order.state === 'blocked') return 'blocked';
-  return order.state;
+  if (order.state === 'completed') return 'completed';
+  if (order.state === 'failed') return 'failed';
+  return 'cancelled';
+}
+
+function canonicalValidationStatus(status: NexoraWorkOrderValidationStatus): CanonicalReceiptValidationStatus {
+  if (status === 'skipped') return 'not_required';
+  return status;
 }
 
 function validationStatus(order: NexoraWorkOrder): CanonicalReceiptValidationStatus {
@@ -116,7 +123,7 @@ async function publishCanonicalWorkOrderReceipt(taskId: string) {
       required: true,
       checks: order.validationPlan.map((check) => ({
         id: check.id,
-        status: check.status,
+        status: canonicalValidationStatus(check.status),
         summary: check.resultSummary || check.description,
       })),
     },

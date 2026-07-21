@@ -1,6 +1,6 @@
 import { taskEvents } from './events.js';
 import { cancelDelegatedTask, getDelegatedTask, listDelegatedTasks, resumeDelegatedTask, updateDelegatedTask } from './store.js';
-import { nexoraWorkOrderExecutionWorker } from './nexoraWorkOrderWorker.js';
+import { canonicalNexoraWorkOrderWorker } from './canonicalWorkOrderWorker.js';
 import { prepareNexoraWorkOrderForRecovery } from './workOrders.js';
 import type { DelegatedTask } from './types.js';
 
@@ -159,7 +159,7 @@ export const nexoraSafeDemoWorker: DelegatedTaskHandler = async (task) => {
 };
 
 durableTaskQueue.addHandler(nexoraSafeDemoWorker);
-durableTaskQueue.addHandler(nexoraWorkOrderExecutionWorker);
+durableTaskQueue.addHandler(canonicalNexoraWorkOrderWorker);
 
 export async function enqueuePersistedQueuedTasks() {
   const tasks = await listDelegatedTasks();

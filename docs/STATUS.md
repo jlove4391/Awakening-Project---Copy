@@ -12,7 +12,9 @@ This file classifies the active repository against the canonical CORE Alpha dire
 - Shared contracts: `packages/shared/`.
 - `legacy/` is reference-only and must not receive new product work.
 - PR #155 was closed without merge because it targeted an obsolete conversational task-approval architecture.
-- PR #186 is the current latest merged repair and corrected delegated approval-state handling and dependencies.
+- PR #186 corrected delegated approval-state handling and dependencies.
+- PR #187 established the canonical CORE source set and completed Milestone 0.
+- Milestone 1 implementation is active on `core/sovereign-command-loop` under issue #188.
 
 ## Keep
 
@@ -41,14 +43,19 @@ This file classifies the active repository against the canonical CORE Alpha dire
 - Execution receipt panel.
 - Existing task and approval state rendering that can be narrowed to genuine boundaries.
 
+## Active correction
+
+### Sovereign Command Loop
+
+- Add typed, durable command records and legal state transitions.
+- Create one command record for each normal Elora request.
+- Emit command lifecycle events through the existing runtime stream.
+- Link command records to current memory references, delegated task IDs, execution IDs, receipt IDs, and candidate-memory IDs where available.
+- Preserve SDK interruption/resume as the conversational approval mechanism and attach waiting approvals to the originating command.
+- Remove the hardcoded CORE execution-proof phrase and its dedicated production route.
+- Replace the obsolete proof smoke with deterministic lifecycle and optional normal conversational-path coverage.
+
 ## Correct next
-
-### Orchestration
-
-- Replace the hardcoded CORE execution-proof prompt path with a generic Sovereign Command Loop.
-- Add a typed command/work state machine controlled by the backend.
-- Require context assembly before planning or execution.
-- Ensure validation, receipt creation, candidate-memory capture, and Elora synthesis are lifecycle stages rather than optional conventions.
 
 ### Context
 
@@ -71,12 +78,12 @@ This file classifies the active repository against the canonical CORE Alpha dire
 
 ### Documentation
 
-- Make `CORE.md`, `ELORA.md`, `NEXORA.md`, `AGENTS.md`, `ROADMAP.md`, and this file the governing source set.
+- Keep `CORE.md`, `ELORA.md`, `NEXORA.md`, `AGENTS.md`, `ROADMAP.md`, and this file as the governing source set.
 - Mark older implementation and reset plans as supporting or historical where they conflict.
 
 ## Partial
 
-- Memory persists, but retrieval is not yet enforced as a prerequisite to every action.
+- Memory persists, but retrieval is not yet enforced as a complete prerequisite to every action.
 - Relationship context is loaded, but not yet fully converted into execution decisions.
 - Trust scores exist, but do not yet govern the autonomy envelope in the policy engine.
 - Specialist contracts exist, but only Nexora has a meaningful execution worker.
@@ -97,7 +104,6 @@ This file classifies the active repository against the canonical CORE Alpha dire
 
 ## Archive or remove after verification
 
-- Hardcoded demo/proof phrase branches once equivalent generic acceptance coverage exists.
 - Duplicate or obsolete approval helpers that predate SDK interruption/resume.
 - Historical planning documents that conflict with the canonical source set, after preserving useful context.
 - Dead smoke scripts tied only to superseded architecture.
@@ -105,11 +111,9 @@ This file classifies the active repository against the canonical CORE Alpha dire
 
 ## Immediate acceptance work
 
-1. Merge the source-of-truth reset.
-2. Audit all normal Elora entry paths and identify where generic orchestration must replace hardcoded routes.
-3. Implement the Sovereign Command Loop.
-4. Add context assembly and identity continuity.
-5. Formalize Nexora work orders and unified receipts.
-6. Prove local execution, restart continuity, candidate memory, and one real approval boundary.
-7. Add one Drive/Docs evidence flow.
-8. Finish the minimal operational UI.
+1. Complete and validate the Sovereign Command Loop.
+2. Add context assembly and identity continuity.
+3. Formalize Nexora work orders and unified receipts.
+4. Prove local execution, restart continuity, candidate memory, and one real approval boundary.
+5. Add one Drive/Docs evidence flow.
+6. Finish the minimal operational UI.

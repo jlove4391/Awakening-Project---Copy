@@ -15,13 +15,13 @@ const targetContent = 'Nexora delegated file-create smoke passed.\n';
 const timeoutMs = Number(process.env.SMOKE_DELEGATED_FILE_CREATE_TIMEOUT_MS || 30000);
 const sessionId = `smoke-delegated-file-create-${Date.now()}`;
 
-process.env.AGENT_RUNTIME_DATA_DIR = process.env.AGENT_RUNTIME_DATA_DIR || dataDir;
-process.env.NEXORA_WORKSPACE_ROOT = process.env.NEXORA_WORKSPACE_ROOT || workspaceRoot;
-process.env.NEXORA_ENABLE_WRITE_FILES = process.env.NEXORA_ENABLE_WRITE_FILES || 'true';
+process.env.AGENT_RUNTIME_DATA_DIR = dataDir;
+process.env.NEXORA_WORKSPACE_ROOT = workspaceRoot;
+process.env.NEXORA_ENABLE_WRITE_FILES = 'true';
 
-await mkdir(path.join(process.env.NEXORA_WORKSPACE_ROOT, '.runtime-smoke'), { recursive: true });
+await mkdir(path.join(workspaceRoot, '.runtime-smoke'), { recursive: true });
 
-const { approveDelegatedTask, approveExecutionPlanStep, createDelegatedTask, getDelegatedTask } = await import('../src/tasks/store.js');
+const { createDelegatedTask, getDelegatedTask } = await import('../src/tasks/store.js');
 await import('../src/tasks/queue.js');
 
 console.log('Delegated file-create smoke: creating delegated Nexora task.');
@@ -36,33 +36,28 @@ const task = await createDelegatedTask({
     'Smoke workspace and task data are isolated under agent-runtime/.runtime-data/smoke/.',
   ],
   requiredTools: ['code.create_file'],
-  approvalRequirements: ['Approve this delegated task before Nexora may request or use the file-write step.'],
+  authorizationSource: 'user_delegated',
+  approvalRequirements: ['The direct user delegation is the authority basis for this ordinary file write.'],
   executionPlan: [
     {
       targetTool: 'code.create_file',
       arguments: { path: targetPath, content: targetContent },
       approvalStatus: 'pending',
-      approval: { required: true, status: 'pending', reason: 'file_write_approval_required' },
+      approval: { required: true, status: 'pending', reason: 'file_write_requested_by_user' },
     },
   ],
   initialLog: 'Smoke task for delegated Nexora workspace file creation.',
 });
 
-assert.equal(task.status, 'queued', 'ordinary delegated file creation should queue without task approval');
-assert.equal(task.approvalRequirements.length, 0, 'ordinary delegated file creation should not create task approval requirements');
+assert.equal(task.status, 'queued', 'ordinary user-delegated file creation should queue without another approval prompt');
+assert.equal(task.approvalRequirements[0]?.status, 'approved', 'direct user delegation should satisfy the task-level authority record');
 assert.equal(task.executionPlan?.[0]?.approvalStatus, 'not_required', 'ordinary file-write step should not require step approval');
-console.log(`✓ Created queued delegated task ${task.id} without task/step approvals.`);
+console.log(`✓ Created queued delegated task ${task.id} without a redundant task/step approval prompt.`);
 
-const firstWorkerState = await waitForTask(task.id, (candidate) => candidate.status === 'completed' || candidate.status === 'failed' || candidate.status === 'blocked');
-let finalTask = firstWorkerState;
-
-
-  finalTask = await waitForTask(task.id, (candidate) => candidate.status === 'completed' || candidate.status === 'failed' || candidate.status === 'blocked');
-} else {
-  console.log('✓ Worker executed ordinary file-write step without explicit step approval.');
-}
+const finalTask = await waitForTask(task.id, (candidate) => ['completed', 'failed', 'blocked'].includes(candidate.status));
+console.log('✓ Worker executed ordinary file-write step without explicit step approval.');
 assert.equal(finalTask.status, 'completed', `task should complete, got ${finalTask.status}: ${finalTask.result?.summary || finalTask.blockedReason || 'no result'}`);
-assert.ok(existsSync(path.join(process.env.NEXORA_WORKSPACE_ROOT, targetPath)), `expected ${targetPath} to exist`);
+assert.ok(existsSync(path.join(workspaceRoot, targetPath)), `expected ${targetPath} to exist`);
 assert.ok(finalTask.receipt, 'completed task should include a receipt');
 assert.ok(finalTask.receipt?.id, 'completed task receipt should include an ID');
 assert.ok(JSON.stringify(finalTask.result).includes('code.create_file'), 'completed result should include code.create_file execution proof');
@@ -72,8 +67,8 @@ console.log('Delegated file-create smoke passed. Output intentionally remains un
 async function waitForTask(taskId: string, predicate: (task: NonNullable<Awaited<ReturnType<typeof getDelegatedTask>>>) => boolean) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const task = await getDelegatedTask(taskId);
-    if (task && predicate(task)) return task;
+    const candidate = await getDelegatedTask(taskId);
+    if (candidate && predicate(candidate)) return candidate;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   const latest = await getDelegatedTask(taskId);

@@ -18,6 +18,7 @@ export interface PendingSdkApproval {
   sessionId: string;
   runState: string;
   approvals: PendingSdkApprovalRecord[];
+  commandId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -60,13 +61,14 @@ export function summarizeApprovalItem(item: RunToolApprovalItem, sessionId: stri
   };
 }
 
-export function savePendingSdkApproval(sessionId: string, runState: string, interruptions: RunToolApprovalItem[]) {
+export function savePendingSdkApproval(sessionId: string, runState: string, interruptions: RunToolApprovalItem[], commandId?: string) {
   const now = new Date().toISOString();
   const existing = pendingApprovals.get(sessionId);
   const record: PendingSdkApproval = {
     sessionId,
     runState,
     approvals: interruptions.map((item, index) => summarizeApprovalItem(item, sessionId, index)),
+    commandId: commandId || existing?.commandId,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };

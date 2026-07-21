@@ -61,24 +61,29 @@ Acceptance:
 
 ## Milestone 3 — Nexora work-order execution
 
-Status: **next**
+Status: **completed** in PR #193
 
 Goal: make Nexora a reliable technical officer rather than a second conversational assistant.
 
 Deliverables:
 
-- Formal work-order schema and lifecycle.
-- Persisted execution plans and step state.
-- Workspace-scoped file, patch, command, test, build, and validation execution.
-- Restart recovery.
-- Structured completion result and rollback guidance.
-- One primary receipt linked to the work order and Elora response.
+- Durable versioned Nexora work-order schema and lifecycle.
+- Workspace scope, constraints, context references, execution plan, acceptance criteria, validation plan, rollback guidance, and Elora return contract.
+- Persisted execution-plan state, work-order state history, validation evidence, changed artifacts, errors, remaining work, and receipt references.
+- Workspace-scoped file, patch, command, test, build, and validation execution through the central tool registry.
+- Exact approval boundaries for destructive and otherwise governed steps using the existing task/step approval path.
+- Restart recovery that preserves completed steps and refuses to replay interrupted mutations without reconciliation.
+- Structured completion proof linked to the originating command and context bundle.
 
 Acceptance:
 
 - Nexora can receive a bounded work order, modify the repository, validate the result, survive restart where applicable, and return proof to Elora.
+- Invalid or underspecified work orders fail before queueing.
+- Approved destructive steps resume through the existing approval path; unapproved steps do not execute.
 
 ## Milestone 4 — Unified receipt and trust loop
+
+Status: **next**
 
 Goal: use receipts as the common primitive for audit, memory, trust, UI, and follow-through.
 

@@ -1,5 +1,5 @@
 import type { RegisteredToolDefinition } from '../tools/registry.js';
-import { decidePolicyForToolName, policyBlocksExecution, policyRequiresApproval } from '../governance/policyDecision.js';
+import { decidePolicyForToolName, policyRequiresApproval } from '../governance/policyDecision.js';
 import { getRelationshipContext } from '../relationship/relationshipService.js';
 import type { RuntimeContext } from '../types.js';
 import { evaluateNexoraCapabilityForStep, isAllowedUserRequestedOrDelegatedCoreTool } from '../workflows/nexora/capabilities.js';
@@ -250,8 +250,9 @@ async function executeStep(initialTask: DelegatedTask, order: NexoraWorkOrder, i
     const tools = await registry();
     const definition = tools.getRegisteredTool(step.targetTool);
     const decision = decidePolicyForToolName(definition?.name || step.targetTool, authorizedInput);
+    const decisionName = String(decision.decision);
     const needsApproval = policyRequiresApproval(decision);
-    const policyBlocked = policyBlocksExecution(decision);
+    const policyBlockedWithoutApprovalPath = decisionName === 'refuse' || decisionName === 'setup_needed';
     let capability = evaluateNexoraCapabilityForStep(step.targetTool, needsApproval ? step.approvalStatus : 'not_required', task.executionOrigin);
 
     if (!capability.allowed && capability.reason === 'approval_required' && !needsApproval && isAllowedUserRequestedOrDelegatedCoreTool(step.targetTool, task.executionOrigin, definition)) {
@@ -271,8 +272,7 @@ async function executeStep(initialTask: DelegatedTask, order: NexoraWorkOrder, i
       capability = evaluateNexoraCapabilityForStep(step.targetTool, 'approved', task.executionOrigin);
     }
 
-    if (policyBlocked || (needsApproval && step.approvalStatus !== 'approved')) {
-      const decisionName = String(decision.decision);
+    if (policyBlockedWithoutApprovalPath || (needsApproval && step.approvalStatus !== 'approved')) {
       const reason = decisionName === 'setup_needed'
         ? 'provider_configuration_required'
         : decisionName === 'escalate'

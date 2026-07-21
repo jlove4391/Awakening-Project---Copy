@@ -35,6 +35,23 @@ const eventWeights: Record<TrustEventType, number> = {
   validation_failed: -5,
 };
 
+const hardApprovalScopes = new Set([
+  'repo.commit',
+  'repo.delete',
+  'provider.create',
+  'provider.update',
+  'provider.delete',
+  'database.migrate',
+  'external.send',
+]);
+
+function isExplicitBoundaryReceipt(receipt: CanonicalReceipt) {
+  return receipt.status === 'blocked'
+    || receipt.status === 'pending_approval'
+    || receipt.policy.classification === 'explicit_boundary'
+    || Boolean(receipt.policy.approvalScope && hardApprovalScopes.has(receipt.policy.approvalScope));
+}
+
 function eventWeight(event: TrustEvent) {
   if (event.type === 'receipt_quality_checked' && event.outcome === 'negative') return -6;
   if (event.type === 'boundary_accuracy_checked' && event.outcome === 'negative') return -5;
@@ -175,6 +192,7 @@ function linkedTaskId(receipt: CanonicalReceipt) {
 }
 
 function receiptEventInput(receipt: CanonicalReceipt, suffix: string): Pick<CreateTrustEventInput, 'id' | 'domain' | 'actor' | 'action' | 'executionId' | 'receiptId' | 'taskId' | 'policyClassification' | 'policyAction' | 'boundary' | 'metadata'> {
+  const explicitBoundary = isExplicitBoundaryReceipt(receipt);
   return {
     id: `${receipt.id}:${suffix}`,
     domain: receipt.trustImpact.domain,
@@ -183,8 +201,8 @@ function receiptEventInput(receipt: CanonicalReceipt, suffix: string): Pick<Crea
     executionId: linkedExecutionId(receipt),
     receiptId: receipt.id,
     taskId: linkedTaskId(receipt),
-    policyClassification: receipt.policy.classification,
-    policyAction: receipt.policy.action,
+    policyClassification: explicitBoundary ? 'explicit_boundary' : receipt.policy.classification,
+    policyAction: explicitBoundary ? 'ask_before_execution' : receipt.policy.action,
     boundary: receipt.policy.boundary,
     metadata: {
       canonicalReceiptVersion: receipt.version,
@@ -192,6 +210,7 @@ function receiptEventInput(receipt: CanonicalReceipt, suffix: string): Pick<Crea
       trustRecommendation: receipt.trustImpact.recommendation,
       commandId: receipt.links.commandId,
       contextBundleId: receipt.links.contextBundleId,
+      approvalScope: receipt.policy.approvalScope,
     },
   };
 }
@@ -199,7 +218,7 @@ function receiptEventInput(receipt: CanonicalReceipt, suffix: string): Pick<Crea
 export async function recordTrustEventsFromCanonicalReceipt(receipt: CanonicalReceipt) {
   const events: TrustEvent[] = [];
   const complete = receipt.integrity.status === 'complete';
-  const explicitBoundary = receipt.status === 'blocked' || receipt.status === 'pending_approval' || receipt.policy.classification === 'explicit_boundary';
+  const explicitBoundary = isExplicitBoundaryReceipt(receipt);
 
   if (!complete) {
     events.push(await appendTrustEvent({

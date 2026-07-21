@@ -307,7 +307,7 @@ async function executeStep(initialTask: DelegatedTask, order: NexoraWorkOrder, i
     }
 
     const executableInput = { ...authorizedInput };
-    if (needsApproval && step.approvalStatus === 'approved') {
+    if (step.approvalStatus === 'approved') {
       context.approvedExecutionId = step.id;
       context.approvedDelegatedStepId = step.id;
     } else {

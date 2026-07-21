@@ -4,7 +4,7 @@ This roadmap is intentionally narrow. It restores one coherent CORE execution pa
 
 ## Milestone 0 — Source-of-truth reset
 
-Status: **in progress**
+Status: **completed**
 
 Deliverables:
 
@@ -19,6 +19,8 @@ Acceptance:
 - A coding agent can identify the product objective, active architecture, approval boundaries, current milestone, and deferred scope without relying on historical chat context.
 
 ## Milestone 1 — Sovereign Command Loop
+
+Status: **in progress**
 
 Goal: replace hardcoded proof paths and fragmented orchestration with one backend-controlled command lifecycle.
 

@@ -15,6 +15,7 @@ const tokenStorePathPatterns = [
 const blockedEnvFilePattern = /(^|\/)\.env(?:\.local)?$/i;
 const envExamplePattern = /(^|\/)\.env\.example$/i;
 const sensitiveKeyPattern = /(?:^|[_-])(api[_-]?key|secret|token|password|passwd|pwd|credential|private[_-]?key|refresh[_-]?token|access[_-]?token|client[_-]?secret|authorization|bearer)(?:$|[_-])/i;
+const structuralIdentifierKeyPattern = /(?:^id$|[_-]id$|[_-]ids$)/i;
 const assignmentSecretPattern = /\b([A-Z0-9_]*(?:API_KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_KEY|REFRESH_TOKEN|ACCESS_TOKEN|CLIENT_SECRET)[A-Z0-9_]*)\s*=\s*([^\s#'\"]{8,}|['\"][^'\"]{8,}['\"])/gi;
 const bearerPattern = /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+\/-]+=*/gi;
 const compactTokenPattern = /\b(?:sk|pk|ghp|github_pat|xox[baprs]|ya29|dop)_?[A-Za-z0-9_\-]{16,}\b/gi;
@@ -27,27 +28,41 @@ function normalizePolicyPath(value: string) {
   return value.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+/g, '/') || '.';
 }
 
+function normalizeObjectKey(value: string) {
+  return value.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+}
+
 function hasHighRiskSecretApproval(input?: HighRiskSecretApproval) {
   return input?.allowHighRiskSecretAccess === true && Boolean(input.highRiskSecretApprovalNote?.trim());
 }
 
+function redactString(value: string) {
+  return value
+    .replace(privateKeyPattern, redaction)
+    .replace(bearerPattern, redaction)
+    .replace(jwtPattern, redaction)
+    .replace(compactTokenPattern, redaction)
+    .replace(assignmentSecretPattern, (_match, key) => `${key}=${redaction}`)
+    .replace(longSecretPattern, (match) => (/\d/.test(match) && /[A-Za-z]/.test(match) ? redaction : match));
+}
+
+function preserveStructuralIdentifier<T>(value: T): T {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map((entry) => (typeof entry === 'string' ? entry : redactTokenLikeValues(entry))) as T;
+  return redactTokenLikeValues(value);
+}
+
 export function redactTokenLikeValues<T>(value: T): T {
-  if (typeof value === 'string') {
-    return value
-      .replace(privateKeyPattern, redaction)
-      .replace(bearerPattern, redaction)
-      .replace(jwtPattern, redaction)
-      .replace(compactTokenPattern, redaction)
-      .replace(assignmentSecretPattern, (_match, key) => `${key}=${redaction}`)
-      .replace(longSecretPattern, (match) => (/\d/.test(match) && /[A-Za-z]/.test(match) ? redaction : match)) as T;
-  }
+  if (typeof value === 'string') return redactString(value) as T;
   if (Array.isArray(value)) return value.map((entry) => redactTokenLikeValues(entry)) as T;
   if (value && typeof value === 'object') {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
-        key,
-        sensitiveKeyPattern.test(key) ? redaction : redactTokenLikeValues(nested),
-      ]),
+      Object.entries(value as Record<string, unknown>).map(([key, nested]) => {
+        const normalizedKey = normalizeObjectKey(key);
+        if (sensitiveKeyPattern.test(normalizedKey)) return [key, redaction];
+        if (structuralIdentifierKeyPattern.test(normalizedKey)) return [key, preserveStructuralIdentifier(nested)];
+        return [key, redactTokenLikeValues(nested)];
+      }),
     ) as T;
   }
   return value;

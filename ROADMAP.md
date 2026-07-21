@@ -20,7 +20,7 @@ Acceptance:
 
 ## Milestone 1 — Sovereign Command Loop
 
-Status: **in progress**
+Status: **completed** in PR #189
 
 Goal: replace hardcoded proof paths and fragmented orchestration with one backend-controlled command lifecycle.
 
@@ -39,23 +39,29 @@ Acceptance:
 
 ## Milestone 2 — Context and continuity spine
 
+Status: **completed** in PR #191
+
 Goal: make memory, identity, relationship, goals, corrections, trust, unfinished work, and prior receipts operational inputs to every Elora turn.
 
 Deliverables:
 
 - Durable CORE identity record.
-- `CoreContextAssembler` or equivalent service.
-- Relevant canonical-memory retrieval.
-- Relationship and current-goal context.
-- Trust-domain state and autonomy envelope.
-- Related active tasks and receipts.
-- Context references in command records and receipts.
+- Typed `CoreContextAssembler` and persisted context bundles.
+- Relevant active/canonical-memory retrieval that excludes unreviewed candidate memory from governing context.
+- Relationship preferences, current goals, corrections, working style, recurring context, and long-term objectives.
+- Trust-domain state, validation requirement, execution scope, and effective autonomy envelope.
+- Related unfinished commands, active delegated tasks, and prior receipts.
+- Exact context-reference IDs in command records, execution records, and existing Alpha receipt evidence.
+- Dynamic Elora instructions that make the assembled context model-visible without treating memory content as independent instructions.
+- Fresh-process restart validation.
 
 Acceptance:
 
-- Restarting the runtime does not erase the system's understanding of the active objective, governing decisions, or work state.
+- Restarting the runtime does not erase the system's understanding of the active objective, governing decisions, relationship corrections, trust state, unfinished work, or prior receipt evidence.
 
 ## Milestone 3 — Nexora work-order execution
+
+Status: **next**
 
 Goal: make Nexora a reliable technical officer rather than a second conversational assistant.
 

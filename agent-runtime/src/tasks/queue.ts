@@ -1,6 +1,7 @@
 import { taskEvents } from './events.js';
 import { cancelDelegatedTask, getDelegatedTask, listDelegatedTasks, resumeDelegatedTask, updateDelegatedTask } from './store.js';
-import { nexoraToolExecutionWorker } from './nexoraWorker.js';
+import { nexoraWorkOrderExecutionWorker } from './nexoraWorkOrderWorker.js';
+import { prepareNexoraWorkOrderForRecovery } from './workOrders.js';
 import type { DelegatedTask } from './types.js';
 
 export type DelegatedTaskHandlerResult = boolean | void;
@@ -120,7 +121,9 @@ class DurableTaskQueue {
       event: {
         type: 'task.started',
         actor: 'system',
-        summary: 'Durable queue dispatched task to Nexora.',
+        summary: task.assignedAgent === 'nexora'
+          ? 'Durable queue dispatched the task to the Nexora work-order worker.'
+          : `Durable queue dispatched the bounded ${task.assignedAgent} specialist call.`,
       },
     });
 
@@ -137,11 +140,11 @@ class DurableTaskQueue {
     await updateDelegatedTask(task.id, {
       status: 'blocked',
       blockedReason: 'worker_unavailable',
-      log: 'No Nexora worker handler is configured for this task yet; task is durably recorded and awaiting worker pickup.',
+      log: `No execution worker is configured for ${task.assignedAgent}; the specialist call is durably recorded and awaiting an implementation or explicit deferral.`,
       event: {
         type: 'task.blocked',
         actor: 'system',
-        summary: 'Task is blocked until a Nexora worker handler is configured.',
+        summary: `Task is blocked until an execution worker for ${task.assignedAgent} is configured.`,
       },
     });
   }
@@ -156,10 +159,24 @@ export const nexoraSafeDemoWorker: DelegatedTaskHandler = async (task) => {
 };
 
 durableTaskQueue.addHandler(nexoraSafeDemoWorker);
-durableTaskQueue.addHandler(nexoraToolExecutionWorker);
+durableTaskQueue.addHandler(nexoraWorkOrderExecutionWorker);
 
 export async function enqueuePersistedQueuedTasks() {
-  const queuedTasks = (await listDelegatedTasks()).filter((task) => task.status === 'queued');
+  const tasks = await listDelegatedTasks();
+  const queuedTasks: DelegatedTask[] = [];
+
+  for (const task of tasks) {
+    if (task.status === 'queued') {
+      queuedTasks.push(task);
+      continue;
+    }
+    if (task.assignedAgent === 'nexora' && task.status === 'running') {
+      await prepareNexoraWorkOrderForRecovery(task);
+      const resumed = await resumeDelegatedTask(task.id, 'system', 'Recovered interrupted Nexora work after runtime restart; completed plan steps will not be repeated.');
+      if (resumed?.status === 'queued') queuedTasks.push(resumed);
+    }
+  }
+
   queuedTasks.forEach((task) => durableTaskQueue.enqueue(task));
   return queuedTasks;
 }

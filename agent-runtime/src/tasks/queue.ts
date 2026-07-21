@@ -1,6 +1,6 @@
 import { taskEvents } from './events.js';
 import { cancelDelegatedTask, getDelegatedTask, listDelegatedTasks, resumeDelegatedTask, updateDelegatedTask } from './store.js';
-import { canonicalNexoraWorkOrderWorker } from './canonicalWorkOrderWorker.js';
+import { canonicalNexoraWorkOrderWorker, publishCanonicalWorkOrderReceipt } from './canonicalWorkOrderWorker.js';
 import { prepareNexoraWorkOrderForRecovery } from './workOrders.js';
 import type { DelegatedTask } from './types.js';
 
@@ -181,8 +181,11 @@ export async function enqueuePersistedQueuedTasks() {
   return queuedTasks;
 }
 
-// Automatically queue tasks once approval requirements are satisfied.
+// Automatically receipt genuine pending boundaries and queue tasks once approval requirements are satisfied.
 taskEvents.on('task.created', (task: DelegatedTask) => {
+  if (task.assignedAgent === 'nexora' && task.status === 'pending_approval') {
+    publishCanonicalWorkOrderReceipt(task.id).catch(() => undefined);
+  }
   if (task.status === 'queued') durableTaskQueue.enqueue(task);
 });
 

@@ -13,7 +13,7 @@ await clearCanonicalReceiptsForTesting();
 await clearTrustEventsForTesting();
 
 const receiptId = canonicalReceiptId('execution', 'approved-delete-completion');
-await upsertCanonicalReceipt({
+const receipt = await upsertCanonicalReceipt({
   id: receiptId,
   subject: { kind: 'execution', id: 'approved-delete-completion' },
   actor: 'nexora',
@@ -44,6 +44,12 @@ await upsertCanonicalReceipt({
   },
 });
 
+assert.equal(receipt.integrity.status, 'complete');
+assert.equal(receipt.policy.classification, 'explicit_boundary');
+assert.equal(receipt.policy.action, 'ask_before_execution');
+assert.equal(receipt.trustImpact.eligible, false);
+assert.equal(receipt.trustImpact.outcome, 'neutral');
+assert.equal(receipt.trustImpact.recommendation, 'hold');
 const events = (await listTrustEvents()).filter((event) => event.receiptId === receiptId);
 assert.equal(events.filter((event) => event.type === 'action_succeeded').length, 0, 'completed repo.delete must not count as ordinary execution trust');
 assert.equal(events.filter((event) => event.type === 'validation_succeeded').length, 0, 'hard-boundary completion must not expand validation trust');

@@ -97,9 +97,12 @@ const approvalTask = await createDelegatedTask({
     },
   ],
 });
-assert.equal(approvalTask.status, 'pending_approval', 'destructive work-order step should wait for approval');
 assert.ok(existsSync(path.join(workspaceRoot, deletePath)), 'file must remain before approval');
-const stepId = approvalTask.executionPlan?.[0]?.id;
+const blockedApprovalTask = await waitForTask(approvalTask.id, (candidate) => ['blocked', 'failed', 'completed'].includes(candidate.status));
+assert.equal(blockedApprovalTask.status, 'blocked', blockedApprovalTask.result?.summary || blockedApprovalTask.blockedReason || 'destructive work order should block');
+assert.equal(blockedApprovalTask.blockedReason, 'step_approval_required');
+assert.ok(existsSync(path.join(workspaceRoot, deletePath)), 'file must remain while the step is blocked');
+const stepId = blockedApprovalTask.executionPlan?.[0]?.id;
 assert.ok(stepId);
 const approved = await approveExecutionPlanStep(approvalTask.id, stepId!, 'user', 'Approved isolated smoke deletion.');
 assert.equal(approved?.status, 'queued');
@@ -108,7 +111,7 @@ const approvalCompleted = await waitForTask(approvalTask.id, (candidate) => ['co
 assert.equal(approvalCompleted.status, 'completed', approvalCompleted.result?.summary || approvalCompleted.blockedReason || 'approved work order did not complete');
 assert.equal(existsSync(path.join(workspaceRoot, deletePath)), false, 'approved file deletion should execute exactly once');
 assert.equal((approvalCompleted.result?.data as any)?.workOrder?.terminalStatus, 'completed');
-console.log('✓ Approval-gated work-order step resumed through the existing step-approval path.');
+console.log('✓ Approval-gated work-order step blocked, resumed, and completed through the existing step-approval path.');
 
 console.log('Nexora work-order smoke passed.');
 

@@ -36,22 +36,23 @@ const task = await createDelegatedTask({
     'Smoke workspace and task data are isolated under agent-runtime/.runtime-data/smoke/.',
   ],
   requiredTools: ['code.create_file'],
-  approvalRequirements: ['Approve this delegated task before Nexora may request or use the file-write step.'],
+  authorizationSource: 'user_delegated',
+  approvalRequirements: ['The direct user delegation is the authority basis for this ordinary file write.'],
   executionPlan: [
     {
       targetTool: 'code.create_file',
       arguments: { path: targetPath, content: targetContent },
       approvalStatus: 'pending',
-      approval: { required: true, status: 'pending', reason: 'file_write_approval_required' },
+      approval: { required: true, status: 'pending', reason: 'file_write_requested_by_user' },
     },
   ],
   initialLog: 'Smoke task for delegated Nexora workspace file creation.',
 });
 
-assert.equal(task.status, 'queued', 'ordinary delegated file creation should queue without task approval');
-assert.equal(task.approvalRequirements.length, 0, 'ordinary delegated file creation should not create task approval requirements');
+assert.equal(task.status, 'queued', 'ordinary user-delegated file creation should queue without another approval prompt');
+assert.equal(task.approvalRequirements[0]?.status, 'approved', 'direct user delegation should satisfy the task-level authority record');
 assert.equal(task.executionPlan?.[0]?.approvalStatus, 'not_required', 'ordinary file-write step should not require step approval');
-console.log(`✓ Created queued delegated task ${task.id} without task/step approvals.`);
+console.log(`✓ Created queued delegated task ${task.id} without a redundant task/step approval prompt.`);
 
 const finalTask = await waitForTask(task.id, (candidate) => ['completed', 'failed', 'blocked'].includes(candidate.status));
 console.log('✓ Worker executed ordinary file-write step without explicit step approval.');

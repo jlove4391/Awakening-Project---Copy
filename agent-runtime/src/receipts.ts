@@ -118,6 +118,15 @@ export interface CanonicalReceiptInput {
 const receiptDir = path.join(runtimeConfig.dataDir, 'receipts');
 const receiptPath = path.join(receiptDir, 'canonical-receipts.json');
 const receiptAuditPath = path.join(receiptDir, 'canonical-receipt-audit.jsonl');
+const hardApprovalScopes = new Set<ApprovalScope>([
+  'repo.commit',
+  'repo.delete',
+  'provider.create',
+  'provider.update',
+  'provider.delete',
+  'database.migrate',
+  'external.send',
+]);
 let cache: CanonicalReceipt[] | undefined;
 let writeChain = Promise.resolve();
 
@@ -127,6 +136,10 @@ function now() {
 
 function unique(values: Array<string | undefined> = []) {
   return [...new Set(values.filter((value): value is string => Boolean(value?.trim())).map((value) => value.trim()))];
+}
+
+function isHardApprovalScope(scope: ApprovalScope | undefined) {
+  return Boolean(scope && hardApprovalScopes.has(scope));
 }
 
 function links(input: Partial<CanonicalReceiptLinks> = {}, existing?: CanonicalReceiptLinks): CanonicalReceiptLinks {
@@ -218,6 +231,9 @@ export function validateCanonicalReceipt(receipt: Partial<CanonicalReceipt> | un
   if (receipt?.status === 'failed' && !receipt.evidence?.errors?.length && receipt.validation?.status !== 'failed') {
     missingFields.push('evidence.errors');
   }
+  if (isHardApprovalScope(receipt?.policy?.approvalScope) && receipt?.policy?.classification !== 'explicit_boundary') {
+    invalidLinks.push('hard approval scopes must be classified as explicit_boundary');
+  }
 
   return {
     status: missingFields.length || invalidLinks.length ? 'incomplete' : 'complete',
@@ -227,7 +243,10 @@ export function validateCanonicalReceipt(receipt: Partial<CanonicalReceipt> | un
 }
 
 function trustImpact(receipt: Omit<CanonicalReceipt, 'integrity' | 'trustImpact'>, integrity: CanonicalReceiptIntegrity, override: Partial<CanonicalReceiptTrustImpact> = {}): CanonicalReceiptTrustImpact {
-  const explicitBoundaryOnly = receipt.status === 'blocked' || receipt.status === 'pending_approval' || receipt.policy.classification === 'explicit_boundary';
+  const explicitBoundaryOnly = receipt.status === 'blocked'
+    || receipt.status === 'pending_approval'
+    || receipt.policy.classification === 'explicit_boundary'
+    || isHardApprovalScope(receipt.policy.approvalScope);
   const terminal = ['completed', 'failed', 'cancelled'].includes(receipt.status);
   const validationResolved = receipt.validation.status === 'passed' || receipt.validation.status === 'failed' || receipt.validation.status === 'not_required';
   const defaultEligible = terminal && validationResolved && integrity.status === 'complete' && !explicitBoundaryOnly;
@@ -240,7 +259,7 @@ function trustImpact(receipt: Omit<CanonicalReceipt, 'integrity' | 'trustImpact'
   const reasons = unique([
     ...(override.reasons || []),
     integrity.status !== 'complete' ? 'Receipt completeness or link integrity did not pass.' : undefined,
-    explicitBoundaryOnly ? 'Approval-only or blocked boundary evidence cannot expand autonomy.' : undefined,
+    explicitBoundaryOnly ? 'Approval-only or hard-boundary evidence cannot expand autonomy.' : undefined,
     receipt.validation.status === 'failed' ? 'Required validation failed.' : undefined,
     receipt.status === 'failed' || receipt.status === 'cancelled' ? `Receipt finished with ${receipt.status} status.` : undefined,
     eligible && outcome === 'positive' ? 'Completed action has complete receipt evidence and passed validation.' : undefined,
@@ -264,6 +283,8 @@ function normalizeReceipt(input: CanonicalReceiptInput, existing?: CanonicalRece
   const nextValidation = validation(input.validation, existing?.validation);
   const requestedAt = input.timestamps?.requestedAt || existing?.timestamps.requestedAt || timestamp;
   const completedAt = input.timestamps?.completedAt || existing?.timestamps.completedAt || (['completed', 'failed', 'cancelled'].includes(status) ? timestamp : undefined);
+  const approvalScope = input.policy?.approvalScope || existing?.policy.approvalScope;
+  const hardBoundary = isHardApprovalScope(approvalScope);
   const base = {
     id,
     version: canonicalReceiptVersion,
@@ -276,11 +297,11 @@ function normalizeReceipt(input: CanonicalReceiptInput, existing?: CanonicalRece
     status,
     trustDomain: input.trustDomain || existing?.trustDomain || 'runtime',
     policy: {
-      action: input.policy?.action || existing?.policy.action,
-      classification: input.policy?.classification || existing?.policy.classification,
+      action: hardBoundary ? 'ask_before_execution' as const : input.policy?.action || existing?.policy.action,
+      classification: hardBoundary ? 'explicit_boundary' as const : input.policy?.classification || existing?.policy.classification,
       boundary: input.policy?.boundary || existing?.policy.boundary,
       approvalStatus: input.policy?.approvalStatus || existing?.policy.approvalStatus,
-      approvalScope: input.policy?.approvalScope || existing?.policy.approvalScope,
+      approvalScope,
       authorityBasis: input.policy?.authorityBasis || existing?.policy.authorityBasis || 'runtime_policy',
     },
     timestamps: {

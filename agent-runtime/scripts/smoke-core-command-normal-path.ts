@@ -10,11 +10,13 @@ if (!process.env.OPENAI_API_KEY) {
 
 const runtimeRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const smokeRoot = path.join(runtimeRoot, '.runtime-data', 'smoke', `core-command-normal-path-${Date.now()}`);
-process.env.AGENT_RUNTIME_DATA_DIR = path.join(smokeRoot, 'data');
-process.env.CODE_WORKSPACE_ROOT = path.join(smokeRoot, 'workspace');
-process.env.NEXORA_WORKSPACE_ROOT = process.env.CODE_WORKSPACE_ROOT;
-await mkdir(process.env.AGENT_RUNTIME_DATA_DIR, { recursive: true });
-await mkdir(process.env.CODE_WORKSPACE_ROOT, { recursive: true });
+const dataDir = path.join(smokeRoot, 'data');
+const workspaceRoot = path.join(smokeRoot, 'workspace');
+process.env.AGENT_RUNTIME_DATA_DIR = dataDir;
+process.env.CODE_WORKSPACE_ROOT = workspaceRoot;
+process.env.NEXORA_WORKSPACE_ROOT = workspaceRoot;
+await mkdir(dataDir, { recursive: true });
+await mkdir(workspaceRoot, { recursive: true });
 
 const { runAgentMessage } = await import('../src/agentEndpoint.js');
 const { getCoreCommand } = await import('../src/core/index.js');
@@ -29,8 +31,10 @@ const result = await runAgentMessage({
 });
 
 assert.ok(result.commandId, 'normal Elora request did not create a CORE command');
+if (!result.commandId) throw new Error('normal Elora request did not create a CORE command');
 const command = await getCoreCommand(result.commandId);
 assert.ok(command, 'CORE command was not persisted');
+if (!command) throw new Error('CORE command was not persisted');
 assert.notEqual(command.state, 'failed');
 assert.ok(command.events.some((event) => event.state === 'context_assembled'));
 assert.ok(command.events.some((event) => event.state === 'authority_decided'));

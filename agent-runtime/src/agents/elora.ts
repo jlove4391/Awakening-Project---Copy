@@ -1,7 +1,7 @@
 import { Agent, type RunContext } from '@openai/agents';
 import { z } from 'zod';
 import { runtimeConfig } from '../config.js';
-import { renderCoreContextForInstructions } from '../core/index.js';
+import { renderCoreContextForInstructions, setActiveCoreExecutionContext } from '../core/index.js';
 import { runtimeTools } from '../tools/registry.js';
 import type { RuntimeContext } from '../types.js';
 import { approvalRequiredForExternalAction, noExternalSending, relationshipLedExecution } from './instructions.js';
@@ -35,6 +35,7 @@ const baseEloraInstructions = [
 ].join('\n');
 
 function buildEloraInstructions(runContext: RunContext<RuntimeContext>) {
+  if (runContext.context.coreContext) setActiveCoreExecutionContext(runContext.context.coreContext);
   return [baseEloraInstructions, renderCoreContextForInstructions(runContext.context.coreContext)].join('\n\n');
 }
 

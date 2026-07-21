@@ -14,7 +14,8 @@ This file classifies the active repository against the canonical CORE Alpha dire
 - PR #155 was closed without merge because it targeted an obsolete conversational task-approval architecture.
 - PR #186 corrected delegated approval-state handling and dependencies.
 - PR #187 established the canonical CORE source set and completed Milestone 0.
-- Milestone 1 implementation is active on `core/sovereign-command-loop` under issue #188.
+- PR #189 implemented the persistent Sovereign Command Loop and completed Milestone 1.
+- PR #191 implements the Context and Continuity Spine under issue #190 and completes Milestone 2 after merge.
 
 ## Keep
 
@@ -28,9 +29,15 @@ This file classifies the active repository against the canonical CORE Alpha dire
 
 ### CORE foundations
 
-- Memory service and candidate/canonical lifecycle.
-- Relationship profile service.
-- Trust event store and domain score service.
+- Typed persistent Sovereign Command Loop and lifecycle events.
+- Durable canonical CORE identity record.
+- Persisted context bundles containing exact reference IDs.
+- Active/canonical memory retrieval that excludes unreviewed candidates from governing context.
+- Relationship profile service with preferences, goals, corrections, working style, recurring context, and long-term objectives.
+- Trust event store, domain scores, and context-derived autonomy/validation envelope.
+- Related unfinished command, delegated-task, execution, and receipt retrieval.
+- Dynamic Elora instructions backed by the assembled context bundle.
+- Command, execution, and Alpha receipt links to context, memory, relationship, trust, work, and prior evidence.
 - Policy decision engine vocabulary: act, report, escalate, refuse, setup-needed.
 - SpecialistCall contract.
 - Alpha artifact and receipt foundations.
@@ -43,33 +50,38 @@ This file classifies the active repository against the canonical CORE Alpha dire
 - Execution receipt panel.
 - Existing task and approval state rendering that can be narrowed to genuine boundaries.
 
-## Active correction
+## Completed corrections
 
 ### Sovereign Command Loop
 
-- Add typed, durable command records and legal state transitions.
-- Create one command record for each normal Elora request.
-- Emit command lifecycle events through the existing runtime stream.
-- Link command records to current memory references, delegated task IDs, execution IDs, receipt IDs, and candidate-memory IDs where available.
-- Preserve SDK interruption/resume as the conversational approval mechanism and attach waiting approvals to the originating command.
-- Remove the hardcoded CORE execution-proof phrase and its dedicated production route.
-- Replace the obsolete proof smoke with deterministic lifecycle and optional normal conversational-path coverage.
+- Added typed, durable command records and legal state transitions.
+- Created one command record for each normal Elora request.
+- Emitted command lifecycle events through the existing runtime stream.
+- Linked commands to memories, delegated tasks, executions, receipts, candidate memory, identity, relationship entries, prior commands, and trust domains.
+- Preserved SDK interruption/resume as the conversational approval mechanism and attached waiting approvals to the originating command.
+- Removed the hardcoded CORE execution-proof phrase and dedicated production route.
+- Replaced the obsolete proof smoke with deterministic lifecycle and normal-path coverage.
+
+### Context and continuity
+
+- Added a durable canonical CORE identity record.
+- Added `CoreContextAssembler` and persisted context bundles.
+- Made active/canonical memory, relationship context, goals, corrections, trust, unfinished work, and prior receipts inputs to every Elora command.
+- Added domain-specific validation and bounded-autonomy envelopes without weakening explicit policy boundaries.
+- Made the assembled context model-visible through dynamic Elora instructions.
+- Linked execution records and existing Alpha receipt evidence to the originating command and context references.
+- Added fresh-process restart validation proving continuity survives runtime restart.
 
 ## Correct next
 
-### Context
-
-- Add an explicit durable CORE identity record.
-- Assemble canonical memory, relationship context, active goals, corrections, trust state, unfinished work, and related receipts into every Elora turn.
-- Make trust state an input to execution scope and validation requirements rather than a reporting-only score.
-
-### Nexora
+### Nexora work orders
 
 - Rewrite outdated Nexora instructions that still describe ordinary edits, tests, commits, and provider writes as generically approval-gated.
-- Formalize the work-order schema and terminal completion contract.
+- Formalize the work-order schema, lifecycle, acceptance checks, validation commands, receipt requirements, and rollback contract.
 - Ensure every queued technical task is either handled by a real worker, blocked with a precise reason, or explicitly deferred.
+- Make restart recovery and structured completion proof part of the work-order acceptance test.
 
-### Governance
+### Governance and receipts
 
 - Unify overlapping task, execution, Alpha, provider, approval, and trust receipt shapes under one primary receipt envelope.
 - Preserve SDK interruption/resume as the conversational approval mechanism.
@@ -83,11 +95,11 @@ This file classifies the active repository against the canonical CORE Alpha dire
 
 ## Partial
 
-- Memory persists, but retrieval is not yet enforced as a complete prerequisite to every action.
-- Relationship context is loaded, but not yet fully converted into execution decisions.
-- Trust scores exist, but do not yet govern the autonomy envelope in the policy engine.
+- The context spine is operational, but long-term context ranking and compression can be refined after Alpha evidence is available.
+- Trust now constrains autonomous level and validation scope, but validated outcomes still need to feed one unified receipt-driven trust loop.
 - Specialist contracts exist, but only Nexora has a meaningful execution worker.
-- Receipts exist, but multiple schemas and streams require unification.
+- Nexora execution exists, but the formal work-order contract and completion schema remain incomplete.
+- Receipts exist and context links are present, but multiple schemas and streams still require unification.
 - The UI surfaces receipts and approvals, but does not yet present the full command loop and continuity state.
 - Provider tools exist, but setup state, real execution proof, and boundary behavior are inconsistent across integrations.
 
@@ -111,9 +123,8 @@ This file classifies the active repository against the canonical CORE Alpha dire
 
 ## Immediate acceptance work
 
-1. Complete and validate the Sovereign Command Loop.
-2. Add context assembly and identity continuity.
-3. Formalize Nexora work orders and unified receipts.
-4. Prove local execution, restart continuity, candidate memory, and one real approval boundary.
-5. Add one Drive/Docs evidence flow.
-6. Finish the minimal operational UI.
+1. Formalize and validate the Nexora work-order execution contract.
+2. Unify receipts and close the trust-feedback loop.
+3. Prove local execution, restart continuity, candidate memory, and one real approval boundary through the normal conversational path.
+4. Add one Drive/Docs evidence flow.
+5. Finish the minimal operational UI.

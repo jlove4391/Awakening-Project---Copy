@@ -70,11 +70,39 @@ jobs:
 
       - name: Verify Nexora work-order execution
         if: steps.typecheck.outcome == 'success'
-        run: npm run smoke:nexora-work-order
+        id: nexora-work-order-smoke
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run smoke:nexora-work-order 2>&1 | tee nexora-work-order-smoke.log
+
+      - name: Upload Nexora work-order diagnostic
+        if: steps.nexora-work-order-smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexora-work-order-smoke-log
+          path: nexora-work-order-smoke.log
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Verify Nexora work-order restart recovery
         if: steps.typecheck.outcome == 'success'
-        run: npm run smoke:nexora-work-order-restart
+        id: nexora-restart-smoke
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run smoke:nexora-work-order-restart 2>&1 | tee nexora-restart-smoke.log
+
+      - name: Upload Nexora restart diagnostic
+        if: steps.nexora-restart-smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexora-restart-smoke-log
+          path: nexora-restart-smoke.log
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Verify SDK approval interruption and resume
         if: steps.typecheck.outcome == 'success'
@@ -135,5 +163,5 @@ jobs:
         run: npm run smoke:core-command-normal-path
 
       - name: Enforce validation results
-        if: always() && (steps.typecheck.outcome == 'failure' || steps.sdk-approval-smoke.outcome == 'failure' || steps.delegated-file-smoke.outcome == 'failure' || steps.delegated-authority-smoke.outcome == 'failure')
+        if: always() && (steps.typecheck.outcome == 'failure' || steps.nexora-work-order-smoke.outcome == 'failure' || steps.nexora-restart-smoke.outcome == 'failure' || steps.sdk-approval-smoke.outcome == 'failure' || steps.delegated-file-smoke.outcome == 'failure' || steps.delegated-authority-smoke.outcome == 'failure')
         run: exit 1

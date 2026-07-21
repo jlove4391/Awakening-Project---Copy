@@ -51,6 +51,12 @@ jobs:
       - name: Verify CORE context continuity and restart
         run: npm run smoke:core-context-continuity
 
+      - name: Verify Nexora work-order execution
+        run: npm run smoke:nexora-work-order
+
+      - name: Verify Nexora work-order restart recovery
+        run: npm run smoke:nexora-work-order-restart
+
       - name: Verify SDK approval interruption and resume
         id: sdk-approval-smoke
         continue-on-error: true

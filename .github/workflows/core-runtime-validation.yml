@@ -1,0 +1,61 @@
+name: CORE Runtime Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'agent-runtime/**'
+      - 'packages/shared/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/core-runtime-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-runtime-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-agent-runtime:
+    name: Typecheck, build, and smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck agent runtime
+        run: npm run typecheck:agent-runtime
+
+      - name: Build agent runtime
+        run: npm run build:agent-runtime
+
+      - name: Verify CORE command lifecycle
+        run: npm run smoke:core-command-lifecycle
+
+      - name: Verify SDK approval interruption and resume
+        run: npm run smoke:sdk-approvals
+
+      - name: Verify ordinary delegated file execution
+        run: npm run smoke:delegated-file-create
+
+      - name: Verify user-requested delegation authority
+        run: npm --workspace @awakening/agent-runtime run smoke:user-requested-delegated-no-approval
+
+      - name: Check normal conversational smoke setup behavior
+        run: npm run smoke:core-command-normal-path

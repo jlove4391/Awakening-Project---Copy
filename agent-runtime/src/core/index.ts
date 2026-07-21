@@ -25,6 +25,13 @@ export {
   renderCoreContextForInstructions,
 } from './contextAssembler.js';
 export {
+  clearActiveCoreExecutionContext,
+  clearActiveCoreExecutionContextsForTesting,
+  getActiveCoreExecutionContext,
+  setActiveCoreExecutionContext,
+} from './executionContextStore.js';
+export type { ActiveCoreExecutionContext } from './executionContextStore.js';
+export {
   clearCoreIdentityCacheForTesting,
   getCoreIdentity,
   updateCoreIdentity,

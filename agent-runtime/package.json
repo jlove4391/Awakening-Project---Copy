@@ -49,7 +49,7 @@
     "smoke:core-context-continuity": "tsx scripts/smoke-core-context-continuity.ts",
     "smoke:nexora-work-order": "tsx scripts/smoke-nexora-work-order.ts",
     "smoke:nexora-work-order-restart": "tsx scripts/smoke-nexora-work-order-restart.ts",
-    "smoke:canonical-receipt-trust": "tsx scripts/smoke-canonical-receipt-trust.ts",
+    "smoke:canonical-receipt-trust": "tsx scripts/smoke-canonical-receipt-trust.ts && tsx scripts/smoke-canonical-hard-boundary.ts",
     "smoke:canonical-receipt-restart": "tsx scripts/smoke-canonical-receipt-restart.ts",
     "smoke:canonical-work-order-receipt": "tsx scripts/smoke-canonical-work-order-receipt.ts"
   },

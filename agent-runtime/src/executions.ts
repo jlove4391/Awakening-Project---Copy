@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { runtimeConfig } from './config.js';
+import { getActiveCoreExecutionContext } from './core/executionContextStore.js';
 import type { ToolRiskLevel } from './tools/registry.js';
 import type { ApprovalScope } from './tasks/types.js';
 import type { PolicyAction, PolicyBoundary, PolicyDecision } from './governance/policyDecision.js';
@@ -50,8 +51,18 @@ export interface ExecutionRecord {
   };
   linkedIds: {
     sessionId?: string;
+    commandId?: string;
+    contextBundleId?: string;
+    identityIds?: string[];
     memoryIds?: string[];
+    relationshipEntryIds?: string[];
+    priorCommandIds?: string[];
     taskIds?: string[];
+    executionIds?: string[];
+    receiptIds?: string[];
+    trustDomains?: string[];
+    validationRequirement?: string;
+    scopeLimit?: string;
     toolCallId?: string;
     voiceSessionId?: string;
     executionMode?: string;
@@ -91,6 +102,45 @@ function truncate(value: string, maxLength = 360) {
   return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
 }
 
+function unique(values: string[] = []) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function mergeContextLinks(linkedIds: ExecutionRecord['linkedIds']) {
+  const active = getActiveCoreExecutionContext(linkedIds.sessionId);
+  if (!active) return { linkedIds, authorityBasis: undefined as string | undefined };
+  return {
+    linkedIds: {
+      ...linkedIds,
+      commandId: linkedIds.commandId || active.commandId,
+      contextBundleId: linkedIds.contextBundleId || active.contextBundleId,
+      identityIds: unique([...(linkedIds.identityIds || []), ...active.identityIds]),
+      memoryIds: unique([...(linkedIds.memoryIds || []), ...active.memoryIds]),
+      relationshipEntryIds: unique([...(linkedIds.relationshipEntryIds || []), ...active.relationshipEntryIds]),
+      priorCommandIds: unique([...(linkedIds.priorCommandIds || []), ...active.priorCommandIds]),
+      taskIds: unique([...(linkedIds.taskIds || []), ...active.taskIds]),
+      executionIds: unique([...(linkedIds.executionIds || []), ...active.executionIds]),
+      receiptIds: unique([...(linkedIds.receiptIds || []), ...active.receiptIds]),
+      trustDomains: unique([...(linkedIds.trustDomains || []), ...active.trustDomains]),
+      validationRequirement: linkedIds.validationRequirement || active.validationRequirement,
+      scopeLimit: linkedIds.scopeLimit || active.scopeLimit,
+    },
+    authorityBasis: active.authorityBasis,
+  };
+}
+
+function memoryEvidence(linkedIds: ExecutionRecord['linkedIds']) {
+  return [
+    ...(linkedIds.memoryIds || []),
+    ...(linkedIds.identityIds || []).map((id) => ({ type: 'identity', id })),
+    ...(linkedIds.relationshipEntryIds || []).map((id) => ({ type: 'relationship', id })),
+    ...(linkedIds.priorCommandIds || []).map((id) => ({ type: 'prior_command', id })),
+    ...(linkedIds.receiptIds || []).map((id) => ({ type: 'prior_receipt', id })),
+    ...(linkedIds.commandId ? [{ type: 'command', id: linkedIds.commandId }] : []),
+    ...(linkedIds.contextBundleId ? [{ type: 'context_bundle', id: linkedIds.contextBundleId }] : []),
+  ];
+}
+
 export function summarizeProviderResponse(result: unknown) {
   result = redactProviderReceiptPayload(result);
   if (result === undefined) return 'No provider response body returned.';
@@ -125,7 +175,9 @@ export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'times
 }): ExecutionRecord {
   const requestedAt = input.requestedAt || now();
   const status = input.status || 'requested';
-  const executionOrigin = input.linkedIds.executionOrigin || (input.linkedIds.executionMode === 'reactive' || input.linkedIds.executionMode === 'delegated' || input.linkedIds.executionMode === 'autonomous' ? input.linkedIds.executionMode : undefined);
+  const context = mergeContextLinks(input.linkedIds);
+  const linkedIds = context.linkedIds;
+  const executionOrigin = linkedIds.executionOrigin || (linkedIds.executionMode === 'reactive' || linkedIds.executionMode === 'delegated' || linkedIds.executionMode === 'autonomous' ? linkedIds.executionMode : undefined);
   const alpha = createAlphaReceipt({
     receipt_id: input.alphaReceipt?.receipt_id,
     timestamp: input.alphaReceipt?.timestamp || requestedAt,
@@ -133,8 +185,8 @@ export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'times
     requested_by: input.alphaReceipt?.requested_by || input.whoRequested,
     action: input.alphaReceipt?.action || input.action,
     reason: input.alphaReceipt?.reason || input.receiptSummary || `${input.action} ${status}`,
-    memory_used: input.alphaReceipt?.memory_used || input.linkedIds.memoryIds || [],
-    authority_basis: input.alphaReceipt?.authority_basis || input.approvalStatus,
+    memory_used: input.alphaReceipt?.memory_used || memoryEvidence(linkedIds),
+    authority_basis: input.alphaReceipt?.authority_basis || context.authorityBasis || input.approvalStatus,
     tools_used: input.alphaReceipt?.tools_used || (input.kind === 'tool_call' ? [input.action] : []),
     outcome: input.alphaReceipt?.outcome || status,
     artifact_paths: input.alphaReceipt?.artifact_paths || [],
@@ -151,7 +203,7 @@ export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'times
     riskLevel: input.riskLevel,
     approvalStatus: input.approvalStatus,
     approvalScope: input.approvalScope,
-    trustDomain: input.trustDomain,
+    trustDomain: input.trustDomain || getActiveCoreExecutionContext(linkedIds.sessionId)?.trustDomain,
     policyAction: input.policyAction,
     policyClassification: input.policyClassification,
     policyBoundary: input.policyBoundary,
@@ -164,14 +216,14 @@ export function createExecutionRecord(input: Omit<ExecutionRecord, 'id' | 'times
       requestedAt,
       startedAt: input.startedAt,
     },
-    linkedIds: input.linkedIds,
+    linkedIds,
     status,
     receipt: {
       summary: input.receiptSummary || `${input.action} ${status}`,
       status,
       issuedAt: now(),
       executionOrigin,
-      autonomyLevel: input.linkedIds.autonomyLevel,
+      autonomyLevel: linkedIds.autonomyLevel,
       alpha,
       alphaValidation: validateAlphaReceipt(alpha),
     },
@@ -201,7 +253,7 @@ export function completeExecutionRecord(
     requested_by: patch.alphaReceipt?.requested_by || record.receipt.alpha?.requested_by || record.whoRequested,
     action: patch.alphaReceipt?.action || record.receipt.alpha?.action || record.action,
     reason: patch.alphaReceipt?.reason || record.receipt.alpha?.reason || patch.receiptSummary || `${record.action} ${patch.status}`,
-    memory_used: patch.alphaReceipt?.memory_used || record.receipt.alpha?.memory_used || record.linkedIds.memoryIds || [],
+    memory_used: patch.alphaReceipt?.memory_used || record.receipt.alpha?.memory_used || memoryEvidence(record.linkedIds),
     authority_basis: patch.alphaReceipt?.authority_basis || record.receipt.alpha?.authority_basis || patch.approvalStatus || record.approvalStatus,
     tools_used: patch.alphaReceipt?.tools_used || record.receipt.alpha?.tools_used || (record.kind === 'tool_call' ? [record.action] : []),
     outcome: patch.alphaReceipt?.outcome || patch.status,
@@ -239,7 +291,6 @@ export function completeExecutionRecord(
   };
 }
 
-
 async function readSessionRecords(sessionId: string) {
   try {
     return JSON.parse(await fs.readFile(sessionExecutionPath(sessionId), 'utf8')) as ExecutionRecord[];
@@ -270,7 +321,6 @@ async function readGlobalRecords() {
 async function writeGlobalRecords(records: ExecutionRecord[]) {
   await fs.writeFile(executionLogPath, records.map((record) => JSON.stringify(record)).join('\n') + (records.length ? '\n' : ''));
 }
-
 
 function publicExecutionRecord(record: ExecutionRecord): ExecutionRecord {
   if (!record.approvalRequest) return record;
@@ -321,7 +371,6 @@ export async function listExecutionRecords(options: { sessionId?: string; limit?
     throw error;
   }
 }
-
 
 export async function getExecutionRecord(id: string) {
   await ensureStore();

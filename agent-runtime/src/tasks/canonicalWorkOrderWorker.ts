@@ -3,7 +3,18 @@ import { canonicalReceiptId, upsertCanonicalReceipt, type CanonicalReceiptStatus
 import type { DelegatedTaskHandler } from './queue.js';
 import { nexoraWorkOrderExecutionWorker } from './nexoraWorkOrderWorker.js';
 import { appendDelegatedTaskEvent, getDelegatedTask, updateDelegatedTask } from './store.js';
+import type { ApprovalScope, DelegatedTask } from './types.js';
 import { getNexoraWorkOrderByTaskId, patchNexoraWorkOrder, type NexoraWorkOrder, type NexoraWorkOrderValidationStatus } from './workOrders.js';
+
+const hardApprovalScopes = new Set<ApprovalScope>([
+  'repo.commit',
+  'repo.delete',
+  'provider.create',
+  'provider.update',
+  'provider.delete',
+  'database.migrate',
+  'external.send',
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -11,6 +22,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function unique(values: Array<string | undefined> = []) {
   return [...new Set(values.filter((value): value is string => Boolean(value?.trim())).map((value) => value.trim()))];
+}
+
+function hardBoundaryScope(task: DelegatedTask) {
+  const scopes = [
+    task.pendingToolAction?.approvalScope,
+    ...(task.executionPlan || []).map((step) => step.approval?.scope),
+  ];
+  return scopes.find((scope): scope is ApprovalScope => Boolean(scope && hardApprovalScopes.has(scope)));
 }
 
 function receiptStatus(order: NexoraWorkOrder): CanonicalReceiptStatus {
@@ -62,7 +81,9 @@ async function publishCanonicalWorkOrderReceipt(taskId: string) {
   ]).filter((receiptId) => receiptId !== primaryReceiptId);
   const status = receiptStatus(order);
   const validation = validationStatus(order);
-  const explicitBoundary = status === 'blocked';
+  const approvalScope = hardBoundaryScope(task) || task.pendingToolAction?.approvalScope;
+  const explicitBoundary = status === 'blocked' || Boolean(approvalScope && hardApprovalScopes.has(approvalScope));
+  const approvedBoundary = Boolean(approvalScope && task.executionPlan?.some((step) => step.approval?.scope === approvalScope && step.approvalStatus === 'approved'));
   const resultSummary = task.result?.summary
     || order.stateHistory.at(-1)?.summary
     || `Nexora work order ${order.id} is ${order.state}.`;
@@ -83,8 +104,8 @@ async function publishCanonicalWorkOrderReceipt(taskId: string) {
     policy: {
       action: explicitBoundary ? 'ask_before_execution' : 'execute',
       classification: explicitBoundary ? 'explicit_boundary' : 'execute_with_receipt',
-      approvalStatus: explicitBoundary ? 'pending' : task.approvalRequirements.some((requirement) => requirement.status === 'approved') ? 'approved' : 'not_required',
-      approvalScope: task.pendingToolAction?.approvalScope,
+      approvalStatus: explicitBoundary ? (approvedBoundary ? 'approved' : 'pending') : task.approvalRequirements.some((requirement) => requirement.status === 'approved') ? 'approved' : 'not_required',
+      approvalScope,
       authorityBasis: task.authorizationSource,
     },
     timestamps: {

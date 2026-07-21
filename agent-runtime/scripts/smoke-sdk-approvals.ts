@@ -71,8 +71,13 @@ assert.equal(existsSync(path.join(workspaceRoot, targetPath)), false, 'approved 
 clearPendingSdkApproval(sessionId);
 
 const approvedRecords = await listExecutionRecords({ sessionId, limit: 20 });
+const globalApprovedRecords = await listExecutionRecords({ limit: 20 });
 const completedRecord = approvedRecords.find((record) => record.action === 'code.delete_file' && record.status === 'completed');
-assert.ok(completedRecord, 'approved execution should write a completed execution record');
+const recordSummary = {
+  session: approvedRecords.map((record) => ({ action: record.action, status: record.status, approvalStatus: record.approvalStatus, sessionId: record.linkedIds.sessionId })),
+  global: globalApprovedRecords.map((record) => ({ action: record.action, status: record.status, approvalStatus: record.approvalStatus, sessionId: record.linkedIds.sessionId })),
+};
+assert.ok(completedRecord, `approved execution should write a completed session execution record: ${JSON.stringify(recordSummary)}`);
 assert.equal(completedRecord?.approvalStatus, 'approved', 'explicit-boundary completion should reflect SDK approval');
 assert.equal(completedRecord?.receipt.summary, 'code.delete_file completed');
 assert.ok(completedRecord?.providerResponseSummary, 'completed execution should include provider response summary');

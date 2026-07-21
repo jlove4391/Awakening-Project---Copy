@@ -1,5 +1,6 @@
 import type { Session } from '@openai/agents';
 import type { AutonomyLevel } from './config.js';
+import type { CoreContextBundle } from './core/contextTypes.js';
 import type { RelationshipContext } from './relationship/relationshipTypes.js';
 export type RuntimeAgentName = 'elora' | 'nexora' | 'kaz' | 'jynx' | 'kalyra';
 export type SpecialistAgentName = Exclude<RuntimeAgentName, 'elora'> | 'caz';
@@ -89,6 +90,8 @@ export interface RuntimeContext {
   voiceSessionId?: string;
   voiceApproval?: VoiceApprovalPolicy;
   agent?: RuntimeAgentName;
+  commandId?: string;
+  coreContext?: CoreContextBundle;
   approvedExecutionId?: string;
   approvedDelegatedTaskId?: string;
   approvedDelegatedStepId?: string;

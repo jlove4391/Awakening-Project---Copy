@@ -45,6 +45,7 @@
     "smoke:databank-status": "npm --workspace @awakening/agent-runtime run smoke:databank-status",
     "smoke:web-tools": "npm --workspace @awakening/agent-runtime run smoke:web-tools",
     "smoke:core-command-lifecycle": "npm --workspace @awakening/agent-runtime run smoke:core-command-lifecycle",
-    "smoke:core-command-normal-path": "npm --workspace @awakening/agent-runtime run smoke:core-command-normal-path"
+    "smoke:core-command-normal-path": "npm --workspace @awakening/agent-runtime run smoke:core-command-normal-path",
+    "smoke:core-context-continuity": "npm --workspace @awakening/agent-runtime run smoke:core-context-continuity"
   }
 }

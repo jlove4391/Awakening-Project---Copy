@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { runtimeConfig } from '../config.js';
+import type { CoreExecutionEnvelope } from './contextTypes.js';
 import type {
   CoreCommandAuthority,
   CoreCommandAuthorityDecision,
@@ -55,11 +56,15 @@ function unique(values: string[] = []) {
 
 function mergeLinks(current: CoreCommandLinks, patch: Partial<CoreCommandLinks> = {}): CoreCommandLinks {
   return {
+    identityIds: unique([...(current.identityIds || []), ...(patch.identityIds || [])]),
     memoryReferenceIds: unique([...(current.memoryReferenceIds || []), ...(patch.memoryReferenceIds || [])]),
     memoryCandidateIds: unique([...(current.memoryCandidateIds || []), ...(patch.memoryCandidateIds || [])]),
+    relationshipEntryIds: unique([...(current.relationshipEntryIds || []), ...(patch.relationshipEntryIds || [])]),
+    priorCommandIds: unique([...(current.priorCommandIds || []), ...(patch.priorCommandIds || [])]),
     taskIds: unique([...(current.taskIds || []), ...(patch.taskIds || [])]),
     executionIds: unique([...(current.executionIds || []), ...(patch.executionIds || [])]),
     receiptIds: unique([...(current.receiptIds || []), ...(patch.receiptIds || [])]),
+    trustDomains: unique([...(current.trustDomains || []), ...(patch.trustDomains || [])]),
   };
 }
 
@@ -119,15 +124,47 @@ export function assertCoreCommandTransition(from: CoreCommandState, to: CoreComm
   if (!allowedTransitions[from].has(to)) throw new Error(`Invalid CORE command transition: ${from} -> ${to}`);
 }
 
-export function decideInitialCommandAuthority(input: { executionMode: 'reactive' | 'delegated' | 'autonomous' | 'observation'; autonomyLevel?: number }): CoreCommandAuthority {
+export function decideInitialCommandAuthority(input: {
+  executionMode: 'reactive' | 'delegated' | 'autonomous' | 'observation';
+  autonomyLevel?: number;
+  executionEnvelope?: CoreExecutionEnvelope;
+}): CoreCommandAuthority {
   const decidedAt = now();
+  const envelope = input.executionEnvelope;
+  const shared = envelope ? {
+    autonomyLevel: envelope.effectiveAutonomyLevel,
+    requestedAutonomyLevel: envelope.requestedAutonomyLevel,
+    trustDomain: envelope.primaryTrustDomain,
+    trustScore: envelope.trustScore,
+    autonomyEnvelope: envelope.autonomyEnvelope,
+    validationRequirement: envelope.validationRequirement,
+    scopeLimit: envelope.scopeLimit,
+  } : { autonomyLevel: input.autonomyLevel };
   if (input.executionMode === 'observation') {
-    return { decision: 'observe_only', executionMode: input.executionMode, autonomyLevel: input.autonomyLevel, reason: 'Observation mode is read-only; tool-level policy still governs each action.', decidedAt };
+    return {
+      decision: 'observe_only',
+      executionMode: input.executionMode,
+      ...shared,
+      reason: `Observation mode is read-only. ${envelope?.reasons.join(' ') || 'Tool-level policy still governs each action.'}`,
+      decidedAt,
+    };
   }
   if (input.executionMode === 'autonomous') {
-    return { decision: 'trust_scoped', executionMode: input.executionMode, autonomyLevel: input.autonomyLevel, reason: 'Autonomous work may proceed only inside the configured trust envelope and tool-level policy.', decidedAt };
+    return {
+      decision: 'trust_scoped',
+      executionMode: input.executionMode,
+      ...shared,
+      reason: `Autonomous work is limited by the assembled trust envelope. ${envelope?.reasons.join(' ') || 'Tool-level policy remains authoritative.'}`,
+      decidedAt,
+    };
   }
-  return { decision: 'execute_with_receipts', executionMode: input.executionMode, autonomyLevel: input.autonomyLevel, reason: 'A direct or delegated user request authorizes ordinary work; each tool still enforces explicit boundaries and setup requirements.', decidedAt };
+  return {
+    decision: 'execute_with_receipts',
+    executionMode: input.executionMode,
+    ...shared,
+    reason: `A direct or delegated founder request authorizes ordinary work while the assembled trust envelope sets validation rigor. ${envelope?.reasons.join(' ') || 'Each tool still enforces explicit boundaries and setup requirements.'}`,
+    decidedAt,
+  };
 }
 
 export async function createCoreCommand(input: CreateCoreCommandInput) {
@@ -143,7 +180,17 @@ export async function createCoreCommand(input: CreateCoreCommandInput) {
       requestText: input.requestText,
       state: 'intent_received',
       context: {},
-      links: { memoryReferenceIds: [], memoryCandidateIds: [], taskIds: [], executionIds: [], receiptIds: [] },
+      links: {
+        identityIds: [],
+        memoryReferenceIds: [],
+        memoryCandidateIds: [],
+        relationshipEntryIds: [],
+        priorCommandIds: [],
+        taskIds: [],
+        executionIds: [],
+        receiptIds: [],
+        trustDomains: [],
+      },
       events: [created],
       createdAt: timestamp,
       updatedAt: timestamp,

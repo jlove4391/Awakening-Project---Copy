@@ -9,6 +9,7 @@ import { listExecutionRecords } from './executions.js';
 import { normalizeAutonomyLevel } from './governance/autonomyProfiles.js';
 import { clearPendingSdkApproval, formatApprovalPrompt, getPendingSdkApproval, isApprovalReply, savePendingSdkApproval } from './approvals/sdkApprovalStore.js';
 import {
+  assembleCoreContext,
   createCoreCommand,
   decideInitialCommandAuthority,
   getCoreCommand,
@@ -17,6 +18,7 @@ import {
   type CoreCommandLinks,
   type CoreCommandRecord,
   type CoreCommandState,
+  type CoreContextBundle,
 } from './core/index.js';
 import type { AgentApprovalAction, AgentMessageEvent, AgentMessageRequest, RuntimeAgentName, RuntimeContext } from './types.js';
 
@@ -96,11 +98,15 @@ async function collectCommandEvidence(command: CoreCommandRecord) {
   const executions = (await listExecutionRecords({ sessionId: command.sessionId, limit: 100 }))
     .filter((execution) => !baseline.has(execution.id));
   const links: CoreCommandLinks = {
+    identityIds: [],
     memoryReferenceIds: [],
     memoryCandidateIds: [],
+    relationshipEntryIds: [],
+    priorCommandIds: [],
     taskIds: [...new Set(executions.flatMap(taskIdsFromExecution))],
     executionIds: executions.map((execution) => execution.id),
     receiptIds: [...new Set(executions.map((execution) => execution.receipt.alpha?.receipt_id || execution.id).filter(Boolean))],
+    trustDomains: [...new Set(executions.map((execution) => execution.trustDomain).filter((value): value is string => Boolean(value)))],
   };
   links.memoryCandidateIds = [...new Set(executions.flatMap((execution) => extractIds(execution.receipt.alpha?.memory_candidates)))];
   return {
@@ -122,6 +128,26 @@ async function emitCoreCommandEvent(sink: AgentMessageSink | undefined, command:
       state: command.state,
       event,
       links: command.links,
+    },
+  });
+}
+
+async function emitCoreContextEvent(sink: AgentMessageSink | undefined, bundle: CoreContextBundle) {
+  await sink?.({
+    event: 'runtime_event',
+    data: {
+      type: 'core.context.assembled',
+      contextBundleId: bundle.id,
+      commandId: bundle.commandId,
+      sessionId: bundle.sessionId,
+      identityId: bundle.identity.id,
+      activeObjective: bundle.continuity.currentObjective,
+      priorActiveObjective: bundle.continuity.priorActiveObjective,
+      trustDomain: bundle.executionEnvelope.primaryTrustDomain,
+      trustScore: bundle.executionEnvelope.trustScore,
+      autonomyEnvelope: bundle.executionEnvelope.autonomyEnvelope,
+      validationRequirement: bundle.executionEnvelope.validationRequirement,
+      references: bundle.references,
     },
   });
 }
@@ -177,6 +203,26 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
     await emitCoreCommandEvent(sink, command, command.events[0]);
   }
 
+  let assembledContext: CoreContextBundle | undefined;
+  if (selectedAgent === 'elora' && command) {
+    context.commandId = command.id;
+    assembledContext = await assembleCoreContext({
+      sessionId: context.sessionId,
+      requestText: command.requestText,
+      agent: selectedAgent,
+      executionMode: context.executionMode,
+      requestedAutonomyLevel: context.autonomyLevel,
+      commandId: command.id,
+      subjectId: context.relationshipContext?.subjectId || 'jordan',
+    });
+    context.coreContext = assembledContext;
+    context.relationshipContext = assembledContext.relationship.context;
+    if (context.executionMode === 'autonomous') {
+      context.autonomyLevel = normalizeAutonomyLevel(assembledContext.executionEnvelope.effectiveAutonomyLevel);
+    }
+    await emitCoreContextEvent(sink, assembledContext);
+  }
+
   await sink?.({
     event: 'session',
     data: {
@@ -189,26 +235,58 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
       executionMode: context.executionMode,
       autonomyLevel: context.autonomyLevel,
       commandId: command?.id,
+      contextBundleId: assembledContext?.id,
+      trustDomain: assembledContext?.executionEnvelope.primaryTrustDomain,
+      validationRequirement: assembledContext?.executionEnvelope.validationRequirement,
     },
   });
 
-  const [initialMemories, baselineExecutions] = await Promise.all([
-    listMemories(context.sessionId, 5),
+  const [fallbackMemories, baselineExecutions] = await Promise.all([
+    assembledContext ? Promise.resolve([]) : listMemories(context.sessionId, 5),
     command?.state === 'intent_received' ? listExecutionRecords({ sessionId: context.sessionId, limit: 100 }) : Promise.resolve([]),
   ]);
-  await sink?.({ event: 'memory', data: { references: initialMemories, commandId: command?.id } });
+  const initialMemories = assembledContext?.memories || fallbackMemories;
+  await sink?.({ event: 'memory', data: { references: initialMemories, commandId: command?.id, contextBundleId: assembledContext?.id } });
 
   if (command?.state === 'intent_received') {
+    const references = assembledContext?.references;
     command = await transitionCommand(command, 'context_assembled', {
-      summary: 'Current session memory and relationship context assembled for command planning.',
-      context: { assembledAt: new Date().toISOString(), relationshipSubjectId: context.relationshipContext?.subjectId, baselineExecutionIds: baselineExecutions.map((execution) => execution.id) },
-      links: { memoryReferenceIds: initialMemories.map((memory) => memory.id) },
+      summary: 'Durable identity, canonical memory, relationship state, trust, unfinished work, and prior receipts were assembled for command planning.',
+      context: {
+        bundleId: assembledContext?.id,
+        assembledAt: assembledContext?.assembledAt || new Date().toISOString(),
+        identityId: assembledContext?.identity.id,
+        relationshipSubjectId: assembledContext?.relationship.context.subjectId || context.relationshipContext?.subjectId,
+        relationshipEntryIds: references?.relationshipEntryIds,
+        trustDomain: assembledContext?.executionEnvelope.primaryTrustDomain,
+        trustScore: assembledContext?.executionEnvelope.trustScore,
+        autonomyEnvelope: assembledContext?.executionEnvelope.autonomyEnvelope,
+        validationRequirement: assembledContext?.executionEnvelope.validationRequirement,
+        scopeLimit: assembledContext?.executionEnvelope.scopeLimit,
+        activeObjective: assembledContext?.continuity.currentObjective || command.requestText,
+        priorActiveObjective: assembledContext?.continuity.priorActiveObjective,
+        baselineExecutionIds: baselineExecutions.map((execution) => execution.id),
+      },
+      links: references ? {
+        identityIds: references.identityIds,
+        memoryReferenceIds: references.memoryIds,
+        relationshipEntryIds: references.relationshipEntryIds,
+        priorCommandIds: references.commandIds,
+        taskIds: references.taskIds,
+        executionIds: references.executionIds,
+        receiptIds: references.receiptIds,
+        trustDomains: references.trustDomains,
+      } : { memoryReferenceIds: initialMemories.map((memory) => memory.id) },
     }, sink);
     command = await transitionCommand(command, 'authority_decided', {
-      summary: 'Initial command authority decided; tool-level policy remains authoritative for each action.',
-      authority: decideInitialCommandAuthority({ executionMode: context.executionMode, autonomyLevel: context.autonomyLevel }),
+      summary: 'Initial command authority was decided from execution mode and the assembled domain trust envelope; tool policy remains authoritative for explicit boundaries.',
+      authority: decideInitialCommandAuthority({
+        executionMode: context.executionMode,
+        autonomyLevel: context.autonomyLevel,
+        executionEnvelope: assembledContext?.executionEnvelope,
+      }),
     }, sink);
-    command = await transitionCommand(command, 'planning', { summary: 'Elora began planning the command through the normal agent path.' }, sink);
+    command = await transitionCommand(command, 'planning', { summary: 'Elora began planning with durable continuity context through the normal agent path.' }, sink);
   }
 
   let streamInput: string | RunState<any, any> = trimmed;
@@ -278,7 +356,7 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
     });
   }
 
-  if (command?.state === 'planning') command = await transitionCommand(command, 'executing', { summary: 'Elora entered normal model and tool execution.' }, sink);
+  if (command?.state === 'planning') command = await transitionCommand(command, 'executing', { summary: 'Elora entered normal model and tool execution with the assembled context bundle.' }, sink);
 
   try {
     const stream = await run(agent as any, streamInput, { stream: true, session: context.session, context });
@@ -327,16 +405,21 @@ export async function runAgentMessage(request: AgentMessageRequest, sink?: Agent
     } else if (command && evidence?.blocked.length) {
       command = await transitionCommand(command, 'blocked', { summary: 'One or more linked executions were blocked by policy or runtime state.', links: evidence.links, finalOutput: stream.finalOutput }, sink);
     } else if (command) {
-      command = await transitionCommand(command, 'validating', { summary: evidence?.executions.length ? 'Linked execution outcomes were checked before command completion.' : 'No action-specific validation was required for this response-only command.', links: evidence?.links }, sink);
+      command = await transitionCommand(command, 'validating', {
+        summary: evidence?.executions.length
+          ? `Linked execution outcomes were checked using the ${command.authority?.validationRequirement || 'standard'} validation requirement.`
+          : 'No action-specific validation was required for this response-only command.',
+        links: evidence?.links,
+      }, sink);
       command = await transitionCommand(command, 'receipted', { summary: evidence?.links.receiptIds.length ? 'Existing execution receipts were linked to the command.' : 'No separate action receipt was required; the command record preserves the response lifecycle.', links: evidence?.links }, sink);
       command = await transitionCommand(command, 'memory_candidates_recorded', { summary: evidence?.links.memoryCandidateIds.length ? 'Memory candidates produced by linked executions were recorded.' : 'No new memory candidates were produced by this command.', links: evidence?.links }, sink);
-      command = await transitionCommand(command, 'response_synthesized', { summary: 'Elora synthesized the final user-facing result.', finalOutput: stream.finalOutput }, sink);
+      command = await transitionCommand(command, 'response_synthesized', { summary: 'Elora synthesized the final user-facing result from durable context and execution evidence.', finalOutput: stream.finalOutput }, sink);
       command = await transitionCommand(command, 'completed', { summary: 'The Sovereign Command Loop completed successfully.', finalOutput: stream.finalOutput }, sink);
     }
 
     await persistRuntimeContext(context);
     const memories = await listMemories(context.sessionId, 5);
-    await sink?.({ event: 'completed', data: { sessionId: context.sessionId, finalOutput: stream.finalOutput, memories, channel: context.channel, voiceSessionId: context.voiceSessionId, agent: selectedAgent, commandId: command?.id, commandState: command?.state } });
+    await sink?.({ event: 'completed', data: { sessionId: context.sessionId, finalOutput: stream.finalOutput, memories, channel: context.channel, voiceSessionId: context.voiceSessionId, agent: selectedAgent, commandId: command?.id, commandState: command?.state, contextBundleId: assembledContext?.id } });
     return { sessionId: context.sessionId, context, text, finalOutput: stream.finalOutput, memories, runtimeEvents, commandId: command?.id };
   } catch (error) {
     if (command && !terminalCommandStates.has(command.state)) {

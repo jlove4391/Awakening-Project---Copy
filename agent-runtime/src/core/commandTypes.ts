@@ -1,4 +1,6 @@
 import type { ExecutionMode, RuntimeAgentName } from '../types.js';
+import type { AutonomyEnvelopeLevel } from '../governance/trustService.js';
+import type { CoreExecutionScopeLimit, CoreValidationRequirement } from './contextTypes.js';
 
 export const coreCommandStates = [
   'intent_received',
@@ -34,17 +36,27 @@ export interface CoreCommandEvent {
 }
 
 export interface CoreCommandLinks {
+  identityIds: string[];
   memoryReferenceIds: string[];
   memoryCandidateIds: string[];
+  relationshipEntryIds: string[];
+  priorCommandIds: string[];
   taskIds: string[];
   executionIds: string[];
   receiptIds: string[];
+  trustDomains: string[];
 }
 
 export interface CoreCommandAuthority {
   decision: CoreCommandAuthorityDecision;
   executionMode: ExecutionMode;
   autonomyLevel?: number;
+  requestedAutonomyLevel?: number;
+  trustDomain?: string;
+  trustScore?: number;
+  autonomyEnvelope?: AutonomyEnvelopeLevel;
+  validationRequirement?: CoreValidationRequirement;
+  scopeLimit?: CoreExecutionScopeLimit;
   reason: string;
   decidedAt: string;
 }
@@ -57,8 +69,18 @@ export interface CoreCommandRecord {
   state: CoreCommandState;
   authority?: CoreCommandAuthority;
   context: {
+    bundleId?: string;
     assembledAt?: string;
+    identityId?: string;
     relationshipSubjectId?: string;
+    relationshipEntryIds?: string[];
+    trustDomain?: string;
+    trustScore?: number;
+    autonomyEnvelope?: AutonomyEnvelopeLevel;
+    validationRequirement?: CoreValidationRequirement;
+    scopeLimit?: CoreExecutionScopeLimit;
+    activeObjective?: string;
+    priorActiveObjective?: string;
     baselineExecutionIds?: string[];
   };
   links: CoreCommandLinks;

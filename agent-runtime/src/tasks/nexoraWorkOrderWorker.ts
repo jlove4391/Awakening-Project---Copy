@@ -64,7 +64,7 @@ function resultSummary(result: unknown) {
   }
   try {
     return JSON.stringify(redactForLogs(result)).slice(0, 500);
-  } catch (_error) {
+  } catch {
     return 'Result could not be summarized.';
   }
 }
@@ -81,13 +81,13 @@ function providerConfigurationMessage(message: string) {
 
 function pathValues(value: unknown): string[] {
   if (!isRecord(value)) return [];
-  const paths: string[] = [];
+  const values: string[] = [];
   for (const [key, entry] of Object.entries(value)) {
     if (/^(path|file|filePath|targetPath|destination|to|workingDirectory)$/i.test(key) && typeof entry === 'string' && entry.trim()) {
-      paths.push(entry.trim().replace(/\\/g, '/'));
+      values.push(entry.trim().replace(/\\/g, '/'));
     }
   }
-  return unique(paths);
+  return unique(values);
 }
 
 function commandValue(value: unknown) {
@@ -162,7 +162,7 @@ async function ensureTaskPlan(task: DelegatedTask, order: NexoraWorkOrder) {
       approvalStatus: workStep.approvalStatus,
       executionOrigin: task.executionOrigin,
     });
-    const step = updated?.executionPlan?.slice().sort((a, b) => a.order - b.order).at(-1);
+    const step = updated?.executionPlan?.slice().sort((left, right) => left.order - right.order).at(-1);
     if (step) appended.push(step);
   }
   const latest = await getDelegatedTask(task.id);
@@ -177,6 +177,12 @@ async function ensureTaskPlan(task: DelegatedTask, order: NexoraWorkOrder) {
   return latest;
 }
 
+async function latestTaskAndStep(taskId: string, stepId: string, fallbackTask: DelegatedTask, fallbackStep: ExecutionPlanStep) {
+  const task = (await getDelegatedTask(taskId)) || fallbackTask;
+  const step = task.executionPlan?.find((candidate) => candidate.id === stepId) || fallbackStep;
+  return { task, step };
+}
+
 async function blockStep(
   task: DelegatedTask,
   step: ExecutionPlanStep,
@@ -184,32 +190,37 @@ async function blockStep(
   reason: 'step_approval_required' | 'provider_configuration_required' | 'policy_block',
   details: Record<string, unknown> = {},
 ) {
-  const definition = (await registry()).getRegisteredTool(step.targetTool);
+  const latest = await latestTaskAndStep(task.id, step.id, task, step);
+  if (reason === 'step_approval_required' && latest.step.approvalStatus === 'approved') {
+    return { blocked: false as const, supersededByApproval: true as const, task: latest.task, step: latest.step };
+  }
+
+  const definition = (await registry()).getRegisteredTool(latest.step.targetTool);
   const pendingToolAction = {
-    stepId: step.id,
-    toolName: step.targetTool,
+    stepId: latest.step.id,
+    toolName: latest.step.targetTool,
     riskLevel: definition?.riskLevel,
     action: definition?.audit.action,
-    arguments: step.arguments,
-    argumentTemplate: step.argumentTemplate,
+    arguments: latest.step.arguments,
+    argumentTemplate: latest.step.argumentTemplate,
     approvalStatus: 'pending' as const,
     reason: message,
     approvalScope: approvalScope(definition),
   };
-  await updateExecutionPlanStep(task.id, step.id, {
+  await updateExecutionPlanStep(latest.task.id, latest.step.id, {
     status: 'blocked',
-    approvalStatus: reason === 'step_approval_required' ? 'pending' : step.approvalStatus,
+    approvalStatus: reason === 'step_approval_required' ? 'pending' : latest.step.approvalStatus,
     ...(reason === 'step_approval_required'
       ? { approval: { required: true, status: 'pending' as const, reason: message, scope: approvalScope(definition) } }
       : {}),
     resultSummary: message,
   });
-  await transitionNexoraWorkOrder(task.id, 'blocked', {
+  await transitionNexoraWorkOrder(latest.task.id, 'blocked', {
     actor: 'nexora',
     summary: message,
-    details: { stepId: step.id, tool: step.targetTool, reason, ...details },
+    details: { stepId: latest.step.id, tool: latest.step.targetTool, reason, ...details },
   });
-  await updateDelegatedTask(task.id, {
+  await updateDelegatedTask(latest.task.id, {
     status: 'blocked',
     blockedReason: reason,
     pendingToolAction,
@@ -218,99 +229,128 @@ async function blockStep(
       type: 'task.blocked',
       actor: 'nexora',
       summary: message,
-      details: redactForLogs({ stepId: step.id, tool: step.targetTool, reason, ...details }) as Record<string, unknown>,
+      details: redactForLogs({ stepId: latest.step.id, tool: latest.step.targetTool, reason, ...details }) as Record<string, unknown>,
     },
   });
+  return { blocked: true as const, supersededByApproval: false as const, task: latest.task, step: latest.step };
 }
 
-async function executeStep(task: DelegatedTask, order: NexoraWorkOrder, step: ExecutionPlanStep, context: RuntimeContext) {
-  const input = stepInput(step);
-  const authorizedInput = step.approvalStatus === 'approved'
-    ? { ...input, confirmedByUser: true, approvalNote: text(step.approval?.note) || 'Approved through the durable delegated-step authority path.' }
-    : input;
-  enforceScope(step, order);
-  const tools = await registry();
-  const definition = tools.getRegisteredTool(step.targetTool);
-  const decision = decidePolicyForToolName(definition?.name || step.targetTool, authorizedInput);
-  const needsApproval = policyRequiresApproval(decision);
-  const policyBlocked = policyBlocksExecution(decision);
-  let capability = evaluateNexoraCapabilityForStep(step.targetTool, needsApproval ? step.approvalStatus : 'not_required', task.executionOrigin);
+async function executeStep(initialTask: DelegatedTask, order: NexoraWorkOrder, initialStep: ExecutionPlanStep, context: RuntimeContext) {
+  let task = initialTask;
+  let step = initialStep;
 
-  if (!capability.allowed && capability.reason === 'approval_required' && !needsApproval && isAllowedUserRequestedOrDelegatedCoreTool(step.targetTool, task.executionOrigin, definition)) {
-    await updateExecutionPlanStep(task.id, step.id, {
-      approvalStatus: 'approved',
-      approval: {
-        required: true,
-        status: 'approved',
-        approver: 'user_authorized_execution_mode',
-        approvedAt: new Date().toISOString(),
-        note: 'Authorized by the explicit user-requested or delegated work order.',
-        reason: 'user_authorized_delegated_execution',
-        scope: approvalScope(definition),
-      },
-    });
-    step.approvalStatus = 'approved';
-    capability = evaluateNexoraCapabilityForStep(step.targetTool, 'approved', task.executionOrigin);
-  }
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    ({ task, step } = await latestTaskAndStep(task.id, step.id, task, step));
+    const input = stepInput(step);
+    const authorizedInput = step.approvalStatus === 'approved'
+      ? { ...input, confirmedByUser: true, approvalNote: text(step.approval?.note) || 'Approved through the durable delegated-step authority path.' }
+      : input;
+    enforceScope(step, order);
 
-  if (policyBlocked || (needsApproval && step.approvalStatus !== 'approved')) {
-    const decisionName = String(decision.decision);
-    const reason = decisionName === 'setup_needed'
-      ? 'provider_configuration_required'
-      : decisionName === 'escalate'
-        ? 'step_approval_required'
-        : 'policy_block';
-    await blockStep(task, step, decision.reason, reason, { policyDecision: decision });
-    return { blocked: true as const };
-  }
-  if (!capability.allowed) {
-    const reason = capability.reason === 'approval_required' ? 'step_approval_required' : 'policy_block';
-    await blockStep(task, step, capability.message || `Nexora capability rejected ${step.targetTool}.`, reason, { capabilityDecision: capability });
-    return { blocked: true as const };
-  }
+    const tools = await registry();
+    const definition = tools.getRegisteredTool(step.targetTool);
+    const decision = decidePolicyForToolName(definition?.name || step.targetTool, authorizedInput);
+    const needsApproval = policyRequiresApproval(decision);
+    const policyBlocked = policyBlocksExecution(decision);
+    let capability = evaluateNexoraCapabilityForStep(step.targetTool, needsApproval ? step.approvalStatus : 'not_required', task.executionOrigin);
 
-  if (step.status === 'running' && mutationTools.has(step.targetTool)) {
-    await blockStep(task, step, `Interrupted mutating step ${step.id} requires reconciliation before retry; CORE will not repeat a possibly completed write after restart.`, 'policy_block', { interruptedStep: true });
-    return { blocked: true as const };
-  }
-  if (step.status === 'running') await updateExecutionPlanStep(task.id, step.id, { status: 'queued', resultSummary: 'Safe interrupted step reset for restart recovery.' });
-
-  const executableInput = { ...authorizedInput };
-  if (needsApproval && step.approvalStatus === 'approved') {
-    context.approvedExecutionId = step.id;
-    context.approvedDelegatedStepId = step.id;
-  } else {
-    context.approvedExecutionId = undefined;
-    context.approvedDelegatedStepId = undefined;
-  }
-
-  await updateExecutionPlanStep(task.id, step.id, { status: 'running' });
-  try {
-    const result = await tools.executeRegisteredTool(step.targetTool, executableInput, context);
-    if (resultFailed(result)) {
-      const summary = resultSummary(result);
-      if (/approval|required|pending/i.test(summary)) {
-        await blockStep(task, step, summary, 'step_approval_required');
-        return { blocked: true as const };
-      }
-      if (providerConfigurationMessage(summary)) {
-        await blockStep(task, step, summary, 'provider_configuration_required');
-        return { blocked: true as const };
-      }
-      throw new Error(summary);
+    if (!capability.allowed && capability.reason === 'approval_required' && !needsApproval && isAllowedUserRequestedOrDelegatedCoreTool(step.targetTool, task.executionOrigin, definition)) {
+      await updateExecutionPlanStep(task.id, step.id, {
+        approvalStatus: 'approved',
+        approval: {
+          required: true,
+          status: 'approved',
+          approver: 'user_authorized_execution_mode',
+          approvedAt: new Date().toISOString(),
+          note: 'Authorized by the explicit user-requested or delegated work order.',
+          reason: 'user_authorized_delegated_execution',
+          scope: approvalScope(definition),
+        },
+      });
+      ({ task, step } = await latestTaskAndStep(task.id, step.id, task, step));
+      capability = evaluateNexoraCapabilityForStep(step.targetTool, 'approved', task.executionOrigin);
     }
-    const summary = resultSummary(result);
-    await updateExecutionPlanStep(task.id, step.id, { status: 'completed', resultSummary: summary });
-    return { blocked: false as const, result, summary, input: executableInput };
-  } catch (error) {
-    const message = text(error instanceof Error ? error.message : String(error)) || 'Unknown Nexora execution failure.';
-    if (providerConfigurationMessage(message)) {
-      await blockStep(task, step, message, 'provider_configuration_required');
+
+    if (policyBlocked || (needsApproval && step.approvalStatus !== 'approved')) {
+      const decisionName = String(decision.decision);
+      const reason = decisionName === 'setup_needed'
+        ? 'provider_configuration_required'
+        : decisionName === 'escalate'
+          ? 'step_approval_required'
+          : 'policy_block';
+      const block = await blockStep(task, step, decision.reason, reason, { policyDecision: decision });
+      if (block.supersededByApproval) {
+        task = block.task;
+        step = block.step;
+        continue;
+      }
       return { blocked: true as const };
     }
-    await updateExecutionPlanStep(task.id, step.id, { status: 'failed', resultSummary: message });
-    throw error;
+
+    if (!capability.allowed) {
+      const reason = capability.reason === 'approval_required' ? 'step_approval_required' : 'policy_block';
+      const block = await blockStep(task, step, capability.message || `Nexora capability rejected ${step.targetTool}.`, reason, { capabilityDecision: capability });
+      if (block.supersededByApproval) {
+        task = block.task;
+        step = block.step;
+        continue;
+      }
+      return { blocked: true as const };
+    }
+
+    if (step.status === 'running' && mutationTools.has(step.targetTool)) {
+      await blockStep(task, step, `Interrupted mutating step ${step.id} requires reconciliation before retry; CORE will not repeat a possibly completed write after restart.`, 'policy_block', { interruptedStep: true });
+      return { blocked: true as const };
+    }
+    if (step.status === 'running') {
+      await updateExecutionPlanStep(task.id, step.id, { status: 'queued', resultSummary: 'Safe interrupted step reset for restart recovery.' });
+    }
+
+    const executableInput = { ...authorizedInput };
+    if (needsApproval && step.approvalStatus === 'approved') {
+      context.approvedExecutionId = step.id;
+      context.approvedDelegatedStepId = step.id;
+    } else {
+      context.approvedExecutionId = undefined;
+      context.approvedDelegatedStepId = undefined;
+    }
+
+    await updateExecutionPlanStep(task.id, step.id, { status: 'running' });
+    try {
+      const result = await tools.executeRegisteredTool(step.targetTool, executableInput, context);
+      if (resultFailed(result)) {
+        const summary = resultSummary(result);
+        if (/approval|required|pending/i.test(summary)) {
+          const block = await blockStep(task, step, summary, 'step_approval_required');
+          if (block.supersededByApproval) {
+            task = block.task;
+            step = block.step;
+            continue;
+          }
+          return { blocked: true as const };
+        }
+        if (providerConfigurationMessage(summary)) {
+          await blockStep(task, step, summary, 'provider_configuration_required');
+          return { blocked: true as const };
+        }
+        throw new Error(summary);
+      }
+      const summary = resultSummary(result);
+      await updateExecutionPlanStep(task.id, step.id, { status: 'completed', resultSummary: summary });
+      return { blocked: false as const, result, summary, input: executableInput };
+    } catch (error) {
+      const message = text(error instanceof Error ? error.message : String(error)) || 'Unknown Nexora execution failure.';
+      if (providerConfigurationMessage(message)) {
+        await blockStep(task, step, message, 'provider_configuration_required');
+        return { blocked: true as const };
+      }
+      await updateExecutionPlanStep(task.id, step.id, { status: 'failed', resultSummary: message });
+      throw error;
+    }
   }
+
+  await blockStep(task, step, 'The step approval state changed concurrently and could not be reconciled safely.', 'policy_block');
+  return { blocked: true as const };
 }
 
 function artifactsForStep(step: ExecutionPlanStep) {
@@ -403,7 +443,9 @@ export const nexoraWorkOrderExecutionWorker: DelegatedTaskHandler = async (initi
   const errors: string[] = [];
 
   try {
-    for (const step of [...(task.executionPlan || [])].sort((a, b) => a.order - b.order)) {
+    for (const plannedStep of [...(task.executionPlan || [])].sort((left, right) => left.order - right.order)) {
+      const latest = await latestTaskAndStep(task.id, plannedStep.id, task, plannedStep);
+      const step = latest.step;
       if (['completed', 'skipped', 'cancelled'].includes(step.status)) {
         if (step.status === 'completed') {
           toolsUsed.push(step.targetTool);
@@ -415,8 +457,9 @@ export const nexoraWorkOrderExecutionWorker: DelegatedTaskHandler = async (initi
         continue;
       }
 
-      const outcome = await executeStep(task, order, step, context);
+      const outcome = await executeStep(latest.task, order, step, context);
       if (outcome.blocked) {
+        const current = await getDelegatedTask(task.id);
         await patchNexoraWorkOrder(task.id, {
           evidence: {
             toolsUsed,
@@ -424,7 +467,7 @@ export const nexoraWorkOrderExecutionWorker: DelegatedTaskHandler = async (initi
             artifactsChanged,
             stepResults,
             errors,
-            remainingWork: (task.executionPlan || []).filter((candidate) => !['completed', 'skipped'].includes(candidate.status)).map((candidate) => `${candidate.targetTool} (${candidate.id})`),
+            remainingWork: (current?.executionPlan || task.executionPlan || []).filter((candidate) => !['completed', 'skipped'].includes(candidate.status)).map((candidate) => `${candidate.targetTool} (${candidate.id})`),
           },
         });
         return true;
@@ -519,6 +562,7 @@ export const nexoraWorkOrderExecutionWorker: DelegatedTaskHandler = async (initi
     if (currentOrder && !terminalWorkOrderStates.has(currentOrder.state)) {
       await transitionNexoraWorkOrder(task.id, 'failed', { actor: 'nexora', summary: message });
     }
+    const currentTask = await getDelegatedTask(task.id);
     await patchNexoraWorkOrder(task.id, {
       evidence: {
         toolsUsed,
@@ -526,7 +570,7 @@ export const nexoraWorkOrderExecutionWorker: DelegatedTaskHandler = async (initi
         artifactsChanged,
         stepResults,
         errors,
-        remainingWork: (task.executionPlan || []).filter((candidate) => !['completed', 'skipped'].includes(candidate.status)).map((candidate) => `${candidate.targetTool} (${candidate.id})`),
+        remainingWork: (currentTask?.executionPlan || task.executionPlan || []).filter((candidate) => !['completed', 'skipped'].includes(candidate.status)).map((candidate) => `${candidate.targetTool} (${candidate.id})`),
       },
     });
     await updateDelegatedTask(task.id, {

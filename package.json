@@ -48,6 +48,8 @@
     "smoke:core-command-normal-path": "npm --workspace @awakening/agent-runtime run smoke:core-command-normal-path",
     "smoke:core-context-continuity": "npm --workspace @awakening/agent-runtime run smoke:core-context-continuity",
     "smoke:nexora-work-order": "npm --workspace @awakening/agent-runtime run smoke:nexora-work-order",
-    "smoke:nexora-work-order-restart": "npm --workspace @awakening/agent-runtime run smoke:nexora-work-order-restart"
+    "smoke:nexora-work-order-restart": "npm --workspace @awakening/agent-runtime run smoke:nexora-work-order-restart",
+    "smoke:canonical-receipt-trust": "npm --workspace @awakening/agent-runtime run smoke:canonical-receipt-trust",
+    "smoke:canonical-receipt-restart": "npm --workspace @awakening/agent-runtime run smoke:canonical-receipt-restart"
   }
 }

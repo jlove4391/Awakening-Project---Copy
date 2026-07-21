@@ -138,6 +138,7 @@ async function runtimeContext(task: DelegatedTask, order: NexoraWorkOrder): Prom
     agent: 'nexora',
     channel: 'text',
     executionMode: task.executionOrigin,
+    approvedDelegatedTaskId: task.id,
     ...(order.contextReferences.commandId ? { commandId: order.contextReferences.commandId } : {}),
     session: undefined as unknown as RuntimeContext['session'],
     record: { id: task.sessionId, provider: 'local-memory', memories: [], tasks: [], updatedAt: new Date().toISOString() },
@@ -275,8 +276,13 @@ async function executeStep(task: DelegatedTask, order: NexoraWorkOrder, step: Ex
   if (step.status === 'running') await updateExecutionPlanStep(task.id, step.id, { status: 'queued', resultSummary: 'Safe interrupted step reset for restart recovery.' });
 
   const executableInput = { ...authorizedInput };
-  if (needsApproval && step.approvalStatus === 'approved') context.approvedExecutionId = step.id;
-  else context.approvedExecutionId = undefined;
+  if (needsApproval && step.approvalStatus === 'approved') {
+    context.approvedExecutionId = step.id;
+    context.approvedDelegatedStepId = step.id;
+  } else {
+    context.approvedExecutionId = undefined;
+    context.approvedDelegatedStepId = undefined;
+  }
 
   await updateExecutionPlanStep(task.id, step.id, { status: 'running' });
   try {

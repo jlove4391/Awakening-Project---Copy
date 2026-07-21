@@ -4,7 +4,7 @@ import type { DelegatedTaskHandler } from './queue.js';
 import { nexoraWorkOrderExecutionWorker } from './nexoraWorkOrderWorker.js';
 import { appendDelegatedTaskEvent, getDelegatedTask, updateDelegatedTask } from './store.js';
 import type { ApprovalScope, DelegatedTask } from './types.js';
-import { getNexoraWorkOrderByTaskId, patchNexoraWorkOrder, type NexoraWorkOrder, type NexoraWorkOrderValidationStatus } from './workOrders.js';
+import { createNexoraWorkOrderForTask, getNexoraWorkOrderByTaskId, patchNexoraWorkOrder, type NexoraWorkOrder, type NexoraWorkOrderValidationStatus } from './workOrders.js';
 
 const hardApprovalScopes = new Set<ApprovalScope>([
   'repo.commit',
@@ -32,13 +32,14 @@ function hardBoundaryScope(task: DelegatedTask) {
   return scopes.find((scope): scope is ApprovalScope => Boolean(scope && hardApprovalScopes.has(scope)));
 }
 
-function receiptStatus(order: NexoraWorkOrder): CanonicalReceiptStatus {
+function receiptStatus(task: DelegatedTask, order: NexoraWorkOrder): CanonicalReceiptStatus {
+  if (task.status === 'pending_approval') return 'pending_approval';
+  if (task.status === 'blocked' || order.state === 'blocked') return 'blocked';
+  if (task.status === 'cancelled' || order.state === 'cancelled') return 'cancelled';
+  if (task.status === 'failed' || order.state === 'failed') return 'failed';
+  if (task.status === 'completed' || order.state === 'completed') return 'completed';
   if (order.state === 'draft' || order.state === 'ready' || order.state === 'queued') return 'requested';
-  if (order.state === 'running' || order.state === 'validating') return 'running';
-  if (order.state === 'blocked') return 'blocked';
-  if (order.state === 'completed') return 'completed';
-  if (order.state === 'failed') return 'failed';
-  return 'cancelled';
+  return 'running';
 }
 
 function canonicalValidationStatus(status: NexoraWorkOrderValidationStatus): CanonicalReceiptValidationStatus {
@@ -46,9 +47,9 @@ function canonicalValidationStatus(status: NexoraWorkOrderValidationStatus): Can
   return status;
 }
 
-function validationStatus(order: NexoraWorkOrder): CanonicalReceiptValidationStatus {
-  if (order.state === 'completed') return order.validationPlan.every((check) => !check.required || check.status === 'passed') ? 'passed' : 'failed';
-  if (order.state === 'failed' || order.state === 'cancelled') return 'failed';
+function validationStatus(task: DelegatedTask, order: NexoraWorkOrder): CanonicalReceiptValidationStatus {
+  if (task.status === 'completed' || order.state === 'completed') return order.validationPlan.every((check) => !check.required || check.status === 'passed') ? 'passed' : 'failed';
+  if (task.status === 'failed' || task.status === 'cancelled' || order.state === 'failed' || order.state === 'cancelled') return 'failed';
   return 'pending';
 }
 
@@ -62,12 +63,16 @@ function resultData(task: NonNullable<Awaited<ReturnType<typeof getDelegatedTask
   return isRecord(task.result?.data) ? { ...task.result.data } : {};
 }
 
-async function publishCanonicalWorkOrderReceipt(taskId: string) {
-  const [task, order] = await Promise.all([
-    getDelegatedTask(taskId),
-    getNexoraWorkOrderByTaskId(taskId),
-  ]);
-  if (!task || !order) return undefined;
+function approvalSummary(task: DelegatedTask, order: NexoraWorkOrder) {
+  const step = task.executionPlan?.find((candidate) => candidate.approvalStatus === 'pending');
+  if (step) return `Nexora work order ${order.id} is awaiting explicit approval for ${step.targetTool}.`;
+  return `Nexora work order ${order.id} is awaiting explicit approval.`;
+}
+
+export async function publishCanonicalWorkOrderReceipt(taskId: string) {
+  const task = await getDelegatedTask(taskId);
+  if (!task || task.assignedAgent !== 'nexora') return undefined;
+  const order = (await getNexoraWorkOrderByTaskId(taskId)) || await createNexoraWorkOrderForTask(task);
 
   const executions = (await listExecutionRecords({ sessionId: task.sessionId, limit: 100 }))
     .filter((execution) => execution.linkedIds.taskIds?.includes(task.id));
@@ -79,17 +84,22 @@ async function publishCanonicalWorkOrderReceipt(taskId: string) {
     ...order.evidence.receiptIds,
     ...executions.map((execution) => execution.receipt.primaryReceiptId || execution.receipt.alpha?.receipt_id),
   ]).filter((receiptId) => receiptId !== primaryReceiptId);
-  const status = receiptStatus(order);
-  const validation = validationStatus(order);
+  const status = receiptStatus(task, order);
+  const validation = validationStatus(task, order);
   const approvalScope = hardBoundaryScope(task) || task.pendingToolAction?.approvalScope;
-  const explicitBoundary = status === 'blocked' || Boolean(approvalScope && hardApprovalScopes.has(approvalScope));
+  const explicitBoundary = status === 'pending_approval' || status === 'blocked' || Boolean(approvalScope && hardApprovalScopes.has(approvalScope));
   const approvedBoundary = Boolean(approvalScope && task.executionPlan?.some((step) => step.approval?.scope === approvalScope && step.approvalStatus === 'approved'));
   const resultSummary = task.result?.summary
+    || (status === 'pending_approval' ? approvalSummary(task, order) : undefined)
     || order.stateHistory.at(-1)?.summary
     || `Nexora work order ${order.id} is ${order.state}.`;
   const errors = unique([
     ...order.evidence.errors,
     ...(task.result?.error?.message ? [task.result.error.message] : []),
+  ]);
+  const remainingWork = unique([
+    ...order.evidence.remainingWork,
+    ...(status === 'pending_approval' || status === 'blocked' ? [resultSummary] : []),
   ]);
 
   const receipt = await upsertCanonicalReceipt({
@@ -135,7 +145,7 @@ async function publishCanonicalWorkOrderReceipt(taskId: string) {
       commandsRun: order.evidence.commandsRun,
       artifactsChanged: order.evidence.artifactsChanged,
       errors,
-      remainingWork: order.evidence.remainingWork,
+      remainingWork,
       rollbackGuidance: order.rollbackGuidance,
       result: task.result,
     },

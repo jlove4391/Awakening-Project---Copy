@@ -54,10 +54,10 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          npm run smoke:sdk-approvals 2>&1 | tee sdk-approval-smoke.log
+          npm --workspace @awakening/agent-runtime run smoke:sdk-approvals 2>&1 | tee sdk-approval-smoke.log
 
       - name: Upload SDK approval diagnostic
-        if: always()
+        if: steps.sdk-approval-smoke.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: sdk-approval-smoke-log

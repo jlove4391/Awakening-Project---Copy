@@ -97,9 +97,17 @@ export async function listTrustEvents(filter: { domain?: TrustDomain; limit?: nu
   return typeof filter.limit === 'number' ? sorted.slice(0, Math.max(0, filter.limit)) : sorted;
 }
 
+export async function getTrustEvent(eventId: string) {
+  return (await listTrustEvents()).find((event) => event.id === eventId);
+}
+
 export async function appendTrustEvent(input: CreateTrustEventInput) {
   return serializedWrite(async () => {
     const events = await listTrustEvents();
+    if (input.id) {
+      const existing = events.find((event) => event.id === input.id);
+      if (existing) return existing;
+    }
     const event: TrustEvent = {
       id: input.id || `trust_${randomUUID()}`,
       occurredAt: input.occurredAt || now(),

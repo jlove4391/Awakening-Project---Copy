@@ -51,6 +51,7 @@
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
     "zod": "^4.0.0",
+    "zod-to-json-schema": "^3.25.1",
     "@awakening/shared": "file:../packages/shared"
   },
   "devDependencies": {

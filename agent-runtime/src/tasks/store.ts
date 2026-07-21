@@ -524,9 +524,7 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
     const normalizedSteps = input.executionPlan?.length
       ? input.executionPlan.map((step, index) => normalizeExecutionPlanStep(step, index + 1, authorizationSource, originContext))
       : undefined;
-    const requiredToolNeedsPolicyApproval = !normalizedSteps?.length
-      && Boolean(input.requiredTools?.some((toolName) => policyRequiresApproval(decidePolicyForToolName(toolName))));
-    const approvalRequirements = requiredToolNeedsPolicyApproval ? normalizeApprovalRequirements(input.approvalRequirements, authorizationSource, executionOrigin) : [];
+    const approvalRequirements = normalizeApprovalRequirements(input.approvalRequirements, authorizationSource, executionOrigin);
     const task: DelegatedTask = {
       id: taskId,
       sessionId: input.sessionId,
@@ -551,7 +549,7 @@ export async function createDelegatedTask(input: CreateDelegatedTaskInput) {
       ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
       updatedAt: now(),
     };
-    const status: DelegatedTaskStatus = needsApproval(task.approvalRequirements) ? 'pending_approval' : 'queued';
+    const status: DelegatedTaskStatus = hasPendingTaskApprovalGate(task) ? 'pending_approval' : 'queued';
     task.status = status;
 
     const created = createAuditEntry(task.id, 'task.created', 'elora', `Elora created bounded ${assignedAgent} specialist call for synthesis: ${task.objective}`, {
@@ -894,6 +892,10 @@ export async function approveDelegatedTask(taskId: string, approver = 'user', no
         : step,
     );
     const status: DelegatedTaskStatus = hasPendingTaskApprovalGate(task) ? 'pending_approval' : 'queued';
+    if (status === 'queued') {
+      task.blockedReason = undefined;
+      task.pendingToolAction = undefined;
+    }
     applyStatusTimestamps(task, status);
     const event = createAuditEntry(task.id, 'task.approved', 'user', `Approval recorded by ${approver}.`, { note });
     task.events.push(event);
@@ -1011,9 +1013,12 @@ export async function approveExecutionPlanStep(taskId: string, stepId: string, a
     step.approval = { ...(step.approval || { required: true, status: 'approved' as const }), status: 'approved', approver, approvedAt, note: note || step.approval?.note };
     step.status = 'queued';
     step.updatedAt = approvedAt;
-    task.blockedReason = undefined;
-    task.pendingToolAction = undefined;
-    applyStatusTimestamps(task, 'queued');
+    const status: DelegatedTaskStatus = hasPendingTaskApprovalGate(task) ? 'pending_approval' : 'queued';
+    if (status === 'queued') {
+      task.blockedReason = undefined;
+      task.pendingToolAction = undefined;
+    }
+    applyStatusTimestamps(task, status);
     const event = createAuditEntry(task.id, 'task.approved', 'user', `Step ${step.id} approval recorded by ${approver}.`, {
       taskId: task.id,
       stepId,
@@ -1027,13 +1032,19 @@ export async function approveExecutionPlanStep(taskId: string, stepId: string, a
       },
       note,
     });
-    const queued = createAuditEntry(task.id, 'task.queued', 'system', 'Approved blocked step; task re-entered the durable Nexora queue.', { stepId });
-    task.events.push(event, queued);
-    task.auditTrail.push(event, queued);
+    const queued = status === 'queued'
+      ? createAuditEntry(task.id, 'task.queued', 'system', 'Approved blocked step; task re-entered the durable Nexora queue.', { stepId })
+      : undefined;
+    task.events.push(event);
+    task.auditTrail.push(event);
+    if (queued) {
+      task.events.push(queued);
+      task.auditTrail.push(queued);
+    }
     task.updatedAt = now();
     await persistTasks();
-    await Promise.all([event, queued].map(appendAuditJsonl));
-    taskEvents.emitTaskUpdated(task, queued, getDelegatedTaskUiState(task));
+    await Promise.all([event, ...(queued ? [queued] : [])].map(appendAuditJsonl));
+    taskEvents.emitTaskUpdated(task, queued || event, getDelegatedTaskUiState(task));
     return task;
   });
 }

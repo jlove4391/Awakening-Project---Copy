@@ -224,10 +224,13 @@ async function blockStep(
 
 async function executeStep(task: DelegatedTask, order: NexoraWorkOrder, step: ExecutionPlanStep, context: RuntimeContext) {
   const input = stepInput(step);
+  const authorizedInput = step.approvalStatus === 'approved'
+    ? { ...input, confirmedByUser: true, approvalNote: text(step.approval?.note) || 'Approved through the durable delegated-step authority path.' }
+    : input;
   enforceScope(step, order);
   const tools = await registry();
   const definition = tools.getRegisteredTool(step.targetTool);
-  const decision = decidePolicyForToolName(definition?.name || step.targetTool, input);
+  const decision = decidePolicyForToolName(definition?.name || step.targetTool, authorizedInput);
   const needsApproval = policyRequiresApproval(decision);
   const policyBlocked = policyBlocksExecution(decision);
   let capability = evaluateNexoraCapabilityForStep(step.targetTool, needsApproval ? step.approvalStatus : 'not_required', task.executionOrigin);
@@ -271,13 +274,9 @@ async function executeStep(task: DelegatedTask, order: NexoraWorkOrder, step: Ex
   }
   if (step.status === 'running') await updateExecutionPlanStep(task.id, step.id, { status: 'queued', resultSummary: 'Safe interrupted step reset for restart recovery.' });
 
-  const executableInput = { ...input };
-  if (needsApproval && step.approvalStatus === 'approved') {
-    executableInput.confirmedByUser = true;
-    context.approvedExecutionId = step.id;
-  } else {
-    context.approvedExecutionId = undefined;
-  }
+  const executableInput = { ...authorizedInput };
+  if (needsApproval && step.approvalStatus === 'approved') context.approvedExecutionId = step.id;
+  else context.approvedExecutionId = undefined;
 
   await updateExecutionPlanStep(task.id, step.id, { status: 'running' });
   try {

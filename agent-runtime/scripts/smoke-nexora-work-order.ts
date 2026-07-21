@@ -98,11 +98,17 @@ const approvalTask = await createDelegatedTask({
   ],
 });
 assert.ok(existsSync(path.join(workspaceRoot, deletePath)), 'file must remain before approval');
-const blockedApprovalTask = await waitForTask(approvalTask.id, (candidate) => ['blocked', 'failed', 'completed'].includes(candidate.status));
-assert.equal(blockedApprovalTask.status, 'blocked', blockedApprovalTask.result?.summary || blockedApprovalTask.blockedReason || 'destructive work order should block');
-assert.equal(blockedApprovalTask.blockedReason, 'step_approval_required');
-assert.ok(existsSync(path.join(workspaceRoot, deletePath)), 'file must remain while the step is blocked');
-const stepId = blockedApprovalTask.executionPlan?.[0]?.id;
+const approvalBoundaryTask = await waitForTask(
+  approvalTask.id,
+  (candidate) => ['pending_approval', 'blocked', 'failed', 'completed'].includes(candidate.status),
+);
+assert.ok(
+  approvalBoundaryTask.status === 'pending_approval' || approvalBoundaryTask.status === 'blocked',
+  approvalBoundaryTask.result?.summary || approvalBoundaryTask.blockedReason || 'destructive work order should wait at an approval boundary',
+);
+if (approvalBoundaryTask.status === 'blocked') assert.equal(approvalBoundaryTask.blockedReason, 'step_approval_required');
+assert.ok(existsSync(path.join(workspaceRoot, deletePath)), 'file must remain while the step is waiting for approval');
+const stepId = approvalBoundaryTask.executionPlan?.[0]?.id;
 assert.ok(stepId);
 const approved = await approveExecutionPlanStep(approvalTask.id, stepId!, 'user', 'Approved isolated smoke deletion.');
 assert.equal(approved?.status, 'queued');
@@ -121,7 +127,7 @@ if (approvalCompleted.status !== 'completed') {
 assert.equal(approvalCompleted.status, 'completed', approvalCompleted.result?.summary || approvalCompleted.blockedReason || 'approved work order did not complete');
 assert.equal(existsSync(path.join(workspaceRoot, deletePath)), false, 'approved file deletion should execute exactly once');
 assert.equal((approvalCompleted.result?.data as any)?.workOrder?.terminalStatus, 'completed');
-console.log('✓ Approval-gated work-order step blocked, resumed, and completed through the existing step-approval path.');
+console.log('✓ Approval-gated work-order step waited, resumed, and completed through the existing step-approval path.');
 
 console.log('Nexora work-order smoke passed.');
 

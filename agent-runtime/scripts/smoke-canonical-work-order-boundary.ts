@@ -34,10 +34,9 @@ const task = await createDelegatedTask({
   executionPlan: [{
     targetTool: 'code.delete_file',
     arguments: { path: targetPath },
-    approvalStatus: 'pending',
-    approval: { required: true, status: 'pending', reason: 'explicit repository-delete approval required', scope: 'repo.delete' },
   }],
 });
+assert.equal(task.status, 'queued', 'the work order must enter execution so policy/capability checks discover the true step boundary');
 
 const blocked = await waitForCanonicalTask(task.id, 'blocked');
 assert.ok(existsSync(path.join(workspaceRoot, targetPath)), 'file must remain before explicit approval');
@@ -52,6 +51,7 @@ assert.equal(blockedReceipt?.trustImpact.recommendation, 'hold');
 
 const stepId = blocked.executionPlan?.[0]?.id;
 assert.ok(stepId);
+assert.equal(blocked.executionPlan?.[0]?.approvalStatus, 'pending', 'runtime boundary discovery should mark the exact step pending');
 const approved = await approveExecutionPlanStep(task.id, stepId!, 'user', 'Approved isolated canonical receipt deletion smoke.');
 assert.equal(approved?.status, 'queued');
 durableTaskQueue.enqueue(task.id);

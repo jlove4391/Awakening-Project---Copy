@@ -48,7 +48,9 @@
     "smoke:core-command-normal-path": "tsx scripts/smoke-core-command-normal-path.ts",
     "smoke:core-context-continuity": "tsx scripts/smoke-core-context-continuity.ts",
     "smoke:nexora-work-order": "tsx scripts/smoke-nexora-work-order.ts",
-    "smoke:nexora-work-order-restart": "tsx scripts/smoke-nexora-work-order-restart.ts"
+    "smoke:nexora-work-order-restart": "tsx scripts/smoke-nexora-work-order-restart.ts",
+    "smoke:canonical-receipt-trust": "tsx scripts/smoke-canonical-receipt-trust.ts",
+    "smoke:canonical-receipt-restart": "tsx scripts/smoke-canonical-receipt-restart.ts"
   },
   "dependencies": {
     "@openai/agents": "0.11.7",

@@ -1,3 +1,7 @@
+import { assembleCoreContext as assembleCoreContextRecord } from './contextAssembler.js';
+import { setActiveCoreExecutionContext } from './executionContextStore.js';
+import type { AssembleCoreContextInput } from './contextTypes.js';
+
 export { coreCommandStates } from './commandTypes.js';
 export type {
   CoreCommandAuthority,
@@ -19,8 +23,14 @@ export {
   listCoreCommands,
   transitionCoreCommand,
 } from './commandStore.js';
+
+export async function assembleCoreContext(input: AssembleCoreContextInput) {
+  const bundle = await assembleCoreContextRecord(input);
+  setActiveCoreExecutionContext(bundle);
+  return bundle;
+}
+
 export {
-  assembleCoreContext,
   getCoreContextBundle,
   renderCoreContextForInstructions,
 } from './contextAssembler.js';

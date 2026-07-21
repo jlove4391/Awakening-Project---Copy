@@ -48,8 +48,9 @@ const trustEvents = await listTrustEvents({ domain: 'repository' });
 assert.ok(trustEvents.length >= 3);
 await writeFile(handoffPath, JSON.stringify({ dataDir, receiptId, trustDomain: 'repository', minimumTrustEvents: trustEvents.length }, null, 2));
 
+const verifierPath = path.join(runtimeRoot, 'scripts', 'verify-canonical-receipt-restart.ts');
 await new Promise<void>((resolve, reject) => {
-  const child = spawn(process.execPath, [path.join(runtimeRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs'), path.join(runtimeRoot, 'scripts', 'verify-canonical-receipt-restart.ts'), handoffPath], {
+  const child = spawn(process.execPath, ['--import', 'tsx', verifierPath, handoffPath], {
     cwd: runtimeRoot,
     env: { ...process.env, AGENT_RUNTIME_DATA_DIR: dataDir },
     stdio: 'inherit',

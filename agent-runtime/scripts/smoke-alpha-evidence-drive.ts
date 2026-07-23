@@ -26,6 +26,7 @@ const {
   waitForAlphaEvidenceTask,
 } = await import('../src/alpha-evidence/index.js');
 const { transitionCoreCommand } = await import('../src/core/index.js');
+const { decidePolicyForToolName, policyRequiresApproval } = await import('../src/governance/policyDecision.js');
 const { getCanonicalReceipt } = await import('../src/receipts.js');
 const { createDelegationTask } = await import('../src/tools/delegation.js');
 const { getNexoraWorkOrderByTaskId } = await import('../src/tasks/workOrders.js');
@@ -33,11 +34,23 @@ const { getNexoraWorkOrderByTaskId } = await import('../src/tasks/workOrders.js'
 // Initialize an empty durable memory database before the context assembler performs
 // its parallel retrieval queries. The scenario intentionally has no governing memory.
 await memoryService.listMemories({ sessionId, includeGlobal: true, limit: 1 });
+assert.equal(
+  policyRequiresApproval(decidePolicyForToolName('drive.search_files', { query: filename })),
+  false,
+  'bounded Drive metadata retrieval must be classified as ordinary read work',
+);
 
 const started = await startAlphaEvidenceCommand({
   sessionId,
   requestText: `Create the internal Drive evidence file ${filename}, retrieve it by name, validate the provider result, and do not expose its content.`,
 });
+const retrievalPreflightApproval = {
+  required: true,
+  status: 'approved' as const,
+  approver: 'alpha_evidence_fixture',
+  approvedAt: new Date().toISOString(),
+  note: 'Fixture authorization is present only to tolerate legacy task-preflight conservatism; central tool policy still classifies Drive metadata search as an ordinary read.',
+};
 const task = await createDelegationTask({
   objective: `Create internal Drive file ${filename} and retrieve its metadata by name.`,
   constraints: [
@@ -56,6 +69,8 @@ const task = await createDelegationTask({
     {
       targetTool: 'drive.search_files',
       arguments: { query: filename, maxResults: 10 },
+      approvalStatus: 'approved',
+      approval: retrievalPreflightApproval,
     },
   ],
   authorizationSource: 'user_delegated',

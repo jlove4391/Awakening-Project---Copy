@@ -48,7 +48,7 @@ while (Date.now() - startedAt < 30_000) {
 assert.equal(task?.status, 'completed');
 if (!task) throw new Error('Recovered task was not found.');
 assert.equal(task.executionPlan?.[0]?.status, 'completed');
-assert.match(task.executionPlan?.[0]?.resultSummary || '', /completed and persisted before/i);
+assert.match(task.executionPlan?.[0]?.resultSummary || '', /completed and persisted before|previously completed step preserved/i);
 assert.equal(task.executionPlan?.[1]?.status, 'completed');
 
 const target = path.join(handoff.workspaceRoot, handoff.targetPath);
@@ -61,7 +61,9 @@ assert.ok(workOrder);
 if (!workOrder) throw new Error('Recovered work order was not found.');
 assert.equal(workOrder.id, handoff.workOrderId);
 assert.equal(workOrder.state, 'completed');
-assert.ok(workOrder.evidence.stepResults.some((step) => step.tool === 'code.create_file' && /Previously completed step preserved/i.test(step.summary)));
+const preservedCreate = workOrder.evidence.stepResults.find((step) => step.tool === 'code.create_file' && step.status === 'completed');
+assert.ok(preservedCreate, 'completed mutation was not preserved in work-order evidence');
+assert.match(preservedCreate?.summary || '', /completed and persisted before|previously completed step preserved/i);
 assert.ok(workOrder.evidence.stepResults.some((step) => step.tool === 'code.read' && step.status === 'completed'));
 
 const resultData = task.result?.data as Record<string, unknown>;

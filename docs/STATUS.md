@@ -1,6 +1,6 @@
 # CORE Repository Status
 
-Last reviewed: 2026-07-21
+Last reviewed: 2026-07-23
 
 This file classifies the active repository against the canonical CORE Alpha direction. It is an implementation inventory, not a historical roadmap.
 
@@ -17,7 +17,8 @@ This file classifies the active repository against the canonical CORE Alpha dire
 - PR #189 implemented the persistent Sovereign Command Loop and completed Milestone 1.
 - PR #191 implemented the Context and Continuity Spine and completed Milestone 2.
 - PR #193 implemented durable Nexora work-order execution and completed Milestone 3.
-- PR #195 implements the unified canonical receipt and receipt-derived trust loop under issue #194 and completes Milestone 4 after merge.
+- PR #195 implemented the unified canonical receipt and receipt-derived trust loop and completed Milestone 4.
+- PR #197 implements production-backed Alpha evidence flows under issue #196 and completes Milestone 5 after merge.
 
 ## Keep
 
@@ -27,9 +28,10 @@ This file classifies the active repository against the canonical CORE Alpha dire
 - OpenAI Agents SDK session handling and interruption/resume approval state.
 - Persistent local session records.
 - Delegated task store, audit JSONL, logs, queue, worker dispatch, and restart re-queueing.
-- Workspace-root and path protections.
+- Workspace-root, traversal, symlink, file-type, and bounded-content protections.
 - Durable canonical receipt store and receipt audit stream.
 - Durable receipt-linked trust-event store with deterministic event identifiers.
+- Durable memory candidate review records.
 
 ### CORE foundations
 
@@ -51,6 +53,8 @@ This file classifies the active repository against the canonical CORE Alpha dire
 - Versioned canonical receipt envelope with completeness, link integrity, validation, evidence, rollback, and trust-impact fields.
 - One primary work-order receipt across pending approval, execution, validation, and completion.
 - Receipt-derived trust expansion, hold, and contraction recommendations.
+- Evidence-backed memory candidates and explicit promotion/rejection contracts.
+- Production-backed Alpha evidence harness using the real command, context, work-order, validation, receipt, memory, and trust services.
 
 ### UI foundations
 
@@ -106,20 +110,32 @@ This file classifies the active repository against the canonical CORE Alpha dire
 - Added domain-specific expansion recommendations only after repeated complete, validated ordinary outcomes without failures or corrections.
 - Added fresh-process persistence coverage for canonical receipts and linked trust events.
 
+### Real Alpha evidence flows
+
+- Added a production-backed evidence harness that composes the existing command, context, delegation, work-order, validation, receipt, memory, and trust services rather than introducing an alternate executor.
+- Proved that a reviewed canonical doctrine is assembled before a bounded repository change and remains linked through command, context, task, work order, executions, validation, and the primary canonical receipt.
+- Proved an isolated local artifact is actually written and validated without a hardcoded natural-language proof matcher.
+- Proved fresh-process continuation preserves a previously completed mutation, executes only the remaining safe step, and completes with canonical receipt evidence.
+- Added evidence-backed candidate memory creation and explicit user review records.
+- Proved unreviewed candidate memory is excluded from governing context and promoted canonical memory becomes governing only after explicit approval.
+- Added canonical memory-review receipts linking the candidate, canonical memory, source command/context, source receipt, task, work order, and executions.
+- Proved a repository-delete request produces no side effect before approval and remains at the exact `repo.delete` boundary with non-expanding trust evidence.
+- Added truthful Google Drive setup behavior: connected providers perform real create/search calls; disconnected providers return `provider_not_configured` and drive the command to setup-required state rather than simulating success.
+- Added bounded `@workspace-file:` Drive content references so private payload content is resolved only at execution time and is not embedded in durable task, audit, work-order, or receipt records.
+- Added an opt-in live model-driven Elora path that runs only with `OPENAI_API_KEY`; without it, the smoke reports setup required and explicitly records that success was not simulated.
+- Added CI coverage for Milestones 1–5 and all deterministic Alpha evidence scenarios.
+
 ## Correct next
 
-### Alpha evidence flows
+### Minimal operational UI
 
-- Prove one remembered local repository request through Elora → Nexora work order → execution → validation → canonical receipt.
-- Prove continuation of unfinished work after restart through the normal conversational path.
-- Prove candidate-memory capture and review linked to the primary receipt.
-- Prove one deliberate explicit-boundary escalation through the normal conversational path.
-- Add one configured internal Drive/Docs create-and-retrieve flow after local receipt evidence is stable.
-
-### Operational UI
-
-- Expose the command, work-order, receipt, trust, memory-candidate, and genuine approval-boundary state without rebuilding backend orchestration in the client.
+- Make the existing Elora console the one operator-facing surface for the working CORE lifecycle.
+- Expose command intent, context bundle references, authority decision, execution/delegation state, validation, and final synthesis.
+- Expose active Nexora work orders with persisted step state, changed artifacts, errors, remaining work, and restart status.
 - Make the primary canonical receipt the UI proof contract rather than branching on legacy subsystem receipt families.
+- Add memory candidate review using the explicit backend promotion/rejection contract.
+- Show domain trust impact and recommendations without treating them as automatic permission expansion.
+- Show only genuine SDK/task/step boundaries in the approval queue.
 
 ### Documentation
 
@@ -128,14 +144,15 @@ This file classifies the active repository against the canonical CORE Alpha dire
 
 ## Partial
 
-- The context spine is operational, but long-term context ranking and compression can be refined after Alpha evidence is available.
-- The canonical receipt-driven trust loop is operational, but score calibration and domain thresholds should be refined using real Alpha outcomes rather than synthetic expansion evidence alone.
+- The context spine is operational, but long-term context ranking and compression can be refined after more real operator evidence is available.
+- The canonical receipt-driven trust loop is operational, but score calibration and domain thresholds should be refined using real Alpha outcomes over time.
 - Specialist contracts exist, but only Nexora has a meaningful execution worker.
 - Nexora work orders are operational, but path-scope derivation remains Alpha-grade and should become an explicit caller-supplied allowlist for complex multi-path or command-heavy work.
 - Legacy task, work-order, execution, SpecialistCall, and Alpha receipt identifiers remain for compatibility and supporting evidence; new consumers should use the canonical primary receipt.
-- Candidate-memory IDs can be represented in canonical receipt links, but the full normal-path capture and human review scenario remains Milestone 5 evidence work.
-- The UI surfaces receipts and approvals, but does not yet present the full command loop, work-order lifecycle, canonical receipt, trust impact, and continuity state.
-- Provider tools exist, but setup state, real execution proof, and boundary behavior remain inconsistent across integrations until the Milestone 5 Drive/Docs evidence flow is completed.
+- Candidate-memory review is operational in the backend, but the operator UI for reviewing, promoting, and rejecting candidates is not yet implemented.
+- The UI does not yet present the full command loop, work-order lifecycle, canonical receipt, trust impact, continuity state, or memory-review contract.
+- The configured Google Drive create-and-retrieve branch is implemented but cannot be exercised in credential-free CI; CI proves the truthful setup-required branch and prevents simulated provider success.
+- The live model-driven normal path is opt-in and requires `OPENAI_API_KEY`; credential-free CI proves only its setup-required behavior.
 
 ## Defer
 
@@ -158,6 +175,6 @@ This file classifies the active repository against the canonical CORE Alpha dire
 
 ## Immediate acceptance work
 
-1. Prove the real Alpha evidence flows through the normal Elora path.
-2. Add one configured internal Drive/Docs create-and-retrieve flow.
-3. Finish the minimal operational UI around commands, work orders, canonical receipts, memory candidates, trust impact, and genuine approvals.
+1. Implement the minimal operational UI around commands, work orders, canonical receipts, memory candidates, trust impact, and genuine approvals.
+2. Exercise the configured Drive create-and-retrieve and live model-driven paths in a credentialed local environment without exposing credentials or private content.
+3. Calibrate trust thresholds using real operator-reviewed Alpha outcomes.

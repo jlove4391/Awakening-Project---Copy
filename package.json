@@ -51,6 +51,10 @@
     "smoke:nexora-work-order-restart": "npm --workspace @awakening/agent-runtime run smoke:nexora-work-order-restart",
     "smoke:canonical-receipt-trust": "npm --workspace @awakening/agent-runtime run smoke:canonical-receipt-trust",
     "smoke:canonical-receipt-restart": "npm --workspace @awakening/agent-runtime run smoke:canonical-receipt-restart",
-    "smoke:canonical-work-order-receipt": "npm --workspace @awakening/agent-runtime run smoke:canonical-work-order-receipt"
+    "smoke:canonical-work-order-receipt": "npm --workspace @awakening/agent-runtime run smoke:canonical-work-order-receipt",
+    "smoke:alpha-evidence-local": "npm --workspace @awakening/agent-runtime run smoke:alpha-evidence-local",
+    "smoke:alpha-evidence-restart": "npm --workspace @awakening/agent-runtime run smoke:alpha-evidence-restart",
+    "smoke:alpha-evidence-drive": "npm --workspace @awakening/agent-runtime run smoke:alpha-evidence-drive",
+    "smoke:alpha-evidence-live": "npm --workspace @awakening/agent-runtime run smoke:alpha-evidence-live"
   }
 }

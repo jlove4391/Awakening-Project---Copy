@@ -51,7 +51,11 @@
     "smoke:nexora-work-order-restart": "tsx scripts/smoke-nexora-work-order-restart.ts",
     "smoke:canonical-receipt-trust": "tsx scripts/smoke-canonical-receipt-trust.ts && tsx scripts/smoke-canonical-hard-boundary.ts && tsx scripts/smoke-canonical-receipt-signals.ts",
     "smoke:canonical-receipt-restart": "tsx scripts/smoke-canonical-receipt-restart.ts",
-    "smoke:canonical-work-order-receipt": "tsx scripts/smoke-canonical-work-order-receipt.ts && tsx scripts/smoke-canonical-work-order-boundary.ts"
+    "smoke:canonical-work-order-receipt": "tsx scripts/smoke-canonical-work-order-receipt.ts && tsx scripts/smoke-canonical-work-order-boundary.ts",
+    "smoke:alpha-evidence-local": "tsx scripts/smoke-alpha-evidence-local.ts",
+    "smoke:alpha-evidence-restart": "tsx scripts/smoke-alpha-evidence-restart.ts",
+    "smoke:alpha-evidence-drive": "tsx scripts/smoke-alpha-evidence-drive.ts",
+    "smoke:alpha-evidence-live": "tsx scripts/smoke-alpha-evidence-live-normal-path.ts"
   },
   "dependencies": {
     "@openai/agents": "0.11.7",

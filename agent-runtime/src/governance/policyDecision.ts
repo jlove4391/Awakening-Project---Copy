@@ -133,7 +133,7 @@ export function isOrdinaryWorkspacePolicyInput(input: PolicyDecisionInput) {
   if (input.approvalScope && ordinaryRepoScopes.has(String(input.approvalScope))) return true;
   if (input.category === 'code' || input.category === 'vscode' || input.category === 'nexora' || input.category === 'alpha') return !isDestructiveIrreversiblePolicyInput(input);
   if (input.category === 'memory') return !isPersonalInformationSensitivePolicyInput(input);
-  if (input.category === 'drive') return String(input.action || '').startsWith('create') && !isPersonalInformationSensitivePolicyInput(input);
+  if (input.category === 'drive') return input.riskLevel === 'read' || (String(input.action || '').startsWith('create') && !isPersonalInformationSensitivePolicyInput(input));
   if (input.category === 'gmail') return /draft|search|read|list|organize/u.test(String(input.action || '')) && !isPersonalInformationSensitivePolicyInput(input);
   if (input.category === 'delegation') return true;
   return input.riskLevel === 'read';
@@ -200,7 +200,12 @@ export function decideToolPolicy(definition: Pick<RegisteredToolDefinition, 'nam
 
 function inferNamedToolPolicy(toolName: string) {
   const [category = 'runtime', action = toolName] = toolName.split('.', 2);
-  if (category !== 'code' && category !== 'nexora') return { category, action, riskLevel: 'unknown' as const, approvalScope: undefined };
+  if (category !== 'code' && category !== 'nexora') {
+    if (/^(status|list|search|read|lookup|get|find|inspect|validate|estimate|score|classify|extract)(?:_|$)/u.test(action)) {
+      return { category, action, riskLevel: 'read' as const, approvalScope: undefined };
+    }
+    return { category, action, riskLevel: 'unknown' as const, approvalScope: undefined };
+  }
   if (action === 'commit') return { category, action, riskLevel: 'purchase_or_commit' as const, approvalScope: 'repo.commit' as const };
   if (action === 'delete_file' || action === 'delete_path') return { category, action, riskLevel: action === 'delete_path' ? ('code_execution' as const) : ('write' as const), approvalScope: 'repo.delete' as const };
   if (action === 'run_command' || action === 'test' || action === 'execute_code' || action === 'scaffold_app') return { category, action, riskLevel: 'code_execution' as const, approvalScope: 'repo.command' as const };

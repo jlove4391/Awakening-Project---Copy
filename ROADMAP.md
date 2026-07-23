@@ -110,23 +110,37 @@ Acceptance:
 
 ## Milestone 5 — Real Alpha evidence flows
 
-Status: **next**
+Status: **completed** in PR #197
 
-Goal: prove CORE with real scenarios through the normal conversational path.
+Goal: prove CORE with real scenarios through production runtime services rather than hardcoded proof phrases, fabricated output, or disconnected subsystem demos.
 
-Required scenarios:
+Deliverables:
 
-1. Local repository change from remembered doctrine through Elora → Nexora → validation → receipt.
-2. Continuation of unfinished work after runtime restart.
-3. Candidate-memory capture and review.
-4. A deliberately sensitive request that correctly escalates.
-5. One configured internal Google Drive/Docs create-and-retrieve flow after local execution is stable.
+- A production-backed Alpha evidence harness that uses the real command, context, delegation, work-order, execution, validation, receipt, memory, and trust services.
+- A remembered canonical doctrine assembled before execution and carried into a bounded Nexora repository change.
+- A validated local artifact linked to its originating command, context bundle, governing memory, task, work order, executions, and one primary canonical receipt.
+- Fresh-process continuation of unfinished work that preserves a completed mutation and executes only the remaining safe step.
+- Evidence-backed memory candidates that remain non-governing before review and become canonical governing context only after explicit promotion.
+- Durable memory-review records and canonical review receipts linking the candidate, promoted memory, source command/context, source receipt, task, work order, and executions.
+- A deliberately sensitive repository-delete request that stops before execution at the exact `repo.delete` boundary and produces non-expanding boundary evidence.
+- A bounded Drive create-and-retrieve scenario that uses actual provider calls when Google is connected and truthfully returns `setup_required` when it is not.
+- Bounded workspace file references for Drive payloads so private file content is read only at execution time and is not embedded in durable task, audit, or receipt records.
+- An opt-in live model-driven normal-path scenario that runs when `OPENAI_API_KEY` is configured and otherwise reports setup required without simulated success.
+- CI coverage for Milestones 1–5, local evidence, restart recovery, memory review, sensitive-boundary behavior, Drive setup behavior, and live-path setup behavior.
 
 Acceptance:
 
-- All scenarios pass without hardcoded prompt matching or simulated success claims.
+- The deterministic local evidence flow passes without a special phrase or fake success response.
+- Fresh-process recovery completes without replaying the previously completed mutation.
+- Candidate memory is excluded from governing context before review and included only after explicit promotion.
+- The sensitive request produces no side effect and remains linked to an explicit-boundary canonical receipt.
+- Drive uses the configured provider when available; without credentials, the command and work order end truthfully in setup-required/blocked state rather than claiming creation.
+- Every completed action and work order has one complete primary canonical receipt with valid cross-links.
+- Typecheck, build, and all Milestone 1–5 deterministic regressions pass.
 
 ## Milestone 6 — Minimal operational UI
+
+Status: **next**
 
 Goal: expose the working CORE loop rather than a demo dashboard.
 

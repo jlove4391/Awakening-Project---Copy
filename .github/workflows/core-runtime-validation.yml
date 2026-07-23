@@ -158,6 +158,78 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Verify local Alpha evidence, memory review, and boundary
+        if: steps.typecheck.outcome == 'success'
+        id: alpha-evidence-local-smoke
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run smoke:alpha-evidence-local 2>&1 | tee alpha-evidence-local-smoke.log
+
+      - name: Upload local Alpha evidence diagnostic
+        if: steps.alpha-evidence-local-smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha-evidence-local-smoke-log
+          path: alpha-evidence-local-smoke.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Verify fresh-process Alpha evidence continuation
+        if: steps.typecheck.outcome == 'success'
+        id: alpha-evidence-restart-smoke
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run smoke:alpha-evidence-restart 2>&1 | tee alpha-evidence-restart-smoke.log
+
+      - name: Upload Alpha evidence restart diagnostic
+        if: steps.alpha-evidence-restart-smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha-evidence-restart-smoke-log
+          path: alpha-evidence-restart-smoke.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Verify truthful Drive Alpha evidence behavior
+        if: steps.typecheck.outcome == 'success'
+        id: alpha-evidence-drive-smoke
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run smoke:alpha-evidence-drive 2>&1 | tee alpha-evidence-drive-smoke.log
+
+      - name: Upload Drive Alpha evidence diagnostic
+        if: steps.alpha-evidence-drive-smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha-evidence-drive-smoke-log
+          path: alpha-evidence-drive-smoke.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Check live Alpha normal-path setup behavior
+        if: steps.typecheck.outcome == 'success'
+        id: alpha-evidence-live-smoke
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run smoke:alpha-evidence-live 2>&1 | tee alpha-evidence-live-smoke.log
+
+      - name: Upload live Alpha evidence diagnostic
+        if: steps.alpha-evidence-live-smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha-evidence-live-smoke-log
+          path: alpha-evidence-live-smoke.log
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Verify SDK approval interruption and resume
         if: steps.typecheck.outcome == 'success'
         id: sdk-approval-smoke
@@ -217,5 +289,5 @@ jobs:
         run: npm run smoke:core-command-normal-path
 
       - name: Enforce validation results
-        if: always() && (steps.typecheck.outcome == 'failure' || steps.nexora-work-order-smoke.outcome == 'failure' || steps.nexora-restart-smoke.outcome == 'failure' || steps.canonical-receipt-smoke.outcome == 'failure' || steps.canonical-receipt-restart-smoke.outcome == 'failure' || steps.canonical-work-order-receipt-smoke.outcome == 'failure' || steps.sdk-approval-smoke.outcome == 'failure' || steps.delegated-file-smoke.outcome == 'failure' || steps.delegated-authority-smoke.outcome == 'failure')
+        if: always() && (steps.typecheck.outcome == 'failure' || steps.nexora-work-order-smoke.outcome == 'failure' || steps.nexora-restart-smoke.outcome == 'failure' || steps.canonical-receipt-smoke.outcome == 'failure' || steps.canonical-receipt-restart-smoke.outcome == 'failure' || steps.canonical-work-order-receipt-smoke.outcome == 'failure' || steps.alpha-evidence-local-smoke.outcome == 'failure' || steps.alpha-evidence-restart-smoke.outcome == 'failure' || steps.alpha-evidence-drive-smoke.outcome == 'failure' || steps.alpha-evidence-live-smoke.outcome == 'failure' || steps.sdk-approval-smoke.outcome == 'failure' || steps.delegated-file-smoke.outcome == 'failure' || steps.delegated-authority-smoke.outcome == 'failure')
         run: exit 1

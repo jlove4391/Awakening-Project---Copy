@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 
 import assert from 'node:assert/strict';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,11 +12,14 @@ const workspaceRoot = path.join(smokeRoot, 'workspace');
 const sessionId = `alpha-evidence-drive-${Date.now()}`;
 const filename = `core-alpha-evidence-${Date.now()}.txt`;
 const content = 'Internal CORE Alpha Drive evidence artifact. Do not share externally.';
+const contentSourcePath = 'evidence/drive-payload.txt';
+const contentReference = `@workspace-file:${contentSourcePath}`;
 
 process.env.AGENT_RUNTIME_DATA_DIR = dataDir;
 process.env.CODE_WORKSPACE_ROOT = workspaceRoot;
 process.env.NEXORA_WORKSPACE_ROOT = workspaceRoot;
-await mkdir(workspaceRoot, { recursive: true });
+await mkdir(path.join(workspaceRoot, 'evidence'), { recursive: true });
+await writeFile(path.join(workspaceRoot, contentSourcePath), content);
 
 const { memoryService } = await import('../src/memory/index.js');
 const {
@@ -62,7 +65,7 @@ const task = await createDelegationTask({
   executionPlan: [
     {
       targetTool: 'drive.create_text_file',
-      arguments: { name: filename, content, mimeType: 'text/plain' },
+      arguments: { name: filename, content: contentReference, mimeType: 'text/plain' },
       approvalStatus: 'approved',
       approval: approvedStep('provider.create', 'alpha_evidence_fixture'),
     },
@@ -101,6 +104,7 @@ assert.ok(receipt.links.taskIds.includes(task.id));
 assert.ok(receipt.links.workOrderIds.includes(workOrder.id));
 assert.ok(!JSON.stringify(receipt).includes(content), 'private Drive content leaked into the canonical receipt');
 assert.ok(!JSON.stringify(finalTask.auditTrail).includes(content), 'private Drive content leaked into the task audit trail');
+assert.ok(JSON.stringify(finalTask.executionPlan).includes(contentReference), 'durable task plan did not retain the bounded content reference');
 
 if (finalTask.status === 'blocked') {
   assert.equal(finalTask.blockedReason, 'provider_configuration_required');
@@ -119,6 +123,7 @@ if (finalTask.status === 'blocked') {
     taskId: task.id,
     workOrderId: workOrder.id,
     primaryReceiptId: receipt.id,
+    contentSource: contentReference,
     reason: finalTask.result?.summary,
   }, null, 2));
   process.exit(0);
@@ -149,4 +154,5 @@ console.log(JSON.stringify({
   taskId: task.id,
   workOrderId: workOrder.id,
   primaryReceiptId: receipt.id,
+  contentSource: contentReference,
 }, null, 2));

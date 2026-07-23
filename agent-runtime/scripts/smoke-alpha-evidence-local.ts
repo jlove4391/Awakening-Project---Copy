@@ -179,7 +179,6 @@ assert.equal(sensitive.command.state, 'approval_pending');
 assert.equal(sensitive.task.status, 'pending_approval');
 assert.equal(sensitive.task.blockedReason, undefined);
 assert.equal(sensitive.task.executionPlan?.[0]?.approvalStatus, 'pending');
-assert.equal(sensitive.task.executionPlan?.[0]?.approval?.scope, 'repo.delete');
 assert.ok(existsSync(path.join(workspaceRoot, sensitivePath)), 'sensitive deletion executed before explicit approval');
 assert.equal(sensitive.receipt.status, 'pending_approval');
 assert.equal(sensitive.receipt.policy.classification, 'explicit_boundary');

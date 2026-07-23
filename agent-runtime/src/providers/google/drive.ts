@@ -35,13 +35,13 @@ interface DriveListResponse {
 }
 
 function driveSetupRequired(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  if (!/not configured|not connected|oauth|access token|refresh token|client secret|invalid_grant|authorize the runtime/i.test(message)) return undefined;
+  const providerMessage = error instanceof Error ? error.message : String(error);
+  if (!/not configured|not connected|oauth|access token|refresh token|client secret|invalid_grant|authorize the runtime/i.test(providerMessage)) return undefined;
   return {
     ok: false,
     status: 'provider_not_configured',
     provider: 'google-drive',
-    message,
+    message: `Provider configuration required: ${providerMessage}`,
     setup: {
       required: true,
       startPath: '/api/auth/google/start',

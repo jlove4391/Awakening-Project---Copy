@@ -45,7 +45,7 @@ function driveSetupRequired(error: unknown) {
     ok: false,
     status: 'provider_not_configured',
     provider: 'google-drive',
-    message: `Provider configuration required: ${providerMessage}`,
+    message: `Provider configuration missing: ${providerMessage}`,
     setup: {
       required: true,
       startPath: '/api/auth/google/start',

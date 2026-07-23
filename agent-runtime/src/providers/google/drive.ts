@@ -34,6 +34,22 @@ interface DriveListResponse {
   files?: Array<Record<string, any>>;
 }
 
+function driveSetupRequired(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!/not configured|not connected|oauth|access token|refresh token|client secret|invalid_grant|authorize the runtime/i.test(message)) return undefined;
+  return {
+    ok: false,
+    status: 'provider_not_configured',
+    provider: 'google-drive',
+    message,
+    setup: {
+      required: true,
+      startPath: '/api/auth/google/start',
+      statusPath: '/api/auth/google/status',
+    },
+  };
+}
+
 export async function searchDriveFiles(input: SearchFilesInput) {
   const params = new URLSearchParams({
     q: toDriveQuery(input.query),
@@ -41,8 +57,14 @@ export async function searchDriveFiles(input: SearchFilesInput) {
     fields: 'files(id, name, mimeType, modifiedTime, webViewLink, parents, size)',
     orderBy: 'modifiedTime desc',
   });
-  const response = await googleApiRequest<DriveListResponse>(`${DRIVE_API_BASE}/files?${params}`);
-  return { ok: true, provider: 'google-drive', files: response.files || [] };
+  try {
+    const response = await googleApiRequest<DriveListResponse>(`${DRIVE_API_BASE}/files?${params}`);
+    return { ok: true, provider: 'google-drive', files: response.files || [] };
+  } catch (error) {
+    const setupRequired = driveSetupRequired(error);
+    if (setupRequired) return setupRequired;
+    throw error;
+  }
 }
 
 export function classifyDriveTextFilePolicy(input: CreateTextFileInput) {
@@ -82,11 +104,16 @@ export async function createDriveTextFile(input: CreateTextFileInput) {
     fields: 'id, name, mimeType, webViewLink, parents',
   });
 
-  const response = await googleApiRequest<Record<string, any>>(`${DRIVE_UPLOAD_BASE}/files?${params}`, {
-    method: 'POST',
-    headers: { 'Content-Type': `multipart/related; boundary=${MULTIPART_BOUNDARY}` },
-    body,
-  });
-
-  return { ok: true, provider: 'google-drive', file: response };
+  try {
+    const response = await googleApiRequest<Record<string, any>>(`${DRIVE_UPLOAD_BASE}/files?${params}`, {
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/related; boundary=${MULTIPART_BOUNDARY}` },
+      body,
+    });
+    return { ok: true, provider: 'google-drive', file: response };
+  } catch (error) {
+    const setupRequired = driveSetupRequired(error);
+    if (setupRequired) return setupRequired;
+    throw error;
+  }
 }

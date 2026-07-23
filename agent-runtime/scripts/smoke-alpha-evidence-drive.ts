@@ -19,6 +19,7 @@ process.env.NEXORA_WORKSPACE_ROOT = workspaceRoot;
 await mkdir(workspaceRoot, { recursive: true });
 
 const {
+  approvedStep,
   completeAlphaEvidenceCommand,
   startAlphaEvidenceCommand,
   waitForAlphaEvidenceTask,
@@ -44,6 +45,8 @@ const task = await createDelegationTask({
     {
       targetTool: 'drive.create_text_file',
       arguments: { name: filename, content, mimeType: 'text/plain' },
+      approvalStatus: 'approved',
+      approval: approvedStep('provider.create', 'alpha_evidence_fixture'),
     },
     {
       targetTool: 'drive.search_files',

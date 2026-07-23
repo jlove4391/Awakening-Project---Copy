@@ -18,6 +18,7 @@ process.env.CODE_WORKSPACE_ROOT = workspaceRoot;
 process.env.NEXORA_WORKSPACE_ROOT = workspaceRoot;
 await mkdir(workspaceRoot, { recursive: true });
 
+const { memoryService } = await import('../src/memory/index.js');
 const {
   approvedStep,
   completeAlphaEvidenceCommand,
@@ -28,6 +29,10 @@ const { transitionCoreCommand } = await import('../src/core/index.js');
 const { getCanonicalReceipt } = await import('../src/receipts.js');
 const { createDelegationTask } = await import('../src/tools/delegation.js');
 const { getNexoraWorkOrderByTaskId } = await import('../src/tasks/workOrders.js');
+
+// Initialize an empty durable memory database before the context assembler performs
+// its parallel retrieval queries. The scenario intentionally has no governing memory.
+await memoryService.listMemories({ sessionId, includeGlobal: true, limit: 1 });
 
 const started = await startAlphaEvidenceCommand({
   sessionId,

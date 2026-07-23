@@ -176,10 +176,12 @@ const sensitive = await runBlockedAlphaEvidenceTask({
   executionPlan: [{ targetTool: 'code.delete_file', arguments: { path: sensitivePath } }],
 });
 assert.equal(sensitive.command.state, 'approval_pending');
-assert.equal(sensitive.task.status, 'blocked');
-assert.equal(sensitive.task.blockedReason, 'step_approval_required');
-assert.equal(sensitive.task.pendingToolAction?.approvalScope, 'repo.delete');
+assert.equal(sensitive.task.status, 'pending_approval');
+assert.equal(sensitive.task.blockedReason, undefined);
+assert.equal(sensitive.task.executionPlan?.[0]?.approvalStatus, 'pending');
+assert.equal(sensitive.task.executionPlan?.[0]?.approval?.scope, 'repo.delete');
 assert.ok(existsSync(path.join(workspaceRoot, sensitivePath)), 'sensitive deletion executed before explicit approval');
+assert.equal(sensitive.receipt.status, 'pending_approval');
 assert.equal(sensitive.receipt.policy.classification, 'explicit_boundary');
 assert.equal(sensitive.receipt.policy.approvalScope, 'repo.delete');
 assert.equal(sensitive.receipt.trustImpact.eligible, false);

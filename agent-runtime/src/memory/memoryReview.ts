@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { runtimeConfig } from '../config.js';
-import { canonicalReceiptId, upsertCanonicalReceipt } from '../receipts.js';
+import { canonicalReceiptId, getCanonicalReceipt, upsertCanonicalReceipt } from '../receipts.js';
 import { AlphaMemoryStatus, type CreateMemoryInput, type MemoryRecord } from './memoryTypes.js';
 import { memoryService } from './memoryService.js';
 
@@ -97,12 +97,34 @@ function evidenceFromMemory(memory: MemoryRecord): MemoryEvidenceLinks {
   };
 }
 
+async function linkCandidateToSourceReceipt(receiptId: string | undefined, candidateId: string) {
+  if (!receiptId) return undefined;
+  const source = await getCanonicalReceipt(receiptId);
+  if (!source) throw new Error(`Source canonical receipt not found for memory candidate: ${receiptId}`);
+  return upsertCanonicalReceipt({
+    id: source.id,
+    subject: source.subject,
+    actor: source.actor,
+    requestedBy: source.requestedBy,
+    action: source.action,
+    summary: source.summary,
+    status: source.status,
+    trustDomain: source.trustDomain,
+    policy: source.policy,
+    timestamps: source.timestamps,
+    links: { ...source.links, memoryCandidateIds: [candidateId] },
+    evidence: source.evidence,
+    validation: source.validation,
+    trustImpact: source.trustImpact,
+  });
+}
+
 export async function createMemoryCandidateFromEvidence(input: CreateMemoryCandidateFromEvidenceInput) {
   const evidence = input.evidence;
   if (!evidence.commandId && !evidence.receiptId && !(evidence.taskIds || []).length && !(evidence.executionIds || []).length) {
     throw new Error('Memory candidates require command, receipt, task, or execution evidence.');
   }
-  return memoryService.createMemoryCandidate({
+  const candidate = await memoryService.createMemoryCandidate({
     ...input,
     metadata: {
       ...(input.metadata || {}),
@@ -115,6 +137,8 @@ export async function createMemoryCandidateFromEvidence(input: CreateMemoryCandi
       executionIds: unique(evidence.executionIds),
     },
   });
+  await linkCandidateToSourceReceipt(evidence.receiptId, candidate.id);
+  return candidate;
 }
 
 export async function listMemoryCandidates(options: { sessionId?: string; limit?: number } = {}) {

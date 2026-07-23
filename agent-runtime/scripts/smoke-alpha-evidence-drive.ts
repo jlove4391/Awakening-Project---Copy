@@ -12,7 +12,7 @@ const workspaceRoot = path.join(smokeRoot, 'workspace');
 const sessionId = `alpha-evidence-drive-${Date.now()}`;
 const filename = `core-alpha-evidence-${Date.now()}.txt`;
 const content = 'Internal CORE Alpha Drive evidence artifact. Do not share externally.';
-const contentSourcePath = 'evidence/drive-payload.txt';
+const contentSourcePath = 'evidence/drive-content-source.txt';
 const contentReference = `@workspace-file:${contentSourcePath}`;
 
 process.env.AGENT_RUNTIME_DATA_DIR = dataDir;
@@ -107,7 +107,17 @@ assert.ok(!JSON.stringify(finalTask.auditTrail).includes(content), 'private Driv
 assert.ok(JSON.stringify(finalTask.executionPlan).includes(contentReference), 'durable task plan did not retain the bounded content reference');
 
 if (finalTask.status === 'blocked') {
-  assert.equal(finalTask.blockedReason, 'provider_configuration_required');
+  const boundaryDiagnostic = JSON.stringify({
+    blockedReason: finalTask.blockedReason,
+    pendingToolAction: finalTask.pendingToolAction,
+    executionPlan: finalTask.executionPlan,
+    result: finalTask.result,
+    workOrderState: workOrder.state,
+    workOrderHistory: workOrder.stateHistory,
+    receiptPolicy: receipt.policy,
+    receiptEvidence: receipt.evidence,
+  }, null, 2);
+  assert.equal(finalTask.blockedReason, 'provider_configuration_required', boundaryDiagnostic);
   assert.equal(workOrder.state, 'blocked');
   assert.equal(receipt.status, 'blocked');
   assert.equal(receipt.trustImpact.eligible, false);

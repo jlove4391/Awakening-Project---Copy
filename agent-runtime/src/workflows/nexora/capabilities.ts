@@ -194,7 +194,7 @@ export const nexoraCapabilities: Record<NexoraCapabilityId, NexoraCapabilityDefi
   ordinary_provider_workspace: {
     id: 'ordinary_provider_workspace',
     label: 'ordinary provider workspace actions',
-    allowedTools: ['drive.create_text_file', 'calendar.create_event', 'gmail.create_draft'],
+    allowedTools: ['drive.create_text_file', 'drive.search_files', 'calendar.create_event', 'gmail.create_draft'],
     riskLevel: 'write',
     approvalRequirement: 'none',
     defaultEnabled: true,

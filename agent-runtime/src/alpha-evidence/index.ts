@@ -13,7 +13,7 @@ import {
 import { getRuntimeContext, persistRuntimeContext } from '../memory/index.js';
 import { getCanonicalReceipt, type CanonicalReceipt } from '../receipts.js';
 import { createDelegationTask } from '../tools/delegation.js';
-import { getDelegatedTask, type } from '../tasks/store.js';
+import { getDelegatedTask } from '../tasks/store.js';
 import { getNexoraWorkOrderByTaskId, type NexoraWorkOrder } from '../tasks/workOrders.js';
 import type { CreateDelegatedTaskInput, DelegatedTask, ExecutionPlanStepApproval } from '../tasks/types.js';
 import type { ExecutionMode, RuntimeContext } from '../types.js';

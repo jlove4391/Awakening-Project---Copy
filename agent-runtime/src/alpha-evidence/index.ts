@@ -73,7 +73,7 @@ export async function startAlphaEvidenceCommand(input: StartAlphaEvidenceCommand
   context.agent = 'elora';
   context.channel = 'text';
   context.executionMode = executionMode;
-  context.autonomyLevel = input.autonomyLevel ?? 0;
+  context.autonomyLevel = (input.autonomyLevel === 1 || input.autonomyLevel === 2 || input.autonomyLevel === 3 ? input.autonomyLevel : 0);
 
   let command = await createCoreCommand({
     sessionId: input.sessionId,

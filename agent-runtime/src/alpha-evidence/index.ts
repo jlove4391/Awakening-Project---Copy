@@ -242,13 +242,13 @@ export async function runBlockedAlphaEvidenceTask(input: RunAlphaEvidenceTaskInp
   })).command;
   const task = await waitForAlphaEvidenceTask(
     created.id,
-    (candidate) => candidate.status === 'blocked' && Boolean(primaryReceiptId(candidate)),
+    (candidate) => (candidate.status === 'blocked' || candidate.status === 'pending_approval') && Boolean(primaryReceiptId(candidate)),
     input.timeoutMs || 30_000,
   );
   const workOrder = await getNexoraWorkOrderByTaskId(task.id);
-  if (!workOrder) throw new Error(`Nexora work order not found for blocked task ${task.id}`);
+  if (!workOrder) throw new Error(`Nexora work order not found for governed task ${task.id}`);
   const receiptId = primaryReceiptId(task);
-  if (!receiptId) throw new Error(`Primary canonical receipt not linked to blocked task ${task.id}`);
+  if (!receiptId) throw new Error(`Primary canonical receipt not linked to governed task ${task.id}`);
   const receipt = await getCanonicalReceipt(receiptId);
   if (!receipt) throw new Error(`Canonical receipt not found: ${receiptId}`);
   command = (await transitionCoreCommand(command.id, task.blockedReason === 'provider_configuration_required' ? 'setup_required' : 'approval_pending', {
